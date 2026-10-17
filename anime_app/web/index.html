@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#07080b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="referrer" content="no-referrer" />
+    
+    <title>KuroAnime — Stream Anime in Sub & Dub</title>
+    <meta name="description" content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean interface." />
+    
+    <!-- Preconnect & Load Satoshi Modern Sans-Serif Font via Fontshare Global CDN -->
+    <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
+    <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=satoshi@900,800,700,600,500,400&display=swap" />
+
+    <!-- Clean Handcrafted SVG Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23FF2A4D'/><stop offset='100%' stop-color='%23FF5A3C'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='%230E1017'/><polygon points='36,25 76,50 36,75' fill='url(%23g)'/><polygon points='36,25 56,50 36,50' fill='%23FFFFFF' fill-opacity='0.25'/></svg>" />
+  </head>
+  <body>
+    <div id="app" class="app-root">
+      <!-- Universal Header Bar -->
+      <header class="app-header" id="app-header">
+        <div class="header-container">
+          <div class="header-left">
+            <div class="brand-logo" id="btn-brand-home">
+              <svg class="brand-mark" viewBox="0 0 40 40" width="32" height="32" aria-hidden="true">
+                <defs>
+                  <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#FF2A4D" />
+                    <stop offset="100%" stop-color="#FF5A3C" />
+                  </linearGradient>
+                </defs>
+                <rect width="40" height="40" rx="9" fill="#141724" />
+                <polygon points="14,10 32,20 14,30" fill="url(#logo-grad)" />
+                <polygon points="14,10 23,20 14,20" fill="#FFFFFF" fill-opacity="0.3" />
+              </svg>
+              <div class="brand-text">
+                <span class="brand-title">KURO<span class="brand-accent">ANIME</span></span>
+                <span class="brand-badge">HD</span>
+              </div>
+            </div>
+
+            <!-- Desktop Navigation Menu (Visible on Desktop / Tablets) -->
+            <nav class="desktop-nav-menu" id="desktop-nav-menu">
+              <button class="nav-btn active" data-tab="home"><i data-lucide="home"></i> Home</button>
+              <button class="nav-btn" data-tab="browse"><i data-lucide="compass"></i> Browse</button>
+              <button class="nav-btn" data-tab="search"><i data-lucide="search"></i> Search</button>
+              <button class="nav-btn" data-tab="watchlist"><i data-lucide="bookmark"></i> My List</button>
+            </nav>
+          </div>
+
+          <div class="header-actions">
+            <button class="header-icon-btn" id="header-search-btn" aria-label="Search anime">
+              <i data-lucide="search"></i>
+            </button>
+            <button class="header-icon-btn" id="header-watchlist-btn" aria-label="Open Watchlist">
+              <i data-lucide="bookmark"></i>
+              <span class="badge-dot" id="watchlist-badge" style="display:none"></span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Content Viewport -->
+      <main class="app-main" id="main-content">
+        <!-- 1. Home View -->
+        <section class="view-screen active" id="view-home">
+          <!-- Spotlight Billboard -->
+          <div class="spotlight-carousel" id="spotlight-container">
+            <div class="spotlight-skeleton skeleton-pulse"></div>
+          </div>
+
+          <!-- Catalog Live Status -->
+          <div class="stats-ticker" id="stats-ticker">
+            <span class="stats-pulse-dot"></span>
+            <span id="stats-ticker-text">Loading catalog stats...</span>
+          </div>
+
+          <!-- Content Rails -->
+          <div class="rails-container" id="rails-container">
+            <!-- Rails injected by JS -->
+          </div>
+        </section>
+
+        <!-- 2. Browse View -->
+        <section class="view-screen" id="view-browse">
+          <div class="browse-header">
+            <h1 class="page-title">Explore Catalog</h1>
+            <p class="page-subtitle">Filter anime by genres, format, and popularity</p>
+          </div>
+
+          <!-- Filter Controls -->
+          <div class="filter-bar">
+            <div class="filter-chips-scroll" id="browse-genres-list">
+              <button class="chip-btn active" data-genre="">All Genres</button>
+            </div>
+            
+            <div class="filter-controls-row">
+              <select class="filter-select" id="browse-type-select">
+                <option value="">All Formats</option>
+                <option value="TV">TV Series</option>
+                <option value="Movie">Movies</option>
+                <option value="OVA">OVAs</option>
+                <option value="Special">Specials</option>
+              </select>
+
+              <select class="filter-select" id="browse-sort-select">
+                <option value="popular">Most Popular</option>
+                <option value="score">Highest Rated</option>
+                <option value="az">A to Z</option>
+                <option value="new">Newest Releases</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Browse Grid -->
+          <div class="anime-grid" id="browse-grid"></div>
+          
+          <div class="pagination-row" id="browse-pagination" style="display:none">
+            <button class="btn-secondary" id="browse-prev-page">Previous</button>
+            <span class="page-indicator" id="browse-page-indicator">Page 1</span>
+            <button class="btn-secondary" id="browse-next-page">Next</button>
+          </div>
+        </section>
+
+        <!-- 3. Search View -->
+        <section class="view-screen" id="view-search">
+          <div class="search-input-wrapper">
+            <i data-lucide="search" class="search-input-icon"></i>
+            <input type="search" class="search-input" id="search-input-field" placeholder="Search by English, Romaji or Japanese title..." autocomplete="off" />
+            <button class="search-clear-btn" id="search-clear-btn" style="display:none">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+
+          <div class="search-suggestions" id="search-recent-box">
+            <div class="section-label-row">
+              <span class="section-label">Popular Searches</span>
+            </div>
+            <div class="tags-cloud" id="search-popular-tags">
+              <button class="tag-chip">Attack on Titan</button>
+              <button class="tag-chip">One Piece</button>
+              <button class="tag-chip">Demon Slayer</button>
+              <button class="tag-chip">Jujutsu Kaisen</button>
+              <button class="tag-chip">Solo Leveling</button>
+              <button class="tag-chip">Bleach</button>
+              <button class="tag-chip">Naruto</button>
+            </div>
+          </div>
+
+          <div class="search-results-area" id="search-results-area">
+            <div class="anime-grid" id="search-results-grid"></div>
+          </div>
+        </section>
+
+        <!-- 4. Watchlist & History View -->
+        <section class="view-screen" id="view-watchlist">
+          <div class="browse-header">
+            <h1 class="page-title">My Collection</h1>
+            <p class="page-subtitle">Your saved watchlist and continue-watching history</p>
+          </div>
+
+          <div class="tab-pill-bar">
+            <button class="tab-pill active" id="tab-btn-watching">Continue Watching</button>
+            <button class="tab-pill" id="tab-btn-saved">Saved List</button>
+          </div>
+
+          <div class="collection-content" id="watchlist-content">
+            <div class="anime-grid" id="watchlist-grid"></div>
+          </div>
+        </section>
+
+        <!-- 5. Anime Detail View -->
+        <section class="view-screen view-screen-detail" id="view-detail">
+          <div class="detail-container" id="detail-container"></div>
+        </section>
+
+        <!-- 6. Watch Player View -->
+        <section class="view-screen view-screen-player" id="view-watch">
+          <div class="player-page-container" id="player-page-container"></div>
+        </section>
+      </main>
+
+      <!-- Bottom Mobile Tab Bar (Visible only on mobile <= 768px) -->
+      <nav class="app-tab-bar" id="app-tab-bar">
+        <button class="tab-item active" data-tab="home" id="tab-nav-home">
+          <i data-lucide="home"></i>
+          <span>Home</span>
+        </button>
+        <button class="tab-item" data-tab="browse" id="tab-nav-browse">
+          <i data-lucide="compass"></i>
+          <span>Browse</span>
+        </button>
+        <button class="tab-item" data-tab="search" id="tab-nav-search">
+          <i data-lucide="search"></i>
+          <span>Search</span>
+        </button>
+        <button class="tab-item" data-tab="watchlist" id="tab-nav-watchlist">
+          <i data-lucide="bookmark"></i>
+          <span>My List</span>
+        </button>
+      </nav>
+
+      <!-- Global Toast Notification -->
+      <div class="toast-notification" id="toast-notification"></div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
