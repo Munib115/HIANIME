@@ -434,12 +434,12 @@ function renderHeroContent(index) {
 
 // ─── Home View ──────────────────────────────────────────────────────
 async function initHome() {
-  // 1. Stats
+  // 1. Catalog Stats (Populates footer quietly)
   fetchApi('/stats').then(stats => {
     if (stats) {
-      const text = document.getElementById('stats-ticker-text');
-      if (text) {
-        text.innerHTML = `Live Catalog: <strong>${stats.anime.toLocaleString()}</strong> Anime • <strong>${stats.streams.toLocaleString()}</strong> Stream Links in Sub & Dub`;
+      const footerStat = document.getElementById('footer-catalog-stats');
+      if (footerStat) {
+        footerStat.textContent = `Streaming ${stats.anime.toLocaleString()} Anime Series & Movies • ${stats.streams.toLocaleString()} Verified High-Speed Streams`;
       }
     }
   });
@@ -447,10 +447,6 @@ async function initHome() {
   // 2. Home Rails & Spotlight
   const homeData = await fetchApi('/home');
   if (!homeData) {
-    const text = document.getElementById('stats-ticker-text');
-    if (text) {
-      text.innerHTML = `<span style="color:#ff5a3c">⚠️ Cannot connect to API backend at <code>${API_BASE}</code></span>`;
-    }
     const stageEl = document.getElementById('hero-stage');
     if (stageEl) {
       stageEl.innerHTML = `
