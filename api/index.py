@@ -202,16 +202,17 @@ def anime_episodes(anime_id: int):
 
 @router.get("/episode/{episode_id}/streams")
 def episode_streams(episode_id: str, anime_id: Optional[int] = None):
-    sql = "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ?"
+    sql = "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ? AND server_name != 'HD-1' AND provider NOT LIKE '%megaplay%'"
     params = [episode_id]
     if anime_id is not None:
         sql += " AND anime_id = ?"
         params.append(anime_id)
-    data = rows(sql + " ORDER BY type, CASE WHEN server_name = 'ZokoAnime' THEN 0 WHEN server_name LIKE '%HD%' THEN 1 ELSE 2 END, server_name", params)
+    data = rows(sql + " ORDER BY type, CASE WHEN server_name = 'ZokoAnime' THEN 0 ELSE 1 END, server_name", params)
     return {
         "sub": [s for s in data if s["type"] == "sub"],
         "dub": [s for s in data if s["type"] == "dub"],
     }
+
 
 
 

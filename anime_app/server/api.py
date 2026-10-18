@@ -1,46 +1,95 @@
 """
-Anime App API — read-only JSON API over hianime.db
-Run:  python -m uvicorn api:app --host 0.0.0.0 --port 8000
-(0.0.0.0 so a phone on the same Wi-Fi can reach it at http://<PC-LAN-IP>:8000)
+KuroAnime API — Vercel Serverless & Standalone FastAPI Backend
+Provides JSON API over SQLite hianime.db
 """
-import json
 import os
 import sqlite3
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 
-DB_PATH = os.environ.get(
-    "ANIME_DB",
-    os.path.join(os.path.dirname(__file__), "..", "..", "hianime.db"),
-)
+# ─── Locate Database File ────────────────────────────────────────────
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(CURRENT_DIR)
 
-app = FastAPI(title="Anime App API")
+CANDIDATES = [
+    os.environ.get("ANIME_DB"),
+    os.path.join(CURRENT_DIR, "hianime.db"),
+    os.path.join(PARENT_DIR, "hianime.db"),
+    os.path.join(PARENT_DIR, "anime_app", "hianime.db"),
+    os.path.join(os.getcwd(), "hianime.db"),
+    os.path.join(os.getcwd(), "anime_app", "hianime.db"),
+]
+
+def find_db():
+    candidates = [
+        os.environ.get("ANIME_DB"),
+        os.path.join(CURRENT_DIR, "hianime.db"),
+        os.path.join(PARENT_DIR, "hianime.db"),
+        os.path.join(PARENT_DIR, "api", "hianime.db"),
+        os.path.join(os.getcwd(), "hianime.db"),
+        os.path.join(os.getcwd(), "api", "hianime.db"),
+        os.path.join(os.getcwd(), "anime_app", "web", "api", "hianime.db"),
+        os.path.join(os.getcwd(), "anime_app", "web", "hianime.db"),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return os.path.abspath(c)
+    return os.path.join(CURRENT_DIR, "hianime.db")
+
+app = FastAPI(title="KuroAnime API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
+
+router = APIRouter()
 
 CARD_COLS = """anime_id, title, title_english, type, status, episode_count,
                anilist_score, mal_score, season_year,
                COALESCE(NULLIF(poster_large,''), poster_url) AS poster"""
 
 
+_INITIALIZED_DB = None
+
+def get_db_path():
+    global _INITIALIZED_DB
+    if _INITIALIZED_DB and os.path.exists(_INITIALIZED_DB):
+        return _INITIALIZED_DB
+
+    source = find_db()
+    if not source or not os.path.exists(source):
+        raise HTTPException(status_code=500, detail="Database file not found on server")
+
+    # On Lambda / Vercel, copy to /tmp so SQLite has full read/lock access without journal errors
+    if os.name != 'nt' and os.path.exists('/tmp'):
+        target = '/tmp/hianime.db'
+        try:
+            if not os.path.exists(target) or os.path.getsize(target) != os.path.getsize(source):
+                import shutil
+                shutil.copyfile(source, target)
+            _INITIALIZED_DB = target
+            return target
+        except Exception:
+            pass
+
+    _INITIALIZED_DB = source
+    return source
+
+
 def db():
-    # Read-only + WAL-friendly so the scraper can keep writing while the API reads
-    path = os.path.abspath(DB_PATH)
+    path = get_db_path()
     try:
-        uri_path = path.replace("\\", "/")
-        if not uri_path.startswith("/"):
-            uri_path = "/" + uri_path
-        conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=10)
-    except Exception:
         conn = sqlite3.connect(path, timeout=10)
+    except Exception:
+        uri_path = path.replace("\\", "/")
+        conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 
 
@@ -74,8 +123,21 @@ def with_flags(cards):
     return cards
 
 
-@app.get("/api/stats")
+@router.get("/health")
+def health():
+    db_file = find_db()
+    return {
+        "status": "ok",
+        "db_path": db_file,
+        "db_exists": os.path.exists(db_file),
+        "db_size": os.path.getsize(db_file) if os.path.exists(db_file) else 0,
+        "files_here": os.listdir(CURRENT_DIR) if os.path.exists(CURRENT_DIR) else [],
+    }
+
+
+@router.get("/stats")
 def stats():
+
     return {
         "anime": one("SELECT COUNT(*) n FROM anime")["n"],
         "episodes": one("SELECT COUNT(*) n FROM episodes")["n"],
@@ -83,7 +145,7 @@ def stats():
     }
 
 
-@app.get("/api/home")
+@router.get("/home")
 def home():
     spotlight = rows(f"""
         SELECT {CARD_COLS}, banner_image, synopsis, genres
@@ -105,7 +167,7 @@ def home():
     return {"spotlight": spotlight, "rails": rails}
 
 
-@app.get("/api/anime/{anime_id}")
+@router.get("/anime/{anime_id}")
 def anime_detail(anime_id: int):
     a = one("SELECT * FROM anime WHERE anime_id = ?", (anime_id,))
     if not a:
@@ -115,7 +177,6 @@ def anime_detail(anime_id: int):
         SELECT season_name, season_anime_id, season_poster, is_current
         FROM anime_seasons WHERE parent_anime_id = ? ORDER BY id
     """, (anime_id,))
-    # mark which seasons are already available in our DB
     have = {r["anime_id"] for r in rows("SELECT anime_id FROM anime")} if a["seasons"] else set()
     for s in a["seasons"]:
         s["available"] = s["season_anime_id"] in have
@@ -124,7 +185,7 @@ def anime_detail(anime_id: int):
     return a
 
 
-@app.get("/api/anime/{anime_id}/episodes")
+@router.get("/anime/{anime_id}/episodes")
 def anime_episodes(anime_id: int):
     eps = rows("""
         SELECT e.episode_id, e.episode_number, e.title, e.japanese_title,
@@ -139,14 +200,14 @@ def anime_episodes(anime_id: int):
     return {"anime_id": anime_id, "episodes": eps}
 
 
-@app.get("/api/episode/{episode_id}/streams")
+@router.get("/episode/{episode_id}/streams")
 def episode_streams(episode_id: str, anime_id: Optional[int] = None):
-    sql = "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ?"
+    sql = "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ? AND server_name != 'HD-1' AND provider NOT LIKE '%megaplay%'"
     params = [episode_id]
     if anime_id is not None:
         sql += " AND anime_id = ?"
         params.append(anime_id)
-    data = rows(sql + " ORDER BY type, CASE WHEN server_name = 'ZokoAnime' THEN 0 WHEN server_name LIKE '%HD%' THEN 1 ELSE 2 END, server_name", params)
+    data = rows(sql + " ORDER BY type, CASE WHEN server_name = 'ZokoAnime' THEN 0 ELSE 1 END, server_name", params)
     return {
         "sub": [s for s in data if s["type"] == "sub"],
         "dub": [s for s in data if s["type"] == "dub"],
@@ -154,7 +215,8 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
 
 
 
-@app.get("/api/search")
+
+@router.get("/search")
 def search(q: str = Query(..., min_length=1), limit: int = 30):
     like = f"%{q.strip()}%"
     res = rows(f"""
@@ -166,7 +228,7 @@ def search(q: str = Query(..., min_length=1), limit: int = 30):
     return {"results": with_flags(res)}
 
 
-@app.get("/api/browse")
+@router.get("/browse")
 def browse(
     genre: Optional[str] = None,
     type: Optional[str] = None,
@@ -196,7 +258,7 @@ def browse(
     return {"page": page, "results": with_flags(res)}
 
 
-@app.get("/api/genres")
+@router.get("/genres")
 def genres():
     counts = {}
     for r in rows("SELECT genres FROM anime WHERE genres IS NOT NULL AND genres != ''"):
@@ -205,3 +267,8 @@ def genres():
             if g:
                 counts[g] = counts.get(g, 0) + 1
     return {"genres": sorted(counts, key=lambda g: -counts[g])}
+
+
+# Mount both /api and root routes so that rewrites work seamlessly
+app.include_router(router, prefix="/api")
+app.include_router(router)

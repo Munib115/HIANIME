@@ -449,7 +449,9 @@ def fetch_single_episode_servers(ep):
     soup = BeautifulSoup(data.get("html",""), "lxml")
     out = []
     for s in soup.select(".server-item"):
-        sname = (s.get("data-server-name","") or "Server").strip()
+        sname = (s.get("data-server-name","") or "ZokoAnime").strip()
+        if "HD-1" in sname or "HD 1" in sname:
+            continue
         shash = s.get("data-hash","")
         try:
             url = base64.b64decode(shash).decode("utf-8", errors="ignore").strip()
@@ -459,16 +461,19 @@ def fetch_single_episode_servers(ep):
             continue
         provider = re.search(r"https?://([^/]+)", url)
         prov_name = provider.group(1) if provider else ""
+        if "megaplay" in prov_name.lower():
+            continue
         out.append({
             "episode_id":     ep_id,
             "episode_number": ep_num,
             "episode_title":  ep_title,
-            "server_name":    sname,
+            "server_name":    sname or "ZokoAnime",
             "type":           (s.get("data-type","") or "sub").strip().lower(),
             "embed_url":      url,
             "provider":       prov_name,
         })
     return out
+
 
 
 def get_all_episode_streams_concurrent(episodes, title=""):
