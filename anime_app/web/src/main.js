@@ -40,7 +40,12 @@ const state = {
   history: JSON.parse(localStorage.getItem('kuro_history') || '[]'),
 };
 
-const API_BASE = '/api';
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE)
+  ? import.meta.env.VITE_API_BASE.replace(/\/+$/, '')
+  : (typeof window !== 'undefined' && window.__API_BASE__)
+    ? window.__API_BASE__.replace(/\/+$/, '')
+    : '/api';
+
 
 // ─── Lucide Icons Initializer ───────────────────────────────────────
 function refreshIcons() {
@@ -199,7 +204,30 @@ async function initHome() {
 
   // 2. Home Rails & Spotlight
   const homeData = await fetchApi('/home');
-  if (!homeData) return;
+  if (!homeData) {
+    const text = document.getElementById('stats-ticker-text');
+    if (text) {
+      text.innerHTML = `<span style="color:#ff5a3c">⚠️ Cannot connect to API backend at <code>${API_BASE}</code></span>`;
+    }
+    const spotlightEl = document.getElementById('spotlight-container');
+    if (spotlightEl) {
+      spotlightEl.innerHTML = `
+        <div class="empty-state" style="padding: 60px 16px;">
+          <i data-lucide="shield" class="empty-state-icon" style="color:#ff5a3c"></i><br/>
+          <strong>Backend API Unreachable</strong><br/>
+          <span style="font-size:0.85rem;color:var(--text-muted);display:inline-block;max-width:440px;margin:8px 0 16px;">
+            Could not reach <code>${API_BASE}/home</code>.<br/>
+            • <b>Locally:</b> Run <code>python -m uvicorn api:app --port 8000</code><br/>
+            • <b>On Vercel:</b> Deploy the fullstack project with root <code>vercel.json</code>, or configure <code>VITE_API_BASE</code>.
+          </span><br/>
+          <button class="btn-primary" onclick="location.reload()">Retry Connection</button>
+        </div>
+      `;
+      refreshIcons();
+    }
+    return;
+  }
+
 
   // Render Spotlight Hero
   const spotlightEl = document.getElementById('spotlight-container');

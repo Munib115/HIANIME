@@ -31,9 +31,17 @@ CARD_COLS = """anime_id, title, title_english, type, status, episode_count,
 
 def db():
     # Read-only + WAL-friendly so the scraper can keep writing while the API reads
-    conn = sqlite3.connect(f"file:{os.path.abspath(DB_PATH)}?mode=ro", uri=True, timeout=10)
+    path = os.path.abspath(DB_PATH)
+    try:
+        uri_path = path.replace("\\", "/")
+        if not uri_path.startswith("/"):
+            uri_path = "/" + uri_path
+        conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=10)
+    except Exception:
+        conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 
 def rows(sql, params=()):

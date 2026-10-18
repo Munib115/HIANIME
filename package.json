@@ -1,0 +1,9 @@
+{
+  "name": "kuro-anime-platform",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd anime_app/web && npm install && npm run build",
+    "start": "python -m uvicorn api.index:app --host 0.0.0.0 --port 8000"
+  }
+}
