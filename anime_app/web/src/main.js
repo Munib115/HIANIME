@@ -179,11 +179,13 @@ function updateWatchlistBadge() {
 }
 
 function saveHistory(anime, episode) {
-  const existingIdx = state.history.findIndex(h => h.anime_id === anime.anime_id);
+  const animeId = Number(anime.anime_id);
+  const existingIdx = state.history.findIndex(h => Number(h.anime_id) === animeId);
+  const thumb = anime.banner_image || anime.poster || anime.poster_large || anime.poster_url;
   const entry = {
-    anime_id: anime.anime_id,
+    anime_id: animeId,
     title: anime.title,
-    poster: anime.poster || anime.poster_large || anime.poster_url,
+    poster: thumb,
     episode_number: episode.episode_number,
     episode_title: episode.title,
     episode_id: episode.episode_id,
