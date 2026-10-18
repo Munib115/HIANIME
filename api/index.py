@@ -53,19 +53,43 @@ CARD_COLS = """anime_id, title, title_english, type, status, episode_count,
                COALESCE(NULLIF(poster_large,''), poster_url) AS poster"""
 
 
+_INITIALIZED_DB = None
+
+def get_db_path():
+    global _INITIALIZED_DB
+    if _INITIALIZED_DB and os.path.exists(_INITIALIZED_DB):
+        return _INITIALIZED_DB
+
+    source = find_db()
+    if not source or not os.path.exists(source):
+        raise HTTPException(status_code=500, detail="Database file not found on server")
+
+    # On Lambda / Vercel, copy to /tmp so SQLite has full read/lock access without journal errors
+    if os.name != 'nt' and os.path.exists('/tmp'):
+        target = '/tmp/hianime.db'
+        try:
+            if not os.path.exists(target) or os.path.getsize(target) != os.path.getsize(source):
+                import shutil
+                shutil.copyfile(source, target)
+            _INITIALIZED_DB = target
+            return target
+        except Exception:
+            pass
+
+    _INITIALIZED_DB = source
+    return source
+
+
 def db():
-    path = find_db()
-    if not os.path.exists(path):
-        raise HTTPException(status_code=500, detail=f"Database file not found on server at {path}")
+    path = get_db_path()
     try:
-        uri_path = path.replace("\\", "/")
-        if not uri_path.startswith("/"):
-            uri_path = "/" + uri_path
-        conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=10)
-    except Exception:
         conn = sqlite3.connect(path, timeout=10)
+    except Exception:
+        uri_path = path.replace("\\", "/")
+        conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 
 
