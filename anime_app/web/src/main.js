@@ -215,9 +215,12 @@ function initHeroSpotlight(spotlightList) {
   const items = heroCarouselState.items;
   heroCarouselState.currentIndex = 0;
 
-  // 1. Render slides in stage with lazy Ken Burns
+  // 1. Render slides in stage with high-res 1080p/4K backdrops
   stageEl.innerHTML = items.map((item, idx) => {
-    const banner = item.banner_image || item.poster_large || item.poster;
+    let banner = item.banner_image || item.poster_large || item.poster || '';
+    if (banner.includes('image.tmdb.org')) {
+      banner = banner.replace(/\/t\/p\/[^/]+/, '/t/p/w1920_and_h1080_multi_faces');
+    }
     return `
       <div class="hero-slide ${idx === 0 ? 'active' : ''}" data-idx="${idx}">
         <img class="hero-slide-img" src="${banner}" alt="${item.title}" loading="${idx === 0 ? 'eager' : 'lazy'}" />
@@ -229,7 +232,10 @@ function initHeroSpotlight(spotlightList) {
   if (thumbsEl) {
     const thumbItems = items.slice(0, 6);
     thumbsEl.innerHTML = thumbItems.map((item, idx) => {
-      const thumb = item.banner_image || item.poster;
+      let thumb = item.banner_image || item.poster || '';
+      if (thumb.includes('image.tmdb.org')) {
+        thumb = thumb.replace(/\/t\/p\/[^/]+/, '/t/p/w780');
+      }
       return `
         <button class="hero-thumb ${idx === 0 ? 'active' : ''}" data-idx="${idx}" aria-label="Slide ${idx + 1}: ${item.title}">
           <img src="${thumb}" alt="" loading="lazy" />

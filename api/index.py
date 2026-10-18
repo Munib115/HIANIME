@@ -150,7 +150,9 @@ def home():
     spotlight = rows(f"""
         SELECT {CARD_COLS}, banner_image, synopsis, genres
         FROM anime
-        WHERE banner_image IS NOT NULL AND banner_image != ''
+        WHERE banner_image IS NOT NULL 
+          AND banner_image != ''
+          AND (title NOT LIKE '%Special%' AND title NOT LIKE '%OVA%' AND title NOT LIKE '%Movie 1%')
         ORDER BY anilist_popularity DESC NULLS LAST
         LIMIT 8
     """)

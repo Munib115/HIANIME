@@ -340,12 +340,17 @@ button, input, select, textarea, optgroup {
   height: 100%;
   object-fit: cover;
   object-position: center 25%;
-  transform: scale(1.06);
+  transform: translateZ(0) scale(1.04);
   transition: transform 9s linear;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: auto;
 }
 
 .hero-slide.active .hero-slide-img {
-  transform: scale(1);
+  transform: translateZ(0) scale(1);
 }
 
 /* Dual Scrims: left readable fade + seamless page melt */
