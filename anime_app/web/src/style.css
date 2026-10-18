@@ -258,6 +258,18 @@ button, input, select, textarea, optgroup {
   background: var(--accent);
 }
 
+.header-icon-btn.active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 2px 12px var(--accent-glow) !important;
+}
+
+.header-icon-btn.active svg {
+  stroke: #FFFFFF !important;
+  fill: #FFFFFF !important;
+}
+
 .badge-dot {
   position: absolute;
   top: 6px;
@@ -528,6 +540,22 @@ button, input, select, textarea, optgroup {
 .btn-hero-ghost svg {
   width: 18px;
   height: 18px;
+}
+
+.btn-hero-ghost.active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 18px var(--accent-glow) !important;
+}
+
+.btn-hero-ghost.active:hover {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+}
+
+.btn-hero-ghost.active svg {
+  stroke: #FFFFFF !important;
 }
 
 /* Staggered text reveal on slide change */
@@ -1091,6 +1119,30 @@ button, input, select, textarea, optgroup {
   letter-spacing: 0.02em;
 }
 
+.card-saved-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  background: var(--accent);
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  box-shadow: 0 2px 8px var(--accent-glow);
+  pointer-events: none;
+}
+
+.card-saved-badge svg {
+  width: 13px;
+  height: 13px;
+  stroke: #FFFFFF;
+  fill: #FFFFFF;
+}
+
 .card-bottom-badges {
   position: absolute;
   bottom: 0;
@@ -1600,6 +1652,22 @@ button, input, select, textarea, optgroup {
 
 .detail-actions-bar .btn-secondary:active {
   transform: scale(0.97);
+}
+
+.detail-actions-bar .btn-secondary.active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 18px var(--accent-glow) !important;
+}
+
+.detail-actions-bar .btn-secondary.active:hover {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+}
+
+.detail-actions-bar .btn-secondary.active svg {
+  stroke: #FFFFFF !important;
 }
 
 .detail-synopsis-box {

@@ -67,8 +67,22 @@ function showToast(msg) {
   setTimeout(() => toast.classList.remove('show'), 2500);
 }
 
+// ─── Video Playback Controller ──────────────────────────────────────
+function stopVideoPlayback() {
+  const frameContainer = document.getElementById('video-frame-container');
+  if (frameContainer) {
+    // Clear innerHTML to completely unload the iframe and silence audio
+    frameContainer.innerHTML = '';
+  }
+}
+
 // ─── View Routing ───────────────────────────────────────────────────
 function showView(viewId) {
+  // If moving away from player, kill video playback immediately
+  if (viewId !== 'view-watch') {
+    stopVideoPlayback();
+  }
+
   document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('active'));
   const target = document.getElementById(viewId);
   if (target) {
@@ -115,13 +129,16 @@ async function fetchApi(endpoint) {
 
 // ─── Watchlist & History Management ─────────────────────────────────
 function toggleWatchlist(anime) {
-  const idx = state.watchlist.findIndex(a => a.anime_id === anime.anime_id);
+  const animeId = Number(anime.anime_id);
+  const idx = state.watchlist.findIndex(a => Number(a.anime_id) === animeId);
+  const willBeSaved = idx === -1;
+
   if (idx > -1) {
     state.watchlist.splice(idx, 1);
     showToast(`Removed from Watchlist`);
   } else {
     state.watchlist.unshift({
-      anime_id: anime.anime_id,
+      anime_id: animeId,
       title: anime.title,
       poster: anime.poster || anime.poster_large || anime.poster_url,
       type: anime.type,
@@ -132,10 +149,26 @@ function toggleWatchlist(anime) {
   }
   localStorage.setItem('kuro_watchlist', JSON.stringify(state.watchlist));
   updateWatchlistBadge();
+
+  // Dynamically update card library badges across all visible lists
+  document.querySelectorAll(`.anime-card[data-id="${animeId}"] .card-poster-wrapper`).forEach(pw => {
+    const existingBadge = pw.querySelector('.card-saved-badge');
+    if (willBeSaved && !existingBadge) {
+      const badge = document.createElement('span');
+      badge.className = 'card-saved-badge';
+      badge.title = 'In Your Library';
+      badge.innerHTML = '<i data-lucide="bookmark"></i>';
+      pw.appendChild(badge);
+    } else if (!willBeSaved && existingBadge) {
+      existingBadge.remove();
+    }
+  });
+
+  refreshIcons();
 }
 
 function isWatchlisted(animeId) {
-  return state.watchlist.some(a => a.anime_id === animeId);
+  return state.watchlist.some(a => Number(a.anime_id) === Number(animeId));
 }
 
 function updateWatchlistBadge() {
@@ -170,6 +203,7 @@ function renderAnimeCard(anime) {
   const score = anime.anilist_score ? (anime.anilist_score / 10).toFixed(1) : (anime.mal_score || '');
   const hasSub = anime.sub !== false;
   const hasDub = anime.dub === true;
+  const inWatchlist = isWatchlisted(anime.anime_id);
 
   return `
     <div class="anime-card" data-id="${anime.anime_id}">
@@ -179,6 +213,7 @@ function renderAnimeCard(anime) {
           ${hasSub ? '<span class="pill-sub">SUB</span>' : ''}
           ${hasDub ? '<span class="pill-dub">DUB</span>' : ''}
         </div>
+        ${inWatchlist ? `<span class="card-saved-badge" title="In Your Library"><i data-lucide="bookmark"></i></span>` : ''}
         <div class="card-bottom-badges">
           <span class="badge-eps">${anime.episode_count ? `${anime.episode_count} EPS` : (anime.type || 'TV')}</span>
           ${score ? `<span class="badge-score"><i data-lucide="star"></i> ${score}</span>` : ''}
@@ -405,7 +440,7 @@ function renderHeroContent(index) {
         <svg viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></svg>
         Play
       </button>
-      <button class="btn-hero-ghost" id="hero-btn-list" data-id="${item.anime_id}">
+      <button class="btn-hero-ghost ${inList ? 'active' : ''}" id="hero-btn-list" data-id="${item.anime_id}">
         <i data-lucide="${inList ? 'check' : 'plus'}"></i>
         <span id="hero-list-label">${inList ? 'In List' : 'My List'}</span>
       </button>
@@ -428,10 +463,9 @@ function renderHeroContent(index) {
   document.getElementById('hero-btn-list')?.addEventListener('click', () => {
     toggleWatchlist(item);
     const nowInList = state.watchlist.some(w => w.anime_id === item.anime_id);
-    const label = document.getElementById('hero-list-label');
     const btn = document.getElementById('hero-btn-list');
-    if (label) label.textContent = nowInList ? 'In List' : 'My List';
     if (btn) {
+      btn.classList.toggle('active', nowInList);
       btn.innerHTML = `<i data-lucide="${nowInList ? 'check' : 'plus'}"></i><span id="hero-list-label">${nowInList ? 'In List' : 'My List'}</span>`;
       refreshIcons();
     }
@@ -708,7 +742,7 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0)
         <button class="btn-primary" style="flex: 1;" id="detail-start-watch-btn">
           <i data-lucide="play"></i> Start Ep 1
         </button>
-        <button class="btn-secondary" id="detail-bookmark-btn">
+        <button class="btn-secondary ${watchlisted ? 'active' : ''}" id="detail-bookmark-btn">
           <i data-lucide="${watchlisted ? 'check' : 'bookmark'}"></i>
           <span>${watchlisted ? 'Saved' : 'Watchlist'}</span>
         </button>
@@ -776,7 +810,8 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0)
   bookmarkBtn?.addEventListener('click', () => {
     toggleWatchlist(anime);
     const nowSaved = isWatchlisted(animeId);
-    bookmarkBtn.querySelector('span').textContent = nowSaved ? 'Saved' : 'Watchlist';
+    bookmarkBtn.classList.toggle('active', nowSaved);
+    bookmarkBtn.innerHTML = `<i data-lucide="${nowSaved ? 'check' : 'bookmark'}"></i><span>${nowSaved ? 'Saved' : 'Watchlist'}</span>`;
     refreshIcons();
   });
 
@@ -849,7 +884,7 @@ async function openWatchPlayer(episodeIndex) {
         <div class="player-anime-title">${anime.title}</div>
         <div class="player-ep-title">Episode ${ep.episode_number}${ep.title ? `: ${ep.title}` : ''}</div>
       </div>
-      <button class="header-icon-btn" id="player-bookmark-btn">
+      <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="Bookmark anime">
         <i data-lucide="${isWatchlisted(anime.anime_id) ? 'check' : 'bookmark'}"></i>
       </button>
     </div>
@@ -928,6 +963,15 @@ async function openWatchPlayer(episodeIndex) {
   // Attach Player Events
   document.getElementById('player-back-detail-btn')?.addEventListener('click', () => {
     showView('view-detail');
+  });
+
+  const playerBookmarkBtn = document.getElementById('player-bookmark-btn');
+  playerBookmarkBtn?.addEventListener('click', () => {
+    toggleWatchlist(anime);
+    const nowSaved = isWatchlisted(anime.anime_id);
+    playerBookmarkBtn.classList.toggle('active', nowSaved);
+    playerBookmarkBtn.innerHTML = `<i data-lucide="${nowSaved ? 'check' : 'bookmark'}"></i>`;
+    refreshIcons();
   });
 
   document.getElementById('player-prev-ep-btn')?.addEventListener('click', () => {
