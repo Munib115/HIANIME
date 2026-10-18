@@ -190,6 +190,248 @@ function renderAnimeCard(anime) {
   `;
 }
 
+// ─── Hero Cinema Spotlight Controller ─────────────────────────────
+let heroCarouselState = {
+  items: [],
+  currentIndex: 0,
+  timer: null,
+  duration: 8000,
+  isPaused: false,
+  touchStartX: 0
+};
+
+function initHeroSpotlight(spotlightList) {
+  if (!spotlightList || !spotlightList.length) return;
+
+  const stageEl = document.getElementById('hero-stage');
+  const thumbsEl = document.getElementById('hero-thumbs');
+  const dotsEl = document.getElementById('hero-dots');
+  const contentEl = document.getElementById('hero-content');
+  const heroSection = document.getElementById('hero-section');
+
+  if (!stageEl || !contentEl) return;
+
+  heroCarouselState.items = spotlightList.slice(0, 8);
+  const items = heroCarouselState.items;
+  heroCarouselState.currentIndex = 0;
+
+  // 1. Render slides in stage with lazy Ken Burns
+  stageEl.innerHTML = items.map((item, idx) => {
+    const banner = item.banner_image || item.poster_large || item.poster;
+    return `
+      <div class="hero-slide ${idx === 0 ? 'active' : ''}" data-idx="${idx}">
+        <img class="hero-slide-img" src="${banner}" alt="${item.title}" loading="${idx === 0 ? 'eager' : 'lazy'}" />
+      </div>
+    `;
+  }).join('');
+
+  // 2. Render desktop thumbnails (up to 6)
+  if (thumbsEl) {
+    const thumbItems = items.slice(0, 6);
+    thumbsEl.innerHTML = thumbItems.map((item, idx) => {
+      const thumb = item.banner_image || item.poster;
+      return `
+        <button class="hero-thumb ${idx === 0 ? 'active' : ''}" data-idx="${idx}" aria-label="Slide ${idx + 1}: ${item.title}">
+          <img src="${thumb}" alt="" loading="lazy" />
+          <span class="hero-thumb-bar"></span>
+        </button>
+      `;
+    }).join('');
+
+    thumbsEl.querySelectorAll('.hero-thumb').forEach(btn => {
+      btn.addEventListener('click', () => {
+        goToHeroSlide(parseInt(btn.dataset.idx, 10));
+      });
+    });
+  }
+
+  // 3. Render mobile dots
+  if (dotsEl) {
+    dotsEl.innerHTML = items.map((_, idx) => `
+      <button class="${idx === 0 ? 'active' : ''}" data-idx="${idx}" aria-label="Slide ${idx + 1}"></button>
+    `).join('');
+
+    dotsEl.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        goToHeroSlide(parseInt(btn.dataset.idx, 10));
+      });
+    });
+  }
+
+  // 4. Render initial slide content
+  renderHeroContent(0);
+
+  // 5. Setup interaction listeners (once)
+  if (heroSection && !heroSection.dataset.listenersAttached) {
+    heroSection.dataset.listenersAttached = 'true';
+
+    // Hover pause
+    heroSection.addEventListener('mouseenter', () => {
+      heroCarouselState.isPaused = true;
+      heroSection.classList.add('paused');
+      clearTimeout(heroCarouselState.timer);
+    });
+
+    heroSection.addEventListener('mouseleave', () => {
+      heroCarouselState.isPaused = false;
+      heroSection.classList.remove('paused');
+      scheduleHeroNext(heroCarouselState.duration);
+    });
+
+    // Mobile touch swipe (>40px)
+    heroSection.addEventListener('touchstart', e => {
+      heroCarouselState.touchStartX = e.changedTouches[0].screenX;
+    }, { passive: true });
+
+    heroSection.addEventListener('touchend', e => {
+      const touchEndX = e.changedTouches[0].screenX;
+      const diff = touchEndX - heroCarouselState.touchStartX;
+      if (Math.abs(diff) > 42) {
+        if (diff < 0) {
+          goToHeroSlide((heroCarouselState.currentIndex + 1) % heroCarouselState.items.length);
+        } else {
+          goToHeroSlide((heroCarouselState.currentIndex - 1 + heroCarouselState.items.length) % heroCarouselState.items.length);
+        }
+      }
+    }, { passive: true });
+  }
+
+  // Schedule autoplay
+  scheduleHeroNext(heroCarouselState.duration);
+}
+
+function scheduleHeroNext(delay) {
+  clearTimeout(heroCarouselState.timer);
+  if (heroCarouselState.isPaused) return;
+  heroCarouselState.timer = setTimeout(() => {
+    const nextIdx = (heroCarouselState.currentIndex + 1) % heroCarouselState.items.length;
+    goToHeroSlide(nextIdx);
+  }, delay);
+}
+
+function goToHeroSlide(index) {
+  if (index < 0 || index >= heroCarouselState.items.length) return;
+  heroCarouselState.currentIndex = index;
+
+  // 1. Update slides
+  const slides = document.querySelectorAll('#hero-stage .hero-slide');
+  slides.forEach((sl, idx) => {
+    sl.classList.toggle('active', idx === index);
+  });
+
+  // 2. Update thumbnails (re-trigger CSS progress bar animation)
+  const thumbs = document.querySelectorAll('#hero-thumbs .hero-thumb');
+  thumbs.forEach((th, idx) => {
+    th.classList.toggle('active', idx === index);
+    if (idx === index) {
+      const bar = th.querySelector('.hero-thumb-bar');
+      if (bar) {
+        bar.style.animation = 'none';
+        void bar.offsetWidth;
+        bar.style.animation = '';
+      }
+    }
+  });
+
+  // 3. Update dots
+  const dots = document.querySelectorAll('#hero-dots button');
+  dots.forEach((dot, idx) => {
+    dot.classList.toggle('active', idx === index);
+  });
+
+  // 4. Render text content with staggered reveal
+  renderHeroContent(index);
+
+  // 5. Schedule next
+  scheduleHeroNext(heroCarouselState.duration);
+}
+
+function renderHeroContent(index) {
+  const contentEl = document.getElementById('hero-content');
+  if (!contentEl) return;
+
+  const item = heroCarouselState.items[index];
+  if (!item) return;
+
+  const title = item.title_english || item.title || 'Untitled Anime';
+  const score = item.anilist_score ? (item.anilist_score / 10).toFixed(1) : (item.mal_score || '');
+  const year = item.season_year || (item.aired ? item.aired.match(/\d{4}/)?.[0] : '');
+  const type = item.type || 'TV';
+  const eps = item.episode_count ? `${item.episode_count} Episodes` : '';
+
+  // Clean genres (supports both comma-separated and space-separated formats)
+  const rawGenres = item.genres || '';
+  const genreTokens = (rawGenres.includes(',') ? rawGenres.split(',') : rawGenres.split(/\s+/)).map(g => g.trim()).filter(Boolean);
+  const genresStr = genreTokens.slice(0, 2).join(' / ');
+
+  // Clean synopsis (strip HTML tags)
+  const synopsis = (item.synopsis || '').replace(/<[^>]*>?/gm, '').trim();
+
+  // Watchlist state
+  const inList = state.watchlist.some(w => w.anime_id === item.anime_id);
+
+  // Build metadata tokens
+  const metaParts = [];
+  if (score) metaParts.push(`<span class="score">★ ${score}</span>`);
+  if (year) metaParts.push(`<span>${year}</span>`);
+  if (type) metaParts.push(`<span>${type}</span>`);
+  if (eps) metaParts.push(`<span>${eps}</span>`);
+  if (genresStr) metaParts.push(`<span>${genresStr}</span>`);
+
+  const metaHtml = metaParts.join('<span class="dot"></span>');
+
+  contentEl.innerHTML = `
+    <div class="hero-eyebrow">
+      <span class="hero-eyebrow-line"></span>
+      #${index + 1} Spotlight
+    </div>
+    <h1 class="hero-title">${title}</h1>
+    <div class="hero-meta">
+      ${metaHtml}
+    </div>
+    <div class="hero-tags-row">
+      ${item.sub !== false ? '<span class="hero-tag">SUB</span>' : ''}
+      ${item.dub === true ? '<span class="hero-tag">DUB</span>' : ''}
+    </div>
+    ${synopsis ? `<p class="hero-synopsis">${synopsis}</p>` : ''}
+    <div class="hero-actions">
+      <button class="btn-hero-play" id="hero-btn-play" data-id="${item.anime_id}">
+        <svg viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        Play
+      </button>
+      <button class="btn-hero-ghost" id="hero-btn-list" data-id="${item.anime_id}">
+        <i data-lucide="${inList ? 'check' : 'plus'}"></i>
+        <span id="hero-list-label">${inList ? 'In List' : 'My List'}</span>
+      </button>
+    </div>
+  `;
+
+  // Staggered reveal animation
+  contentEl.classList.remove('swap');
+  void contentEl.offsetWidth; // force reflow
+  contentEl.classList.add('swap');
+
+  // Convert lucide tags
+  refreshIcons();
+
+  // Button actions
+  document.getElementById('hero-btn-play')?.addEventListener('click', () => {
+    openAnimeDetail(item.anime_id, true);
+  });
+
+  document.getElementById('hero-btn-list')?.addEventListener('click', () => {
+    toggleWatchlist(item);
+    const nowInList = state.watchlist.some(w => w.anime_id === item.anime_id);
+    const label = document.getElementById('hero-list-label');
+    const btn = document.getElementById('hero-btn-list');
+    if (label) label.textContent = nowInList ? 'In List' : 'My List';
+    if (btn) {
+      btn.innerHTML = `<i data-lucide="${nowInList ? 'check' : 'plus'}"></i><span id="hero-list-label">${nowInList ? 'In List' : 'My List'}</span>`;
+      refreshIcons();
+    }
+  });
+}
+
 // ─── Home View ──────────────────────────────────────────────────────
 async function initHome() {
   // 1. Stats
@@ -209,18 +451,14 @@ async function initHome() {
     if (text) {
       text.innerHTML = `<span style="color:#ff5a3c">⚠️ Cannot connect to API backend at <code>${API_BASE}</code></span>`;
     }
-    const spotlightEl = document.getElementById('spotlight-container');
-    if (spotlightEl) {
-      spotlightEl.innerHTML = `
-        <div class="empty-state" style="padding: 60px 16px;">
-          <i data-lucide="shield" class="empty-state-icon" style="color:#ff5a3c"></i><br/>
-          <strong>Backend API Unreachable</strong><br/>
-          <span style="font-size:0.85rem;color:var(--text-muted);display:inline-block;max-width:440px;margin:8px 0 16px;">
-            Could not reach <code>${API_BASE}/home</code>.<br/>
-            • <b>Locally:</b> Run <code>python -m uvicorn api:app --port 8000</code><br/>
-            • <b>On Vercel:</b> Deploy the fullstack project with root <code>vercel.json</code>, or configure <code>VITE_API_BASE</code>.
-          </span><br/>
-          <button class="btn-primary" onclick="location.reload()">Retry Connection</button>
+    const stageEl = document.getElementById('hero-stage');
+    if (stageEl) {
+      stageEl.innerHTML = `
+        <div class="empty-state" style="padding: 120px 20px; text-align: center; color: var(--text-secondary);">
+          <i data-lucide="wifi-off" style="width: 44px; height: 44px; stroke: #ff5a3c; margin-bottom: 12px;"></i>
+          <h2 style="font-size: 1.4rem; color: #fff; margin-bottom: 8px;">Catalog Connection Offline</h2>
+          <p style="font-size: 0.9rem; max-width: 440px; margin: 0 auto 20px;">Could not load spotlight from <code>${API_BASE}/home</code>. Please verify backend service.</p>
+          <button class="btn-hero-play" onclick="location.reload()" style="display:inline-flex; margin: 0 auto;">Retry</button>
         </div>
       `;
       refreshIcons();
@@ -228,50 +466,8 @@ async function initHome() {
     return;
   }
 
-
-  // Render Spotlight Hero
-  const spotlightEl = document.getElementById('spotlight-container');
-  if (spotlightEl && homeData.spotlight?.length) {
-    const featured = homeData.spotlight[0];
-    const banner = featured.banner_image || featured.poster;
-    const score = featured.anilist_score ? (featured.anilist_score / 10).toFixed(1) : '';
-
-    const rawGenres = featured.genres || '';
-    const genreTokens = (rawGenres.includes(',') ? rawGenres.split(',') : rawGenres.split(/\s+/)).map(g => g.trim()).filter(Boolean);
-    const topGenre = genreTokens[0] || 'Top Series';
-
-    spotlightEl.innerHTML = `
-      <div class="spotlight-slide" style="background-image: url('${banner}')">
-        <div class="spotlight-overlay"></div>
-        <div class="spotlight-content">
-          <div class="spotlight-tags">
-            <span class="spotlight-rank-badge">#1 In Catalog</span>
-            ${score ? `<span class="badge-gold"><i data-lucide="star"></i> ${score}</span>` : ''}
-            <span class="pill-sub">SUB</span>
-            <span class="pill-dub">DUB</span>
-            <span class="badge-eps">${topGenre}</span>
-          </div>
-          <h2 class="spotlight-title">${featured.title}</h2>
-          <p class="spotlight-synopsis">${featured.synopsis || 'Start streaming now in full high definition with verified fast player servers.'}</p>
-          <div class="spotlight-actions">
-            <button class="btn-primary" id="spotlight-play-btn" data-id="${featured.anime_id}">
-              <i data-lucide="play"></i> Watch Ep 1
-            </button>
-            <button class="btn-secondary" id="spotlight-info-btn" data-id="${featured.anime_id}">
-              <i data-lucide="layers"></i> Details
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById('spotlight-play-btn')?.addEventListener('click', () => {
-      openAnimeDetail(featured.anime_id, true);
-    });
-    document.getElementById('spotlight-info-btn')?.addEventListener('click', () => {
-      openAnimeDetail(featured.anime_id);
-    });
-  }
+  // Render Professional Cinema Hero Spotlight
+  initHeroSpotlight(homeData.spotlight || []);
 
   // Render Rails
   const railsContainer = document.getElementById('rails-container');
@@ -951,6 +1147,26 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('browse-next-page')?.addEventListener('click', () => {
     state.browsePage++;
     fetchBrowseResults();
+  });
+
+  // Header Scroll Spy (Transparent at top, Frosted glass on scroll)
+  const headerEl = document.getElementById('app-header');
+  window.addEventListener('scroll', () => {
+    if (headerEl) {
+      headerEl.classList.toggle('scrolled', window.scrollY > 40);
+    }
+  }, { passive: true });
+
+  // Keyboard navigation for Hero Carousel (Desktop)
+  window.addEventListener('keydown', e => {
+    if (state.currentTab !== 'home') return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (heroCarouselState.items.length < 2) return;
+    if (e.key === 'ArrowRight') {
+      goToHeroSlide((heroCarouselState.currentIndex + 1) % heroCarouselState.items.length);
+    } else if (e.key === 'ArrowLeft') {
+      goToHeroSlide((heroCarouselState.currentIndex - 1 + heroCarouselState.items.length) % heroCarouselState.items.length);
+    }
   });
 
   // Init App

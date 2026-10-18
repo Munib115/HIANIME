@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="referrer" content="no-referrer" />
+<title>KuroAnime — Hero Reference</title>
+<meta name="description" content="Reference implementation of the KuroAnime hero section for desktop and mobile." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #07080b;
+    --text: #f3f4f8;
+    --muted: #a3a9b8;
+    --dim: #6b7182;
+    --line: rgba(255,255,255,.14);
+    --accent: #ff2a4d;
+    --ease: cubic-bezier(.16,1,.3,1);
+    --pad: clamp(20px, 4.5vw, 72px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+
+  /* ── Nav ─────────────────────────────── */
+  .nav { position: fixed; inset: 0 0 auto; z-index: 20; height: 68px; display: flex; align-items: center; gap: 40px; padding: 0 var(--pad);
+         background: linear-gradient(to bottom, rgba(7,8,11,.75), transparent); transition: background .3s; }
+  .nav.solid { background: rgba(7,8,11,.92); backdrop-filter: blur(14px); border-bottom: 1px solid rgba(255,255,255,.05); }
+  .logo { font-weight: 800; letter-spacing: .08em; font-size: 1.05rem; }
+  .logo span { color: var(--accent); }
+  .links { display: flex; gap: 28px; font-size: .9rem; color: var(--muted); }
+  .links a { color: inherit; text-decoration: none; transition: color .2s; }
+  .links a.on, .links a:hover { color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; gap: 18px; align-items: center; }
+  .icon { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+  /* ── Hero ────────────────────────────── */
+  .hero { position: relative; height: min(88vh, 860px); min-height: 560px; overflow: hidden; }
+  .slide { position: absolute; inset: 0; opacity: 0; transition: opacity 1s var(--ease); }
+  .slide.on { opacity: 1; }
+  .slide img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 25%;
+               transform: scale(1.06); transition: transform 9s linear; }
+  .slide.on img { transform: scale(1); }
+  /* Two scrims: readable left side + seamless fade into page */
+  .hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      linear-gradient(90deg, var(--bg) 0%, rgba(7,8,11,.88) 28%, rgba(7,8,11,.35) 58%, transparent 80%),
+      linear-gradient(0deg, var(--bg) 0%, rgba(7,8,11,.6) 18%, transparent 45%); }
+
+  .content { position: absolute; z-index: 2; left: var(--pad); bottom: clamp(90px, 14vh, 150px); width: min(560px, 44vw); }
+  .eyebrow { font-size: .72rem; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+  .eyebrow i { width: 18px; height: 2px; background: var(--accent); display: inline-block; }
+  .title { margin: 14px 0 16px; font-weight: 800; font-size: clamp(2.2rem, 4.4vw, 4rem); line-height: 1.02; letter-spacing: -.025em; text-wrap: balance;
+           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: .9rem; color: var(--muted); }
+  .meta .score { color: var(--text); font-weight: 600; }
+  .meta .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--dim); }
+  .tag { font-size: .66rem; font-weight: 700; letter-spacing: .08em; padding: 3px 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--text); }
+  .tags { flex-basis: 100%; display: flex; gap: 6px; margin-top: 6px; }
+  @media (max-width: 768px) { .tags { justify-content: center; } }
+  .synopsis { margin-top: 18px; color: #c4c8d2; font-size: .98rem; line-height: 1.6; max-width: 52ch;
+              display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .actions { margin-top: 28px; display: flex; gap: 12px; }
+  .btn { height: 48px; padding: 0 26px; border-radius: 6px; display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: .95rem;
+         transition: transform .2s var(--ease), background .2s; }
+  .btn:active { transform: scale(.97); }
+  .btn-play { background: #fff; color: #000; }
+  .btn-play:hover { background: #e6e6e6; }
+  .btn-play .icon { fill: #000; stroke: none; }
+  .btn-ghost { background: rgba(255,255,255,.14); backdrop-filter: blur(10px); }
+  .btn-ghost:hover { background: rgba(255,255,255,.22); }
+
+  /* Fade-up on slide change */
+  .content.swap > * { animation: up .7s var(--ease) both; }
+  .content.swap > *:nth-child(2) { animation-delay: .05s; } .content.swap > *:nth-child(3) { animation-delay: .1s; }
+  .content.swap > *:nth-child(4) { animation-delay: .15s; } .content.swap > *:nth-child(5) { animation-delay: .2s; }
+  @keyframes up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+  /* Thumbnail switcher (desktop) */
+  .thumbs { position: absolute; z-index: 2; right: var(--pad); bottom: clamp(90px, 14vh, 150px); display: flex; gap: 10px; }
+  .thumb { position: relative; width: 112px; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; opacity: .5; transition: opacity .3s, transform .3s var(--ease); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .thumb:hover { opacity: .85; transform: translateY(-3px); }
+  .thumb.on { opacity: 1; outline: 2px solid #fff; outline-offset: 2px; }
+  .thumb .bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: #fff; }
+  .thumb.on .bar { animation: fill var(--dur, 8s) linear forwards; }
+  .hero.paused .thumb.on .bar { animation-play-state: paused; }
+  @keyframes fill { to { width: 100%; } }
+  .dots { display: none; }
+
+  /* Below-hero rail stub so the fade can be judged in context */
+  .rail { padding: 0 var(--pad) 80px; margin-top: -40px; position: relative; z-index: 3; }
+  .rail h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 14px; }
+  .row { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; }
+  .card { flex: 0 0 auto; width: 160px; }
+  .card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 6px; background: #12141b; }
+  .card p { font-size: .85rem; margin-top: 8px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .skeleton { position: absolute; inset: 0; background: linear-gradient(100deg, #0d0f14 30%, #151821 50%, #0d0f14 70%); background-size: 200% 100%; animation: sh 1.4s infinite; }
+  @keyframes sh { to { background-position: -200% 0; } }
+
+  /* ── Mobile ──────────────────────────── */
+  @media (max-width: 768px) {
+    .links, .nav-right .avatar { display: none; }
+    .nav { height: 56px; }
+    .hero { height: auto; min-height: 0; aspect-ratio: auto; }
+    .stage { position: relative; height: 72svh; min-height: 460px; }
+    .slide img { object-position: center top; }
+    .hero::after { background: linear-gradient(0deg, var(--bg) 0%, rgba(7,8,11,.85) 26%, rgba(7,8,11,.2) 55%, rgba(7,8,11,.45) 100%); height: 72svh; min-height: 460px; }
+    .content { left: 0; right: 0; bottom: 28px; width: auto; padding: 0 20px; text-align: center; }
+    .eyebrow, .meta, .actions { justify-content: center; }
+    .title { font-size: clamp(1.9rem, 8.5vw, 2.6rem); margin: 10px 0 12px; }
+    .synopsis { display: none; }
+    .actions { margin-top: 20px; }
+    .btn { flex: 1; justify-content: center; max-width: 180px; height: 46px; }
+    .thumbs { display: none; }
+    .dots { display: flex; justify-content: center; gap: 6px; padding: 16px 0 4px; }
+    .dots button { width: 6px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.3); transition: width .3s var(--ease), background .3s; }
+    .dots button.on { width: 20px; background: #fff; }
+    .rail { margin-top: 20px; padding: 0 20px 80px; }
+    .card { width: 120px; }
+  }
+  @media (min-width: 769px) { .stage { position: absolute; inset: 0; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header class="nav" id="nav">
+  <div class="logo">KURO<span>ANIME</span></div>
+  <nav class="links"><a class="on" href="#">Home</a><a href="#">Browse</a><a href="#">Movies</a><a href="#">My List</a></nav>
+  <div class="nav-right">
+    <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <svg class="icon avatar" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+  </div>
+</header>
+
+<main>
+  <section class="hero" id="hero" aria-roledescription="carousel" aria-label="Featured anime">
+    <div class="stage" id="stage"><div class="skeleton"></div></div>
+    <div class="content" id="content"></div>
+    <div class="thumbs" id="thumbs"></div>
+  </section>
+  <div class="dots" id="dots"></div>
+  <section class="rail"><h2>Trending Now</h2><div class="row" id="row"></div></section>
+</main>
+
+<script>
+const API = 'https://web-three-rho-81.vercel.app/api';
+const DURATION = 8000;
+let items = [], idx = 0, timer = null;
+
+const strip = s => (s || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function metaHTML(a) {
+  const parts = [];
+  if (a.anilist_score) parts.push(`<span class="score">★ ${(a.anilist_score / 10).toFixed(1)}</span>`);
+  if (a.season_year) parts.push(a.season_year);
+  if (a.type) parts.push(esc(a.type));
+  if (a.episode_count) parts.push(`${a.episode_count} Episodes`);
+  const raw = a.genres || '';
+  const g = (raw.includes(',') ? raw.split(',') : raw.split(/\s+/)).map(s => s.trim()).filter(Boolean).slice(0, 2).join(' / ');
+  if (g) parts.push(esc(g));
+  const tags = (a.sub ? '<span class="tag">SUB</span>' : '') + (a.dub ? '<span class="tag">DUB</span>' : '');
+  return parts.join('<span class="dot"></span>') + (tags ? `<span class="tags">${tags}</span>` : '');
+}
+
+function render(i) {
+  idx = (i + items.length) % items.length;
+  const a = items[idx];
+  document.querySelectorAll('.slide').forEach((s, n) => s.classList.toggle('on', n === idx));
+  document.querySelectorAll('.thumb').forEach((t, n) => t.classList.toggle('on', n === idx));
+  document.querySelectorAll('.dots button').forEach((d, n) => d.classList.toggle('on', n === idx));
+  const c = document.getElementById('content');
+  c.classList.remove('swap'); void c.offsetWidth; c.classList.add('swap');
+  c.innerHTML = `
+    <div class="eyebrow"><i></i>#${idx + 1} Spotlight</div>
+    <h1 class="title">${esc(a.title_english || a.title)}</h1>
+    <div class="meta">${metaHTML(a)}</div>
+    <p class="synopsis">${esc(strip(a.synopsis))}</p>
+    <div class="actions">
+      <button class="btn btn-play" id="hero-play"><svg class="icon" viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z"/></svg>Play</button>
+      <button class="btn btn-ghost" id="hero-list"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>My List</button>
+    </div>`;
+  restart();
+}
+
+function restart() { clearInterval(timer); timer = setInterval(() => render(idx + 1), DURATION); }
+
+async function init() {
+  document.documentElement.style.setProperty('--dur', DURATION + 'ms');
+  try {
+    const data = await (await fetch(API + '/home')).json();
+    items = data.spotlight || [];
+    document.getElementById('stage').innerHTML = items.map(a =>
+      `<div class="slide"><img src="${esc(a.banner_image || a.poster)}" alt="" loading="eager"></div>`).join('');
+    document.getElementById('thumbs').innerHTML = items.slice(0, 6).map((a, n) =>
+      `<button class="thumb" data-i="${n}" aria-label="${esc(a.title)}"><img src="${esc(a.banner_image || a.poster)}" alt=""><span class="bar"></span></button>`).join('');
+    document.getElementById('dots').innerHTML = items.map((_, n) => `<button data-i="${n}" aria-label="Slide ${n + 1}"></button>`).join('');
+    document.getElementById('row').innerHTML = (data.rails?.trending || []).map(a =>
+      `<div class="card"><img src="${esc(a.poster)}" alt="" loading="lazy"><p>${esc(a.title)}</p></div>`).join('');
+    document.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => render(+b.dataset.i)));
+    render(0);
+  } catch (e) {
+    document.getElementById('content').innerHTML = '<p class="synopsis">Could not load /api/home.</p>';
+  }
+}
+
+// Pause on hover (desktop), swipe (mobile), arrow keys
+const hero = document.getElementById('hero');
+hero.addEventListener('mouseenter', () => { hero.classList.add('paused'); clearInterval(timer); });
+hero.addEventListener('mouseleave', () => { hero.classList.remove('paused'); restart(); });
+let x0 = null;
+hero.addEventListener('touchstart', e => x0 = e.touches[0].clientX, { passive: true });
+hero.addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 40) render(idx + (dx < 0 ? 1 : -1)); x0 = null; });
+document.addEventListener('keydown', e => { if (e.key === 'ArrowRight') render(idx + 1); if (e.key === 'ArrowLeft') render(idx - 1); });
+addEventListener('scroll', () => document.getElementById('nav').classList.toggle('solid', scrollY > 40), { passive: true });
+
+init();
+</script>
+</body>
+</html>

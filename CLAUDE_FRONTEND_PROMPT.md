@@ -21,7 +21,7 @@ The frontend must connect directly to our working FastAPI backend (endpoints and
 - **Text Primary:** `#F3F4F8` (Crisp high-contrast white)
 - **Text Secondary / Muted:** `#8F96A9` (Subtitles, episode metadata, timestamps)
 - **Borders & Dividers:** `rgba(255, 255, 255, 0.08)` (Subtle, sleek outlines)
-- **Card Shadows & Glows:** `0 8px 32px rgba(0, 0, 0, 0.6)`, with glowing hover halos: `0 0 25px rgba(255, 42, 77, 0.25)`
+- **Card Shadows:** `0 8px 32px rgba(0, 0, 0, 0.6)`. Use accent color sparingly (active states, progress bars, one small brand mark). **No neon glows, no glowing outlines, no lens flares** — these make the UI look AI-generated and cheap.
 
 ### 🔤 Typography & Hierarchy
 - **Font Family:** `Satoshi`, `Plus Jakarta Sans`, or `Inter` (Sans-serif)
@@ -38,6 +38,50 @@ The frontend must connect directly to our working FastAPI backend (endpoints and
 
 ---
 
+## 1.5 Hero Section Specification (MOST IMPORTANT — follow exactly)
+
+The hero must look like a real production streaming service (Apple TV+, Netflix, Crunchyroll, Max), **not** a template. A working reference implementation is attached as `hero_preview.html` with screenshots `hero_desktop.png` and `hero_mobile.png` — match it.
+
+### Principles
+- **Artwork is the hero.** Full-bleed, edge-to-edge `banner_image` (fallback `poster`). Never put the art inside a floating rounded card.
+- **Restraint.** One primary button, one secondary. No glows, no gradient text, no emoji, no pill overload.
+- **Typography does the work.** Big tight title, quiet metadata line, short synopsis.
+- **The hero melts into the page.** No hard bottom edge — gradient fades into `#07080B` and the first rail overlaps it slightly (`margin-top: -40px`).
+
+### Desktop (≥ 769px)
+- Height: `min(88vh, 860px)`, min `560px`. Image `object-fit: cover; object-position: center 25%`.
+- Two stacked scrims on `::after`:
+  - Left: `linear-gradient(90deg, #07080B 0%, rgba(7,8,11,.88) 28%, rgba(7,8,11,.35) 58%, transparent 80%)`
+  - Bottom: `linear-gradient(0deg, #07080B 0%, rgba(7,8,11,.6) 18%, transparent 45%)`
+- Nav is **transparent** over the hero (top fade only), becomes solid `rgba(7,8,11,.92)` + blur after 40px scroll.
+- Content block: left-aligned, `left: clamp(20px, 4.5vw, 72px)`, `bottom: clamp(90px, 14vh, 150px)`, width `min(560px, 44vw)`. In order:
+  1. **Eyebrow** — `0.72rem`, uppercase, `letter-spacing: .18em`, muted, preceded by an 18×2px accent line. Text: `#1 Spotlight`.
+  2. **Title** — `font-weight: 800; font-size: clamp(2.2rem, 4.4vw, 4rem); line-height: 1.02; letter-spacing: -0.025em; text-wrap: balance;` clamp to 2 lines. Prefer `title_english`, fallback `title`.
+  3. **Metadata line** — muted `0.9rem`, items separated by 3px dots: `★ 8.5` (white, from `anilist_score/10`) · year · type · `25 Episodes` · max 2 genres joined with ` / `.
+  4. **Audio tags** on their own row: outlined `SUB` `DUB` (1px border `rgba(255,255,255,.14)`, 4px radius, `0.66rem` bold).
+  5. **Synopsis** — `#C4C8D2`, `0.98rem/1.6`, max `52ch`, clamp 3 lines. Strip HTML tags first.
+  6. **Buttons** (48px tall, 6px radius, no shadow): solid **white** `▶ Play` with black text; translucent `rgba(255,255,255,.14)` + blur `+ My List`.
+- **Thumbnail switcher** bottom-right, aligned to the content bottom: up to 6 16:9 thumbs (112px wide), inactive `opacity .5`, active has `2px` white outline + a 3px white progress bar filling over the autoplay duration.
+- Autoplay every **8s**, crossfade `opacity 1s`, slow Ken Burns (`scale(1.06) → 1` over 9s). Pause on hover. ←/→ keys switch slides. Content fades up (14px, staggered 50ms) on each change.
+
+### Mobile (≤ 768px)
+- Art area `72svh` (min 460px), `object-position: center top`, full-bleed, no card.
+- Single scrim: `linear-gradient(0deg, #07080B 0%, rgba(7,8,11,.85) 26%, rgba(7,8,11,.2) 55%, rgba(7,8,11,.45) 100%)` (top darkening keeps the nav legible).
+- Nav: logo + search icon only, 56px tall, transparent.
+- Content centered at the bottom of the art: eyebrow, title `clamp(1.9rem, 8.5vw, 2.6rem)`, metadata line, tags. **Hide synopsis.**
+- Buttons side by side, equal width, max 180px each, 46px tall.
+- Replace thumbnails with **pagination dots** under the hero: 6px dots, active becomes a 20px white pill.
+- Horizontal **swipe** (>40px) changes slides.
+
+### Data rules
+- Source: `GET /api/home` → `spotlight[]`. Genres may be comma- **or space-separated** — handle both.
+- Show skeleton shimmer until the first image loads. Respect `prefers-reduced-motion`.
+
+### Do NOT
+- Neon/glow shadows, gradient-filled titles, glassmorphism cards around the text, centered text on desktop, `#1 IN CATALOG` badges with emoji, more than two buttons, placeholder lorem text.
+
+---
+
 ## 2. Platform Architecture (Mobile & Desktop)
 
 ### 🖥️ Desktop (PC) Experience
@@ -46,12 +90,7 @@ The frontend must connect directly to our working FastAPI backend (endpoints and
    - Navigation links: `Home`, `Browse`, `Search`, `My Collection`
    - Real-time debounced global search bar with instant drop-down results
    - Bookmark icon with live saved-count badge
-2. **Cinematic Hero Spotlight (Billboard Slider):**
-   - High-resolution wide banner backdrop with dark multi-layer gradients (fade to bottom and left)
-   - Badges: `#1 in Catalog`, Score (`★ 8.8`), Format (`TV Series`), Audio Availability (`SUB`, `DUB`)
-   - Large title, expandable synopsis (truncated to 3 lines)
-   - Dual CTA: `[▶ Watch Episode 1]` (Primary Crimson) and `[+ Save to Watchlist]` / `[ⓘ Details]`
-   - Mini thumbnail preview switcher or indicator dots
+2. **Hero Spotlight:** implement exactly as described in **Section 1.5**.
 3. **Netflix-style Content Rails:**
    - Categories: `🔥 Trending Now`, `⭐ Top Rated Anime`, `📺 Airing Releases`, `🎬 Blockbuster Movies`, `✨ Recently Added`
    - Smooth horizontal scroll buttons (`<` and `>`) that fade in on track hover
@@ -65,7 +104,7 @@ The frontend must connect directly to our working FastAPI backend (endpoints and
    - Immersive 16:9 iframe video player with ambient background glow (canvas blur)
    - Server Switcher Toolbar:
      - Audio toggle: `SUB (Japanese)` vs `DUB (English)`
-     - Server selector chips: `Server 1: ZokoAnime (Default HD)`, `Server 2: HD-1 (MegaPlay)`, `Server 3`
+     - Server selector chips rendered from the API response (currently only `ZokoAnime` is returned — do not hardcode extra servers)
      - Reload stream button, Next/Previous episode shortcuts
    - Sequels & Seasons Carousel (instantly switch to Season 2, Season 3, Movies)
    - Horizontal chunked episode drawer (e.g. `1 - 50`, `51 - 100`, etc.) with episode numbers and sub/dub availability indicators
@@ -75,7 +114,7 @@ The frontend must connect directly to our working FastAPI backend (endpoints and
 
 ### 📱 Mobile Experience (PWA-Ready Touch First)
 1. **Mobile Bottom Tab Bar (Fixed at bottom with safe-area inset):**
-   - 4 Touch Items: `Home`, `Browse`, `Search`, `My List` with active glow
+   - 4 Touch Items: `Home`, `Browse`, `Search`, `My List`; active item white, inactive muted (no glow)
 2. **Swipeable Touch Carousels:**
    - Elastic scroll with momentum snapping for rails and seasons
 3. **Bottom Sheet & Drawers:**
