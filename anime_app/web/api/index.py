@@ -22,14 +22,21 @@ CANDIDATES = [
     os.path.join(os.getcwd(), "anime_app", "hianime.db"),
 ]
 
-DB_PATH = None
-for p in CANDIDATES:
-    if p and os.path.exists(p):
-        DB_PATH = os.path.abspath(p)
-        break
-
-if not DB_PATH:
-    DB_PATH = os.path.join(PARENT_DIR, "hianime.db")
+def find_db():
+    candidates = [
+        os.environ.get("ANIME_DB"),
+        os.path.join(CURRENT_DIR, "hianime.db"),
+        os.path.join(PARENT_DIR, "hianime.db"),
+        os.path.join(PARENT_DIR, "api", "hianime.db"),
+        os.path.join(os.getcwd(), "hianime.db"),
+        os.path.join(os.getcwd(), "api", "hianime.db"),
+        os.path.join(os.getcwd(), "anime_app", "web", "api", "hianime.db"),
+        os.path.join(os.getcwd(), "anime_app", "web", "hianime.db"),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return os.path.abspath(c)
+    return os.path.join(CURRENT_DIR, "hianime.db")
 
 app = FastAPI(title="KuroAnime API")
 app.add_middleware(
@@ -47,7 +54,9 @@ CARD_COLS = """anime_id, title, title_english, type, status, episode_count,
 
 
 def db():
-    path = os.path.abspath(DB_PATH)
+    path = find_db()
+    if not os.path.exists(path):
+        raise HTTPException(status_code=500, detail=f"Database file not found on server at {path}")
     try:
         uri_path = path.replace("\\", "/")
         if not uri_path.startswith("/"):
@@ -57,6 +66,7 @@ def db():
         conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 
 def rows(sql, params=()):
@@ -89,8 +99,21 @@ def with_flags(cards):
     return cards
 
 
+@router.get("/health")
+def health():
+    db_file = find_db()
+    return {
+        "status": "ok",
+        "db_path": db_file,
+        "db_exists": os.path.exists(db_file),
+        "db_size": os.path.getsize(db_file) if os.path.exists(db_file) else 0,
+        "files_here": os.listdir(CURRENT_DIR) if os.path.exists(CURRENT_DIR) else [],
+    }
+
+
 @router.get("/stats")
 def stats():
+
     return {
         "anime": one("SELECT COUNT(*) n FROM anime")["n"],
         "episodes": one("SELECT COUNT(*) n FROM episodes")["n"],
