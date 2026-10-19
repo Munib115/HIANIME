@@ -34,6 +34,7 @@ const state = {
   browsePage: 1,
   browseGenre: '',
   browseType: '',
+  browseStatus: '',
   browseSort: 'popular',
   searchDebounceTimer: null,
   watchlist: JSON.parse(localStorage.getItem('kuro_watchlist') || '[]'),
@@ -577,7 +578,37 @@ async function initHome() {
 
     railsContainer.querySelectorAll('.rail-see-all').forEach(btn => {
       btn.addEventListener('click', () => {
-        state.browseSort = btn.dataset.rail === 'top_rated' ? 'score' : 'popular';
+        const rail = btn.dataset.rail;
+        const statusSelect = document.getElementById('browse-status-select');
+        const typeSelect = document.getElementById('browse-type-select');
+        const sortSelect = document.getElementById('browse-sort-select');
+
+        if (rail === 'airing') {
+          state.browseStatus = 'airing';
+          state.browseSort = 'popular';
+          state.browseType = '';
+          if (statusSelect) statusSelect.value = 'airing';
+          if (typeSelect) typeSelect.value = '';
+          if (sortSelect) sortSelect.value = 'popular';
+        } else if (rail === 'top_rated') {
+          state.browseStatus = '';
+          state.browseSort = 'score';
+          if (statusSelect) statusSelect.value = '';
+          if (sortSelect) sortSelect.value = 'score';
+        } else if (rail === 'movies') {
+          state.browseStatus = '';
+          state.browseType = 'Movie';
+          state.browseSort = 'popular';
+          if (statusSelect) statusSelect.value = '';
+          if (typeSelect) typeSelect.value = 'Movie';
+          if (sortSelect) sortSelect.value = 'popular';
+        } else {
+          state.browseStatus = '';
+          state.browseSort = 'popular';
+          if (statusSelect) statusSelect.value = '';
+          if (sortSelect) sortSelect.value = 'popular';
+        }
+        state.browsePage = 1;
         switchTab('browse');
       });
     });
@@ -624,6 +655,7 @@ async function fetchBrowseResults() {
   });
   if (state.browseGenre) params.append('genre', state.browseGenre);
   if (state.browseType) params.append('type', state.browseType);
+  if (state.browseStatus) params.append('status', state.browseStatus);
 
   const res = await fetchApi(`/browse?${params.toString()}`);
   if (!res || !res.results?.length) {
@@ -1174,6 +1206,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Browse Dropdowns
+  document.getElementById('browse-status-select')?.addEventListener('change', e => {
+    state.browseStatus = e.target.value;
+    state.browsePage = 1;
+    fetchBrowseResults();
+  });
+
   document.getElementById('browse-type-select')?.addEventListener('change', e => {
     state.browseType = e.target.value;
     state.browsePage = 1;

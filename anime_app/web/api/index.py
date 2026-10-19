@@ -269,6 +269,7 @@ def search(q: str = Query(..., min_length=1), limit: int = 30):
 def browse(
     genre: Optional[str] = None,
     type: Optional[str] = None,
+    status: Optional[str] = None,
     sort: str = "popular",
     page: int = 1,
     per_page: int = 30,
@@ -280,11 +281,17 @@ def browse(
     if type:
         where.append("type LIKE ?")
         params.append(f"%{type}%")
+    if status:
+        st = status.lower()
+        if "air" in st or "releas" in st:
+            where.append("(status LIKE '%Currently Airing%' OR anilist_status='RELEASING' OR category='airing') AND status NOT LIKE '%Finished%' AND (anilist_status IS NULL OR anilist_status != 'FINISHED')")
+        elif "comp" in st or "finish" in st:
+            where.append("(status LIKE '%Finished%' OR anilist_status='FINISHED')")
     order = {
         "popular": "anilist_popularity DESC NULLS LAST",
         "score": "anilist_score DESC NULLS LAST",
         "az": "title COLLATE NOCASE ASC",
-        "new": "season_year DESC NULLS LAST",
+        "new": "season_year DESC NULLS LAST, anilist_popularity DESC NULLS LAST",
     }.get(sort, "anilist_popularity DESC NULLS LAST")
     per_page = max(1, min(per_page, 60))
     sql = f"SELECT {CARD_COLS} FROM anime"
