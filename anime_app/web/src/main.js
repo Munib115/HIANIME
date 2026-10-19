@@ -927,16 +927,9 @@ async function openWatchPlayer(episodeIndex) {
         <div class="player-anime-title">${anime.title}</div>
         <div class="player-ep-title">Episode ${ep.episode_number}${ep.title ? `: ${ep.title}` : ''}</div>
       </div>
-      <div class="player-header-actions">
-        <button class="player-adblock-pill ${adShield.isEnabled() ? 'active' : ''}" id="btn-toggle-adshield" aria-label="Toggle AdBlock" title="AdBlock Protection">
-          <span class="adblock-dot ${adShield.isEnabled() ? 'active' : ''}"></span>
-          <i data-lucide="shield"></i>
-          <span>AdBlock <strong id="adblock-pill-state">${adShield.isEnabled() ? 'ON' : 'OFF'}</strong></span>
-        </button>
-        <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="Bookmark anime">
-          <i data-lucide="${isWatchlisted(anime.anime_id) ? 'check' : 'bookmark'}"></i>
-        </button>
-      </div>
+      <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="Bookmark anime">
+        <i data-lucide="${isWatchlisted(anime.anime_id) ? 'check' : 'bookmark'}"></i>
+      </button>
     </div>
 
     <!-- Video Container -->
@@ -949,6 +942,28 @@ async function openWatchPlayer(episodeIndex) {
 
     <!-- Controls Panel -->
     <div class="player-controls-panel">
+      <!-- Professional AdShield Small Box Controller -->
+      <div class="adblock-box ${adShield.isEnabled() ? 'active' : ''}" id="adblock-box">
+        <div class="adblock-box-left">
+          <div class="adblock-badge-icon">
+            <i data-lucide="shield-check" class="shield-on-icon"></i>
+            <i data-lucide="shield-alert" class="shield-off-icon"></i>
+          </div>
+          <div class="adblock-box-text">
+            <div class="adblock-box-title-row">
+              <span class="adblock-box-title">AdShield Protection</span>
+              <span class="adblock-status-tag" id="adblock-status-tag">${adShield.isEnabled() ? 'ACTIVE' : 'OFF'}</span>
+            </div>
+            <div class="adblock-box-desc" id="adblock-status-desc">
+              ${adShield.isEnabled() ? 'Pop-up ads & redirects blocked' : 'Protection off • Tap switch to enable'}
+            </div>
+          </div>
+        </div>
+        <button class="adblock-switch-track ${adShield.isEnabled() ? 'active' : ''}" id="btn-toggle-adshield" role="switch" aria-checked="${adShield.isEnabled()}" aria-label="Toggle AdShield">
+          <span class="adblock-switch-thumb"></span>
+        </button>
+      </div>
+
       <!-- Audio Selection -->
       <div class="server-section-label">Audio Language</div>
       <div class="audio-toggle-bar">
@@ -1032,23 +1047,38 @@ async function openWatchPlayer(episodeIndex) {
     if (state.activeEpisodeIndex < state.activeEpisodes.length - 1) openWatchPlayer(state.activeEpisodeIndex + 1);
   });
 
-  // Compact AdBlock Pill Toggle
+  // Professional AdShield Small Box Toggle
+  const adBlockBox = document.getElementById('adblock-box');
   const adBlockBtn = document.getElementById('btn-toggle-adshield');
-  const adBlockDot = adBlockBtn?.querySelector('.adblock-dot');
-  const adBlockState = document.getElementById('adblock-pill-state');
+  const adBlockTag = document.getElementById('adblock-status-tag');
+  const adBlockDesc = document.getElementById('adblock-status-desc');
+
+  function syncAdShieldUI(isActive) {
+    if (adBlockBox) adBlockBox.classList.toggle('active', isActive);
+    if (adBlockBtn) {
+      adBlockBtn.classList.toggle('active', isActive);
+      adBlockBtn.setAttribute('aria-checked', String(isActive));
+    }
+    if (adBlockTag) adBlockTag.textContent = isActive ? 'ACTIVE' : 'OFF';
+    if (adBlockDesc) {
+      adBlockDesc.textContent = isActive
+        ? 'Pop-up ads & redirects blocked'
+        : 'Protection off • Tap switch to enable';
+    }
+    const overlay = document.getElementById('stream-shield-overlay');
+    if (overlay) {
+      overlay.classList.toggle('hidden', !isActive);
+    }
+  }
 
   adBlockBtn?.addEventListener('click', () => {
     const newState = adShield.toggle();
-    adBlockBtn.classList.toggle('active', newState);
-    adBlockDot?.classList.toggle('active', newState);
-    if (adBlockState) adBlockState.textContent = newState ? 'ON' : 'OFF';
-    showToast(newState ? 'AdBlock Active: Popups Defused' : 'AdBlock Disabled');
+    syncAdShieldUI(newState);
+    showToast(newState ? 'AdShield Active: Popups Defused' : 'AdShield Disabled');
   });
 
   adShield.onStateChange((isEnabled) => {
-    if (adBlockBtn) adBlockBtn.classList.toggle('active', isEnabled);
-    if (adBlockDot) adBlockDot.classList.toggle('active', isEnabled);
-    if (adBlockState) adBlockState.textContent = isEnabled ? 'ON' : 'OFF';
+    syncAdShieldUI(isEnabled);
   });
 
   document.getElementById('player-reload-btn')?.addEventListener('click', () => {
@@ -1151,8 +1181,11 @@ function loadStreamIntoPlayer() {
     return;
   }
 
+  const isShieldOn = adShield.isEnabled();
+
   frameContainer.innerHTML = `
     <iframe 
+      id="main-stream-iframe"
       class="video-iframe"
       src="${server.embed_url}" 
       referrerpolicy="no-referrer"
@@ -1160,7 +1193,41 @@ function loadStreamIntoPlayer() {
       allowfullscreen
       scrolling="no"
     ></iframe>
+    <div class="stream-shield-overlay ${isShieldOn ? '' : 'hidden'}" id="stream-shield-overlay">
+      <div class="shield-watermark-pill">
+        <i data-lucide="shield-check"></i> AdShield Active
+      </div>
+      <button class="shield-play-trigger" id="shield-play-trigger" aria-label="Play Video without Ads">
+        <i data-lucide="play"></i>
+      </button>
+      <div class="shield-tap-hint">Tap to Play • Zero Popup Ads</div>
+    </div>
   `;
+
+  refreshIcons();
+
+  const overlay = document.getElementById('stream-shield-overlay');
+  const trigger = document.getElementById('shield-play-trigger');
+
+  function startProtectedPlayback(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    // Command player to start playing via postMessage - bypasses iframe ad network click-traps!
+    adShield.sendPlayerCommand('autoplay', { on: true });
+    adShield.sendPlayerCommand('play');
+
+    if (overlay) {
+      overlay.classList.add('hidden');
+    }
+    showToast('🛡️ Playing Stream — Popup Ads Defused');
+  }
+
+  trigger?.addEventListener('click', startProtectedPlayback);
+  overlay?.addEventListener('click', (e) => {
+    startProtectedPlayback(e);
+  });
 }
 
 // ─── Watchlist & History View ───────────────────────────────────────

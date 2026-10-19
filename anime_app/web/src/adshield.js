@@ -1,12 +1,13 @@
 /**
- * KuroAnime AdShield Engine
- * Reverse-Engineered from AdGuard Scriptlets (`prevent-window-open`, `window.open-defuser`)
- * and Brave Shields frame protections.
+ * KuroAnime AdShield Engine v2
+ * High-performance, zero-popup ad defuser for embedded anime streams.
  *
- * Core Objectives:
- * 1. Allow 100% uninterrupted video streaming (HLS, MSE, DRM, Fullscreen, WebAudio).
- * 2. NEVER trigger "Video stream can't be played because of sandbox".
- * 3. Neutralize pop-ups, pop-unders, top-navigation frame hijacking, and rogue click redirects.
+ * Objectives:
+ * 1. Allow 100% uninterrupted HLS/MSE streaming without sandbox errors.
+ * 2. Defuse pop-up / pop-under tabs created on video click.
+ * 3. Provide direct postMessage bridge to stream player (ZokoAnime / MegaCloud)
+ *    so playback, pause, and seek happen without triggering iframe ad-traps.
+ * 4. Maintain pristine top-window navigation lock.
  */
 
 const STORAGE_KEY = 'kuro_adshield_active';
@@ -14,11 +15,17 @@ const STORAGE_KEY = 'kuro_adshield_active';
 class AdShieldEngine {
   constructor() {
     const saved = localStorage.getItem(STORAGE_KEY);
-    this.enabled = saved !== null ? saved === 'true' : true; // Enabled by default
+    this.enabled = saved !== null ? saved === 'true' : true; // Active by default
     this.originalOpen = window.open;
     this.blockedPopupsCount = 0;
     this.isStreamPlaying = false;
+    this.playerState = {
+      isPaused: true,
+      currentTime: 0,
+      duration: 0,
+    };
     this.listeners = new Set();
+    this.playerListeners = new Set();
   }
 
   init() {
@@ -26,6 +33,7 @@ class AdShieldEngine {
     this.patchAnchorClicks();
     this.patchFocusBlurGuard();
     this.patchTopNavigationGuard();
+    this.initPlayerMessageListener();
   }
 
   isEnabled() {
@@ -48,6 +56,11 @@ class AdShieldEngine {
     return () => this.listeners.delete(cb);
   }
 
+  onPlayerState(cb) {
+    this.playerListeners.add(cb);
+    return () => this.playerListeners.delete(cb);
+  }
+
   notifyListeners() {
     for (const cb of this.listeners) {
       try { cb(this.enabled, this.blockedPopupsCount); } catch (e) {}
@@ -59,12 +72,50 @@ class AdShieldEngine {
   }
 
   /**
-   * AdGuard / uBlock `nowoif` (no-window-open-if) & `window.open-defuser`
-   * Intercepts `window.open`. If AdShield is enabled and it's not a user-initiated
-   * trusted action, it defuses the popup and returns a valid sham window object.
-   *
-   * Crucial: Returning a sham window prevents video players from displaying
-   * "Stream can't be played because of sandbox" when they check `if (window.open('...'))`.
+   * Send control command directly to player iframe via postMessage.
+   * This bypasses the pirate ad-trap overlay inside the iframe.
+   */
+  sendPlayerCommand(type, data = {}) {
+    const iframe = document.getElementById('main-stream-iframe');
+    if (iframe && iframe.contentWindow) {
+      try {
+        iframe.contentWindow.postMessage(
+          Object.assign({ channel: 'zokoanime', type }, data),
+          '*'
+        );
+      } catch (err) {
+        console.warn('[AdShield] Error sending command to player:', err);
+      }
+    }
+  }
+
+  /**
+   * Listen to state events emitted by the player core
+   */
+  initPlayerMessageListener() {
+    window.addEventListener('message', (e) => {
+      const d = e.data;
+      if (!d || typeof d !== 'object' || d.channel !== 'zokoanime') return;
+
+      if (d.type === 'state') {
+        if (typeof d.paused === 'boolean') {
+          this.playerState.isPaused = d.paused;
+        }
+        if (typeof d.time === 'number') {
+          this.playerState.currentTime = d.time;
+        }
+        if (typeof d.duration === 'number') {
+          this.playerState.duration = d.duration;
+        }
+        for (const cb of this.playerListeners) {
+          try { cb(this.playerState); } catch (err) {}
+        }
+      }
+    });
+  }
+
+  /**
+   * Defuse window.open calls and return sham WindowProxy
    */
   patchWindowOpen() {
     const self = this;
@@ -113,8 +164,7 @@ class AdShieldEngine {
   }
 
   /**
-   * Intercepts synthetic link clicks that pirate ad networks create dynamically
-   * (e.g. `<a href="https://ad.com" target="_blank"></a>.click()`)
+   * Intercept synthetic link clicks from ad networks
    */
   patchAnchorClicks() {
     const self = this;
@@ -125,7 +175,6 @@ class AdShieldEngine {
         const href = (this.href || '').toLowerCase();
         const target = (this.target || '').toLowerCase();
 
-        // If it targets a new window or is cross-origin ad link while video is loaded
         if (target === '_blank' && !href.startsWith(window.location.origin)) {
           self.blockedPopupsCount++;
           self.notifyListeners();
@@ -138,34 +187,35 @@ class AdShieldEngine {
   }
 
   /**
-   * Brave Shields style Pop-under & Focus Guard
-   * Prevents ad networks from creating a hidden popup and stealing window focus.
+   * Pop-under & Focus Trap Neutralizer
    */
   patchFocusBlurGuard() {
     const self = this;
     window.addEventListener('blur', () => {
       if (self.enabled && self.isStreamPlaying) {
-        // Popunder or new tab opened by an iframe click
+        // If an iframe click caused this blur (ad popup window opened)
+        const isIframeActive = document.activeElement && document.activeElement.tagName === 'IFRAME';
+        if (isIframeActive) {
+          self.blockedPopupsCount++;
+          self.notifyListeners();
+          console.warn('[AdShield] Detected iframe ad pop-up blur event — reclaiming focus.');
+        }
         setTimeout(() => {
-          if (document.hidden) {
-            // Tab was switched; keep state intact
-          } else {
+          if (!document.hidden) {
             window.focus();
           }
-        }, 10);
+        }, 30);
       }
     });
   }
 
   /**
-   * Top-Level Navigation Guard (Anti-Framebusting)
-   * Prevents iframes from navigating `top.location` to rogue landing pages.
+   * Anti-Framebusting / Top navigation hijack protection
    */
   patchTopNavigationGuard() {
     const self = this;
     window.addEventListener('beforeunload', (e) => {
       if (self.enabled && self.isStreamPlaying) {
-        // If a navigation happens without user clicking internal links
         const activeTag = document.activeElement ? document.activeElement.tagName : '';
         if (activeTag === 'IFRAME') {
           console.warn('[AdShield] Prevented iframe frame-busting top navigation attempt.');
@@ -175,35 +225,6 @@ class AdShieldEngine {
         }
       }
     });
-  }
-
-  /**
-   * Reverse-Engineered HTML5 Iframe Sandbox Matrix
-   *
-   * Why does this allow video streaming without triggering the sandbox error?
-   * 1. `allow-scripts`: Required for player JS (HLS.js / JWPlayer).
-   * 2. `allow-same-origin`: Required to access cookies, storage, and video segments.
-   * 3. `allow-forms`: Required for token auth submissions.
-   * 4. `allow-presentation`: Required for Fullscreen & Picture-in-Picture.
-   * 5. `allow-popups`: Required so `window.open` does NOT throw DOMException 18
-   *    (which triggers the "Stream can't be played because of sandbox" error).
-   * 
-   * CRITICAL SECURITY RESTRICTIONS KEPT ACTIVE:
-   * - `allow-top-navigation` is OMITTED (iframe cannot redirect this site to ads).
-   * - `allow-top-navigation-by-user-activation` is OMITTED (clicks cannot redirect top).
-   * - `allow-popups-to-escape-sandbox` is OMITTED (any popup inherits sandbox confinement).
-  /**
-   * Embed providers (Zoko / MegaCloud) explicitly check if their iframe is sandboxed
-   * and refuse to stream if the 'sandbox' attribute is detected.
-   * Therefore, we omit the sandbox attribute completely so video streaming works 100%
-   * uninterrupted without any EMBED BLOCKED errors.
-   */
-  getIframeSandbox() {
-    return null;
-  }
-
-  getIframeAttributes() {
-    return 'referrerpolicy="no-referrer" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen scrolling="no"';
   }
 }
 
