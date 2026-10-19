@@ -477,7 +477,11 @@ def main():
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     conn.close()
     sync_db_copies()
-    log(f"FINISHED! Successfully added {added_count} new/airing anime to the catalog.")
+    log(f"Backlog complete! Successfully added {added_count} new/airing anime to the catalog.")
+    log("Now transitioning to continuous auto-updater daemon mode...")
+    
+    import daemon_airing_sync
+    daemon_airing_sync.run_daemon(poll_interval_sec=300)
 
 if __name__ == "__main__":
     main()
