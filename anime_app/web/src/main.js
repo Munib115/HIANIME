@@ -260,6 +260,7 @@ function initHeroSpotlight(spotlightList) {
     }
     return `
       <div class="hero-slide ${idx === 0 ? 'active' : ''}" data-idx="${idx}">
+        <div class="hero-slide-ambient" style="background-image: url('${banner}')" aria-hidden="true"></div>
         <img class="hero-slide-img" src="${banner}" alt="${item.title}" loading="${idx === 0 ? 'eager' : 'lazy'}" />
       </div>
     `;

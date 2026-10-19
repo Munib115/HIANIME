@@ -25,10 +25,10 @@ CANDIDATES = [
 def find_db():
     candidates = [
         os.environ.get("ANIME_DB"),
-        os.path.join(CURRENT_DIR, "hianime.db"),
         os.path.join(PARENT_DIR, "hianime.db"),
-        os.path.join(PARENT_DIR, "api", "hianime.db"),
+        os.path.join(CURRENT_DIR, "hianime.db"),
         os.path.join(os.getcwd(), "hianime.db"),
+        os.path.join(PARENT_DIR, "api", "hianime.db"),
         os.path.join(os.getcwd(), "api", "hianime.db"),
         os.path.join(os.getcwd(), "anime_app", "web", "api", "hianime.db"),
         os.path.join(os.getcwd(), "anime_app", "web", "hianime.db"),
@@ -150,14 +150,24 @@ def home():
     spotlight = rows(f"""
         SELECT {CARD_COLS}, banner_image, synopsis, genres
         FROM anime
-        WHERE banner_image IS NOT NULL AND banner_image != ''
+        WHERE banner_image IS NOT NULL 
+          AND banner_image != ''
+          AND (title NOT LIKE '%Special%' AND title NOT LIKE '%OVA%' AND title NOT LIKE '%Movie 1%')
         ORDER BY anilist_popularity DESC NULLS LAST
         LIMIT 8
     """)
     rails = {
         "trending": rows(f"SELECT {CARD_COLS} FROM anime ORDER BY anilist_popularity DESC NULLS LAST LIMIT 20"),
         "top_rated": rows(f"SELECT {CARD_COLS} FROM anime WHERE anilist_score IS NOT NULL ORDER BY anilist_score DESC LIMIT 20"),
-        "airing": rows(f"SELECT {CARD_COLS} FROM anime WHERE status LIKE '%Airing%' OR anilist_status='RELEASING' ORDER BY anilist_popularity DESC NULLS LAST LIMIT 20"),
+        "airing": rows(f"""
+            SELECT {CARD_COLS} 
+            FROM anime 
+            WHERE (status LIKE '%Currently Airing%' OR anilist_status='RELEASING' OR category='airing')
+              AND status NOT LIKE '%Finished%' 
+              AND (anilist_status IS NULL OR anilist_status != 'FINISHED')
+            ORDER BY anilist_popularity DESC NULLS LAST 
+            LIMIT 24
+        """),
         "movies": rows(f"SELECT {CARD_COLS} FROM anime WHERE type LIKE '%Movie%' ORDER BY anilist_popularity DESC NULLS LAST LIMIT 20"),
         "recent": rows(f"SELECT {CARD_COLS} FROM anime ORDER BY scraped_at DESC LIMIT 20"),
     }
