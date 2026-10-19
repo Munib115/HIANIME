@@ -337,8 +337,8 @@ def clean_stream(url: str = Query(...)):
         # 1. Strip the ad network container (<div id="adbar">...</div>)
         html = re.sub(r'<div id=["\']adbar["\'].*?</div>', '', html, flags=re.DOTALL | re.IGNORECASE)
 
-        # 2. Strip any known popup/ad script tags
-        html = re.sub(r'<script[^>]*src=["\'][^"\']*(butchestusker|popads|propeller|adsterra|monetag|onclick|syndication)[^"\']*["\'][^>]*></script>', '', html, flags=re.IGNORECASE)
+        # 2. Strip any ad script tags (butchestusker, popads, etc.)
+        html = re.sub(r'<script[^>]*src=["\'][^"\']*(butchestusker|popads|propeller|adsterra|monetag|onclick|syndication|click|banner)[^"\']*["\'][^>]*></script>', '', html, flags=re.IGNORECASE)
 
         # 3. Inject base href so relative assets resolve cleanly to host origin
         if "<head>" in html:
@@ -346,13 +346,29 @@ def clean_stream(url: str = Query(...)):
         elif "<html" in html:
             html = re.sub(r'(<html[^>]*>)', rf'\1<head><base href="{origin}/"></head>', html, flags=re.IGNORECASE)
 
-        # 4. Inject popup defuser script inside player DOM
+        # 4. Inject bulletproof popup defuser script inside player DOM
         cleaner_script = """
         <script>
-          window.open = function() {
-            console.warn("[AdShield-Core] Pop-up blocked cleanly.");
-            return { closed: false, close: function(){}, focus: function(){} };
-          };
+        (function() {
+          var dummy = { closed: false, close: function(){}, focus: function(){}, blur: function(){}, postMessage: function(){} };
+          try {
+            Object.defineProperty(window, 'open', {
+              value: function() { console.warn('[AdShield] Blocked in-player popup.'); return dummy; },
+              writable: false,
+              configurable: false
+            });
+          } catch(e) { window.open = function() { return dummy; }; }
+          try { if (window.top && window.top !== window) window.top.open = window.open; } catch(e){}
+          try { if (window.parent && window.parent !== window) window.parent.open = window.open; } catch(e){}
+          document.addEventListener('click', function(e) {
+            var a = e.target.closest ? e.target.closest('a') : null;
+            if (a && (a.target === '_blank' || !a.href.startsWith(location.origin))) {
+              e.preventDefault();
+              e.stopPropagation();
+              console.warn('[AdShield] Blocked popup anchor link.');
+            }
+          }, true);
+        })();
         </script>
         """
         if "</head>" in html:

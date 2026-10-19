@@ -1,5 +1,4 @@
 import './style.css';
-import { adShield } from './adshield.js';
 import { 
   createIcons, 
   Home, 
@@ -21,7 +20,10 @@ import {
   ChevronLeft,
   RotateCcw,
   Sparkles,
-  Film
+  Film,
+  Bell,
+  ExternalLink,
+  Download
 } from 'lucide';
 
 // ─── Global State & Storage ─────────────────────────────────────────
@@ -57,7 +59,7 @@ function refreshIcons() {
     icons: {
       Home, Compass, Search, Bookmark, Play, Star, ArrowLeft,
       Layers, Volume2, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
-      ChevronLeft, RotateCcw, Sparkles, Film
+      ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download
     }
   });
 }
@@ -82,12 +84,9 @@ function stopVideoPlayback() {
 
 // ─── View Routing ───────────────────────────────────────────────────
 function showView(viewId) {
-  // If moving away from player, kill video playback immediately and deactivate stream guard
+  // If moving away from player, kill video playback immediately
   if (viewId !== 'view-watch') {
     stopVideoPlayback();
-    adShield.setStreamActive(false);
-  } else {
-    adShield.setStreamActive(true);
   }
 
   document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('active'));
@@ -942,28 +941,6 @@ async function openWatchPlayer(episodeIndex) {
 
     <!-- Controls Panel -->
     <div class="player-controls-panel">
-      <!-- Professional AdShield Small Box Controller -->
-      <div class="adblock-box ${adShield.isEnabled() ? 'active' : ''}" id="adblock-box">
-        <div class="adblock-box-left">
-          <div class="adblock-badge-icon">
-            <i data-lucide="shield-check" class="shield-on-icon"></i>
-            <i data-lucide="shield-alert" class="shield-off-icon"></i>
-          </div>
-          <div class="adblock-box-text">
-            <div class="adblock-box-title-row">
-              <span class="adblock-box-title">AdShield Protection</span>
-              <span class="adblock-status-tag" id="adblock-status-tag">${adShield.isEnabled() ? 'ACTIVE' : 'OFF'}</span>
-            </div>
-            <div class="adblock-box-desc" id="adblock-status-desc">
-              ${adShield.isEnabled() ? 'Pop-up ads & redirects blocked' : 'Protection off • Tap switch to enable'}
-            </div>
-          </div>
-        </div>
-        <button class="adblock-switch-track ${adShield.isEnabled() ? 'active' : ''}" id="btn-toggle-adshield" role="switch" aria-checked="${adShield.isEnabled()}" aria-label="Toggle AdShield">
-          <span class="adblock-switch-thumb"></span>
-        </button>
-      </div>
-
       <!-- Audio Selection -->
       <div class="server-section-label">Audio Language</div>
       <div class="audio-toggle-bar">
@@ -1045,41 +1022,6 @@ async function openWatchPlayer(episodeIndex) {
 
   document.getElementById('player-next-ep-btn')?.addEventListener('click', () => {
     if (state.activeEpisodeIndex < state.activeEpisodes.length - 1) openWatchPlayer(state.activeEpisodeIndex + 1);
-  });
-
-  // Professional AdShield Small Box Toggle
-  const adBlockBox = document.getElementById('adblock-box');
-  const adBlockBtn = document.getElementById('btn-toggle-adshield');
-  const adBlockTag = document.getElementById('adblock-status-tag');
-  const adBlockDesc = document.getElementById('adblock-status-desc');
-
-  function syncAdShieldUI(isActive) {
-    if (adBlockBox) adBlockBox.classList.toggle('active', isActive);
-    if (adBlockBtn) {
-      adBlockBtn.classList.toggle('active', isActive);
-      adBlockBtn.setAttribute('aria-checked', String(isActive));
-    }
-    if (adBlockTag) adBlockTag.textContent = isActive ? 'ACTIVE' : 'OFF';
-    if (adBlockDesc) {
-      adBlockDesc.textContent = isActive
-        ? 'Pop-up ads & redirects blocked'
-        : 'Protection off • Tap switch to enable';
-    }
-    const overlay = document.getElementById('stream-shield-overlay');
-    if (overlay) {
-      overlay.classList.toggle('hidden', !isActive);
-    }
-  }
-
-  adBlockBtn?.addEventListener('click', () => {
-    const newState = adShield.toggle();
-    syncAdShieldUI(newState);
-    loadStreamIntoPlayer();
-    showToast(newState ? 'AdShield Active: Popups Defused' : 'AdShield Disabled');
-  });
-
-  adShield.onStateChange((isEnabled) => {
-    syncAdShieldUI(isEnabled);
   });
 
   document.getElementById('player-reload-btn')?.addEventListener('click', () => {
@@ -1182,56 +1124,19 @@ function loadStreamIntoPlayer() {
     return;
   }
 
-  const isShieldOn = adShield.isEnabled();
-  const streamSrc = isShieldOn 
-    ? `${API_BASE}/clean-stream?url=${encodeURIComponent(server.embed_url)}`
-    : server.embed_url;
-
   frameContainer.innerHTML = `
     <iframe 
       id="main-stream-iframe"
       class="video-iframe"
-      src="${streamSrc}" 
+      src="${server.embed_url}" 
       referrerpolicy="no-referrer"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
       allowfullscreen
       scrolling="no"
     ></iframe>
-    <div class="stream-shield-overlay ${isShieldOn ? '' : 'hidden'}" id="stream-shield-overlay">
-      <div class="shield-watermark-pill">
-        <i data-lucide="shield-check"></i> AdShield Active
-      </div>
-      <button class="shield-play-trigger" id="shield-play-trigger" aria-label="Play Video without Ads">
-        <i data-lucide="play"></i>
-      </button>
-      <div class="shield-tap-hint">Tap to Play • Zero Popup Ads</div>
-    </div>
   `;
 
   refreshIcons();
-
-  const overlay = document.getElementById('stream-shield-overlay');
-  const trigger = document.getElementById('shield-play-trigger');
-
-  function startProtectedPlayback(e) {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    // Command player to start playing via postMessage - bypasses iframe ad network click-traps!
-    adShield.sendPlayerCommand('autoplay', { on: true });
-    adShield.sendPlayerCommand('play');
-
-    if (overlay) {
-      overlay.classList.add('hidden');
-    }
-    showToast('🛡️ Playing Stream — Popup Ads Defused');
-  }
-
-  trigger?.addEventListener('click', startProtectedPlayback);
-  overlay?.addEventListener('click', (e) => {
-    startProtectedPlayback(e);
-  });
 }
 
 // ─── Watchlist & History View ───────────────────────────────────────
@@ -1362,8 +1267,71 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Init App & Reverse-Engineered AdShield
-  adShield.init();
+  // Centered Inbox Message / Announcement Modal (Brave Browser)
+  const inboxModal = document.getElementById('brave-inbox-modal');
+  const btnCloseInbox = document.getElementById('btn-close-inbox-modal');
+  const btnContinue = document.getElementById('btn-continue-site');
+  const btnGetBrave = document.getElementById('btn-get-brave');
+  const cbDontShow = document.getElementById('brave-dont-show-again');
+  const headerInboxBtn = document.getElementById('header-inbox-btn');
+  const inboxBadge = document.getElementById('inbox-badge');
+
+  function openBraveModal() {
+    if (!inboxModal) return;
+    inboxModal.classList.add('active');
+    inboxModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    refreshIcons();
+  }
+
+  function closeBraveModal() {
+    if (!inboxModal) return;
+    inboxModal.classList.remove('active');
+    inboxModal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    if (cbDontShow?.checked) {
+      localStorage.setItem('kuro_brave_notice_dismissed', 'true');
+      if (inboxBadge) inboxBadge.style.display = 'none';
+    }
+  }
+
+  headerInboxBtn?.addEventListener('click', () => {
+    openBraveModal();
+  });
+
+  btnCloseInbox?.addEventListener('click', closeBraveModal);
+  btnContinue?.addEventListener('click', closeBraveModal);
+  btnGetBrave?.addEventListener('click', () => {
+    // When user clicks download, close modal after short delay
+    setTimeout(closeBraveModal, 600);
+  });
+
+  inboxModal?.addEventListener('click', (e) => {
+    if (e.target === inboxModal) {
+      closeBraveModal();
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && inboxModal?.classList.contains('active')) {
+      closeBraveModal();
+    }
+  });
+
+  // Check dismissal state
+  const isDismissed = localStorage.getItem('kuro_brave_notice_dismissed') === 'true';
+  if (inboxBadge) {
+    inboxBadge.style.display = isDismissed ? 'none' : 'block';
+  }
+
+  // When user opens website, show inbox message in center
+  if (!isDismissed) {
+    setTimeout(() => {
+      openBraveModal();
+    }, 450);
+  }
+
+  // Init App
   updateWatchlistBadge();
   initHome();
   refreshIcons();

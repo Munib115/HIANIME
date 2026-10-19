@@ -11,7 +11,7 @@ HiAnime Turbo Scraper v3 — Multi-Worker Parallel Engine (~2 Hours)
 import sys, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-import requests, base64, json, re, time, sqlite3, os
+import requests, base64, json, re, time, sqlite3, os, shutil
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -23,6 +23,18 @@ BASE_URL      = "https://hianime.at"
 API_BASE      = "https://hianime.at/api/theme/"
 OUTPUT_DIR    = r"C:\Users\Munib Raza\OneDrive\Desktop\hianime_output"
 URL_LIST      = os.path.join(OUTPUT_DIR, "anime_url_list.json")
+
+def sync_db_copies():
+    for dest in [
+        os.path.join(OUTPUT_DIR, "api", "hianime.db"),
+        os.path.join(OUTPUT_DIR, "anime_app", "web", "api", "hianime.db"),
+        os.path.join(OUTPUT_DIR, "anime_app", "web", "hianime.db"),
+    ]:
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(DB_PATH, dest)
+        except Exception:
+            pass
 DB_PATH       = os.path.join(OUTPUT_DIR, "hianime.db")
 LOG_FILE      = os.path.join(OUTPUT_DIR, "turbo_scrape.log")
 
@@ -569,6 +581,13 @@ def main():
             elapsed       = time.time() - start_time
             anime_sec     = time.time() - anime_start
 
+            if scraped_anime % 20 == 0:
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+                    sync_db_copies()
+                except Exception:
+                    pass
+
             # Calculate live speed & ETA
             eps_per_sec   = scraped_eps / max(elapsed, 1)
             rem_anime     = total - i
@@ -584,7 +603,12 @@ def main():
 
     log("=" * 65)
     log("TURBO SCRAPE FINISHED!")
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+    except Exception:
+        pass
     conn.close()
+    sync_db_copies()
     if log_fh:
         log_fh.close()
 

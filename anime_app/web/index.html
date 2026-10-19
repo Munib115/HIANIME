@@ -11,9 +11,10 @@
     <title>KuroAnime — Stream Anime in Sub & Dub</title>
     <meta name="description" content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean interface." />
     
-    <!-- Preconnect & Load Satoshi Modern Sans-Serif Font via Fontshare Global CDN -->
-    <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
-    <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=satoshi@900,800,700,600,500,400&display=swap" />
+    <!-- Standard High-Performance Google Fonts: Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@600;700;800;900&display=swap" rel="stylesheet" />
 
     <!-- Clean Handcrafted SVG Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23FF2A4D'/><stop offset='100%' stop-color='%23FF5A3C'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='%230E1017'/><polygon points='36,25 76,50 36,75' fill='url(%23g)'/><polygon points='36,25 56,50 36,50' fill='%23FFFFFF' fill-opacity='0.25'/></svg>" />
@@ -50,6 +51,10 @@
           </nav>
 
           <div class="header-actions">
+            <button class="header-icon-btn" id="header-inbox-btn" aria-label="Announcements & Tips" title="Inbox: Ad-Free Streaming Tip">
+              <i data-lucide="bell"></i>
+              <span class="badge-dot badge-dot-alert" id="inbox-badge"></span>
+            </button>
             <button class="header-icon-btn" id="header-search-btn" aria-label="Search anime">
               <i data-lucide="search"></i>
             </button>
@@ -220,6 +225,96 @@
           <span>My List</span>
         </button>
       </nav>
+
+      <!-- Centered Inbox Message / Announcement Modal (Brave Recommendation) -->
+      <div class="inbox-modal-backdrop" id="brave-inbox-modal" aria-hidden="true">
+        <div class="inbox-modal-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
+          <!-- Top Colored Accent Bar -->
+          <div class="inbox-modal-glow"></div>
+          
+          <!-- Close Button -->
+          <button class="inbox-modal-close" id="btn-close-inbox-modal" aria-label="Close message">
+            <i data-lucide="x"></i>
+          </button>
+
+          <!-- Header Badge Row -->
+          <div class="inbox-badge-row">
+            <span class="inbox-pill-tag">
+              <i data-lucide="shield"></i> PRO STREAMING TIP
+            </span>
+            <span class="inbox-date-tag">Announcement • Important</span>
+          </div>
+
+          <!-- Anime GIF Banner -->
+          <div class="inbox-gif-container">
+            <img 
+              src="/anime-brave.gif" 
+              alt="Anime Brave Browser Recommendation" 
+              class="inbox-anime-gif" 
+              loading="eager"
+            />
+            <div class="inbox-gif-overlay">
+              <span class="inbox-gif-badge">✨ 100% Ad-Free Anime</span>
+            </div>
+          </div>
+
+          <!-- Modal Body -->
+          <div class="inbox-modal-body">
+            <h2 class="inbox-modal-title" id="inbox-modal-title">
+              Stream Without Ads Using <span class="text-brave-gradient">Brave Browser</span>
+            </h2>
+            <p class="inbox-modal-desc">
+              Tired of annoying pop-up ads, spam tabs, and redirects? For the best ad-free anime streaming experience, we strongly recommend using <strong>Brave Browser</strong> with its built-in Shields.
+            </p>
+
+            <!-- Feature Highlights -->
+            <div class="inbox-features-list">
+              <div class="inbox-feature-item">
+                <div class="inbox-feature-icon">
+                  <i data-lucide="shield-check"></i>
+                </div>
+                <div class="inbox-feature-text">
+                  <strong>Blocks Video Ads & Popups</strong>
+                  <span>Shields defuses unwanted redirect taps automatically</span>
+                </div>
+              </div>
+              <div class="inbox-feature-item">
+                <div class="inbox-feature-icon">
+                  <i data-lucide="sparkles"></i>
+                </div>
+                <div class="inbox-feature-text">
+                  <strong>Smooth HD Playback</strong>
+                  <span>Fast buffering with zero intrusive tracker scripts</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="inbox-modal-actions">
+              <a 
+                href="https://brave.com/download/" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                class="btn-brave-primary"
+                id="btn-get-brave"
+              >
+                <i data-lucide="download"></i>
+                <span>Get Brave Browser</span>
+                <i data-lucide="external-link"></i>
+              </a>
+              <button class="btn-brave-secondary" id="btn-continue-site">
+                Continue to KuroAnime
+              </button>
+            </div>
+
+            <!-- Don't Show Again Option -->
+            <label class="inbox-dont-show-row" for="brave-dont-show-again">
+              <input type="checkbox" id="brave-dont-show-again" />
+              <span>Don't show this announcement again</span>
+            </label>
+          </div>
+        </div>
+      </div>
 
       <!-- Global Toast Notification -->
       <div class="toast-notification" id="toast-notification"></div>
