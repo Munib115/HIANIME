@@ -4,6 +4,7 @@ Provides JSON API over SQLite hianime.db
 """
 import os
 import sqlite3
+import re
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, APIRouter
@@ -166,10 +167,10 @@ def home():
               AND status NOT LIKE '%Finished%' 
               AND (anilist_status IS NULL OR anilist_status != 'FINISHED')
             ORDER BY anilist_popularity DESC NULLS LAST 
-            LIMIT 24
+            LIMIT 40
         """),
         "movies": rows(f"SELECT {CARD_COLS} FROM anime WHERE type LIKE '%Movie%' ORDER BY anilist_popularity DESC NULLS LAST LIMIT 20"),
-        "recent": rows(f"SELECT {CARD_COLS} FROM anime ORDER BY scraped_at DESC LIMIT 20"),
+        "recent": rows(f"SELECT {CARD_COLS} FROM anime ORDER BY scraped_at DESC LIMIT 30"),
     }
     for k in rails:
         with_flags(rails[k])
@@ -228,14 +229,40 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
 
 @router.get("/search")
 def search(q: str = Query(..., min_length=1), limit: int = 30):
-    like = f"%{q.strip()}%"
+    query_str = q.strip()
+    like = f"%{query_str}%"
+    
+    # 1. Direct or exact substring match
     res = rows(f"""
         SELECT {CARD_COLS} FROM anime
         WHERE title LIKE ? OR title_english LIKE ? OR title_romaji LIKE ? OR synonyms LIKE ?
         ORDER BY anilist_popularity DESC NULLS LAST
         LIMIT ?
     """, (like, like, like, like, min(limit, 60)))
-    return {"results": with_flags(res)}
+    
+    # 2. Tokenized multi-word search (handles missing colons, hyphens, and multi-word queries)
+    clean_words = [w for w in re.sub(r'[:\-_,]+', ' ', query_str).split() if len(w) > 1]
+    if len(res) < limit and len(clean_words) > 1:
+        seen = {r["anime_id"] for r in res}
+        conds, params = [], []
+        for w in clean_words:
+            w_like = f"%{w}%"
+            conds.append("(title LIKE ? OR title_english LIKE ? OR title_romaji LIKE ? OR synonyms LIKE ?)")
+            params.extend([w_like, w_like, w_like, w_like])
+        
+        multi_sql = f"""
+            SELECT {CARD_COLS} FROM anime
+            WHERE {" AND ".join(conds)}
+            ORDER BY anilist_popularity DESC NULLS LAST
+            LIMIT ?
+        """
+        more = rows(multi_sql, params + [min(limit, 60)])
+        for r in more:
+            if r["anime_id"] not in seen:
+                res.append(r)
+                seen.add(r["anime_id"])
+                
+    return {"results": with_flags(res[:min(limit, 60)])}
 
 
 @router.get("/browse")
