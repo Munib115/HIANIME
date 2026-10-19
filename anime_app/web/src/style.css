@@ -2016,6 +2016,143 @@ button, input, select, textarea, optgroup {
   margin-bottom: 8px;
 }
 
+/* ─── AdShield Protection Bar (Brave & AdGuard Engineered) ────────── */
+.adshield-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.adshield-bar.disabled {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
+.adshield-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.adshield-icon-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.adshield-bar.disabled .adshield-icon-badge {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.adshield-icon-badge svg {
+  width: 18px;
+  height: 18px;
+}
+
+.adshield-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.adshield-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adshield-title {
+  font-family: var(--font-family);
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.adshield-tag {
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  background: #10b981;
+  color: #000;
+  letter-spacing: 0.04em;
+}
+
+.adshield-bar.disabled .adshield-tag {
+  background: #ef4444;
+  color: #fff;
+}
+
+.adshield-subtitle {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adshield-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #10b981;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-family);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+}
+
+.adshield-toggle-btn:hover {
+  background: rgba(16, 185, 129, 0.28);
+  border-color: #10b981;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.35);
+}
+
+.adshield-bar.disabled .adshield-toggle-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.adshield-toggle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  transition: all 0.2s ease;
+}
+
+.adshield-bar.disabled .adshield-toggle-dot {
+  background: #64748b;
+  box-shadow: none;
+}
+
 /* Audio Segmented Switcher */
 .audio-toggle-bar {
   display: flex;

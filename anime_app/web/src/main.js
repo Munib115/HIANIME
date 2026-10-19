@@ -1,4 +1,5 @@
 import './style.css';
+import { adShield } from './adshield.js';
 import { 
   createIcons, 
   Home, 
@@ -11,6 +12,8 @@ import {
   Layers, 
   Volume2, 
   Shield, 
+  ShieldCheck,
+  ShieldAlert,
   Clock, 
   Check, 
   X, 
@@ -53,7 +56,7 @@ function refreshIcons() {
   createIcons({
     icons: {
       Home, Compass, Search, Bookmark, Play, Star, ArrowLeft,
-      Layers, Volume2, Shield, Clock, Check, X, ChevronRight,
+      Layers, Volume2, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
       ChevronLeft, RotateCcw, Sparkles, Film
     }
   });
@@ -79,9 +82,12 @@ function stopVideoPlayback() {
 
 // ─── View Routing ───────────────────────────────────────────────────
 function showView(viewId) {
-  // If moving away from player, kill video playback immediately
+  // If moving away from player, kill video playback immediately and deactivate stream guard
   if (viewId !== 'view-watch') {
     stopVideoPlayback();
+    adShield.setStreamActive(false);
+  } else {
+    adShield.setStreamActive(true);
   }
 
   document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('active'));
@@ -934,6 +940,28 @@ async function openWatchPlayer(episodeIndex) {
 
     <!-- Controls Panel -->
     <div class="player-controls-panel">
+      <!-- AdShield Protection Bar (Brave & AdGuard Engineered) -->
+      <div class="adshield-bar ${adShield.isEnabled() ? '' : 'disabled'}" id="player-adshield-bar">
+        <div class="adshield-left">
+          <div class="adshield-icon-badge">
+            <i data-lucide="${adShield.isEnabled() ? 'shield-check' : 'shield-alert'}"></i>
+          </div>
+          <div class="adshield-info">
+            <div class="adshield-title-row">
+              <span class="adshield-title">AdShield Protection</span>
+              <span class="adshield-tag" id="adshield-status-tag">${adShield.isEnabled() ? 'ACTIVE' : 'OFF'}</span>
+            </div>
+            <span class="adshield-subtitle" id="adshield-subtitle">
+              ${adShield.isEnabled() ? 'Popups & Redirects Defused • Video Stream Unlocked' : 'AdBlock disabled • Popups may open'}
+            </span>
+          </div>
+        </div>
+        <button class="adshield-toggle-btn" id="btn-toggle-adshield" aria-label="Toggle AdShield">
+          <span class="adshield-toggle-dot"></span>
+          <span id="adshield-toggle-label">${adShield.isEnabled() ? 'Blocker ON' : 'Blocker OFF'}</span>
+        </button>
+      </div>
+
       <!-- Audio Selection -->
       <div class="server-section-label">Audio Language</div>
       <div class="audio-toggle-bar">
@@ -1015,6 +1043,45 @@ async function openWatchPlayer(episodeIndex) {
 
   document.getElementById('player-next-ep-btn')?.addEventListener('click', () => {
     if (state.activeEpisodeIndex < state.activeEpisodes.length - 1) openWatchPlayer(state.activeEpisodeIndex + 1);
+  });
+
+  // AdShield Toggle & Live Counter Listener
+  const adShieldBtn = document.getElementById('btn-toggle-adshield');
+  const adShieldBar = document.getElementById('player-adshield-bar');
+  const adShieldTag = document.getElementById('adshield-status-tag');
+  const adShieldSub = document.getElementById('adshield-subtitle');
+  const adShieldLabel = document.getElementById('adshield-toggle-label');
+
+  function updateAdShieldUI() {
+    const isEn = adShield.isEnabled();
+    if (adShieldBar) adShieldBar.classList.toggle('disabled', !isEn);
+    if (adShieldTag) {
+      adShieldTag.textContent = isEn ? 'ACTIVE' : 'OFF';
+      adShieldTag.style.background = isEn ? '#10b981' : '#ef4444';
+      adShieldTag.style.color = isEn ? '#000' : '#fff';
+    }
+    if (adShieldSub) {
+      adShieldSub.textContent = isEn 
+        ? (adShield.blockedPopupsCount > 0 
+            ? `${adShield.blockedPopupsCount} Popups Defused • Stream Protected` 
+            : 'Popups & Redirects Defused • Video Stream Unlocked')
+        : 'AdBlock disabled • Popups and redirects allowed';
+    }
+    if (adShieldLabel) {
+      adShieldLabel.textContent = isEn ? 'Blocker ON' : 'Blocker OFF';
+    }
+    refreshIcons();
+  }
+
+  adShieldBtn?.addEventListener('click', () => {
+    const newState = adShield.toggle();
+    updateAdShieldUI();
+    showToast(newState ? 'AdShield Active: Popups & Redirects Blocked' : 'AdShield Disabled: Permissive Mode');
+    loadStreamIntoPlayer();
+  });
+
+  adShield.onStateChange(() => {
+    updateAdShieldUI();
   });
 
   document.getElementById('player-reload-btn')?.addEventListener('click', () => {
@@ -1117,10 +1184,14 @@ function loadStreamIntoPlayer() {
     return;
   }
 
+  const sandboxAttr = adShield.getIframeSandbox();
+  const sandboxSnippet = sandboxAttr ? `sandbox="${sandboxAttr}"` : '';
+
   frameContainer.innerHTML = `
     <iframe 
       class="video-iframe"
       src="${server.embed_url}" 
+      ${sandboxSnippet}
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
       allowfullscreen
       scrolling="no"
@@ -1256,7 +1327,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Init App
+  // Init App & Reverse-Engineered AdShield
+  adShield.init();
   updateWatchlistBadge();
   initHome();
   refreshIcons();
