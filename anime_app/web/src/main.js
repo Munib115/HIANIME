@@ -1074,6 +1074,7 @@ async function openWatchPlayer(episodeIndex) {
   adBlockBtn?.addEventListener('click', () => {
     const newState = adShield.toggle();
     syncAdShieldUI(newState);
+    loadStreamIntoPlayer();
     showToast(newState ? 'AdShield Active: Popups Defused' : 'AdShield Disabled');
   });
 
@@ -1182,12 +1183,15 @@ function loadStreamIntoPlayer() {
   }
 
   const isShieldOn = adShield.isEnabled();
+  const streamSrc = isShieldOn 
+    ? `${API_BASE}/clean-stream?url=${encodeURIComponent(server.embed_url)}`
+    : server.embed_url;
 
   frameContainer.innerHTML = `
     <iframe 
       id="main-stream-iframe"
       class="video-iframe"
-      src="${server.embed_url}" 
+      src="${streamSrc}" 
       referrerpolicy="no-referrer"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
       allowfullscreen

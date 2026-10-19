@@ -8,6 +8,7 @@ import re
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, APIRouter
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # ─── Locate Database File ────────────────────────────────────────────
@@ -311,6 +312,57 @@ def genres():
             if g:
                 counts[g] = counts.get(g, 0) + 1
     return {"genres": sorted(counts, key=lambda g: -counts[g])}
+
+
+@router.get("/clean-stream", response_class=HTMLResponse)
+def clean_stream(url: str = Query(...)):
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid stream URL")
+    
+    try:
+        import urllib.parse
+        import urllib.request
+        from fastapi.responses import HTMLResponse
+
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": url,
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        parsed = urllib.parse.urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+
+        # 1. Strip the ad network container (<div id="adbar">...</div>)
+        html = re.sub(r'<div id=["\']adbar["\'].*?</div>', '', html, flags=re.DOTALL | re.IGNORECASE)
+
+        # 2. Strip any known popup/ad script tags
+        html = re.sub(r'<script[^>]*src=["\'][^"\']*(butchestusker|popads|propeller|adsterra|monetag|onclick|syndication)[^"\']*["\'][^>]*></script>', '', html, flags=re.IGNORECASE)
+
+        # 3. Inject base href so relative assets resolve cleanly to host origin
+        if "<head>" in html:
+            html = html.replace("<head>", f'<head><base href="{origin}/">')
+        elif "<html" in html:
+            html = re.sub(r'(<html[^>]*>)', rf'\1<head><base href="{origin}/"></head>', html, flags=re.IGNORECASE)
+
+        # 4. Inject popup defuser script inside player DOM
+        cleaner_script = """
+        <script>
+          window.open = function() {
+            console.warn("[AdShield-Core] Pop-up blocked cleanly.");
+            return { closed: false, close: function(){}, focus: function(){} };
+          };
+        </script>
+        """
+        if "</head>" in html:
+            html = html.replace("</head>", cleaner_script + "</head>")
+        else:
+            html = cleaner_script + html
+
+        return HTMLResponse(content=html, media_type="text/html")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch clean stream: {str(e)}")
 
 
 # Mount both /api and root routes so that rewrites work seamlessly
