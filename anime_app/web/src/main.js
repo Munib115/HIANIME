@@ -94,7 +94,9 @@ function showView(viewId) {
   const target = document.getElementById(viewId);
   if (target) {
     target.classList.add('active');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollLeft = 0;
+    document.body.scrollLeft = 0;
   }
 
   // Update tab active state (mobile & desktop)
@@ -925,9 +927,16 @@ async function openWatchPlayer(episodeIndex) {
         <div class="player-anime-title">${anime.title}</div>
         <div class="player-ep-title">Episode ${ep.episode_number}${ep.title ? `: ${ep.title}` : ''}</div>
       </div>
-      <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="Bookmark anime">
-        <i data-lucide="${isWatchlisted(anime.anime_id) ? 'check' : 'bookmark'}"></i>
-      </button>
+      <div class="player-header-actions">
+        <button class="player-adblock-pill ${adShield.isEnabled() ? 'active' : ''}" id="btn-toggle-adshield" aria-label="Toggle AdBlock" title="AdBlock Protection">
+          <span class="adblock-dot ${adShield.isEnabled() ? 'active' : ''}"></span>
+          <i data-lucide="shield"></i>
+          <span>AdBlock <strong id="adblock-pill-state">${adShield.isEnabled() ? 'ON' : 'OFF'}</strong></span>
+        </button>
+        <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="Bookmark anime">
+          <i data-lucide="${isWatchlisted(anime.anime_id) ? 'check' : 'bookmark'}"></i>
+        </button>
+      </div>
     </div>
 
     <!-- Video Container -->
@@ -940,28 +949,6 @@ async function openWatchPlayer(episodeIndex) {
 
     <!-- Controls Panel -->
     <div class="player-controls-panel">
-      <!-- AdShield Protection Bar (Brave & AdGuard Engineered) -->
-      <div class="adshield-bar ${adShield.isEnabled() ? '' : 'disabled'}" id="player-adshield-bar">
-        <div class="adshield-left">
-          <div class="adshield-icon-badge">
-            <i data-lucide="${adShield.isEnabled() ? 'shield-check' : 'shield-alert'}"></i>
-          </div>
-          <div class="adshield-info">
-            <div class="adshield-title-row">
-              <span class="adshield-title">AdShield Protection</span>
-              <span class="adshield-tag" id="adshield-status-tag">${adShield.isEnabled() ? 'ACTIVE' : 'OFF'}</span>
-            </div>
-            <span class="adshield-subtitle" id="adshield-subtitle">
-              ${adShield.isEnabled() ? 'Popups & Redirects Defused • Video Stream Unlocked' : 'AdBlock disabled • Popups may open'}
-            </span>
-          </div>
-        </div>
-        <button class="adshield-toggle-btn" id="btn-toggle-adshield" aria-label="Toggle AdShield">
-          <span class="adshield-toggle-dot"></span>
-          <span id="adshield-toggle-label">${adShield.isEnabled() ? 'Blocker ON' : 'Blocker OFF'}</span>
-        </button>
-      </div>
-
       <!-- Audio Selection -->
       <div class="server-section-label">Audio Language</div>
       <div class="audio-toggle-bar">
@@ -1045,43 +1032,23 @@ async function openWatchPlayer(episodeIndex) {
     if (state.activeEpisodeIndex < state.activeEpisodes.length - 1) openWatchPlayer(state.activeEpisodeIndex + 1);
   });
 
-  // AdShield Toggle & Live Counter Listener
-  const adShieldBtn = document.getElementById('btn-toggle-adshield');
-  const adShieldBar = document.getElementById('player-adshield-bar');
-  const adShieldTag = document.getElementById('adshield-status-tag');
-  const adShieldSub = document.getElementById('adshield-subtitle');
-  const adShieldLabel = document.getElementById('adshield-toggle-label');
+  // Compact AdBlock Pill Toggle
+  const adBlockBtn = document.getElementById('btn-toggle-adshield');
+  const adBlockDot = adBlockBtn?.querySelector('.adblock-dot');
+  const adBlockState = document.getElementById('adblock-pill-state');
 
-  function updateAdShieldUI() {
-    const isEn = adShield.isEnabled();
-    if (adShieldBar) adShieldBar.classList.toggle('disabled', !isEn);
-    if (adShieldTag) {
-      adShieldTag.textContent = isEn ? 'ACTIVE' : 'OFF';
-      adShieldTag.style.background = isEn ? '#10b981' : '#ef4444';
-      adShieldTag.style.color = isEn ? '#000' : '#fff';
-    }
-    if (adShieldSub) {
-      adShieldSub.textContent = isEn 
-        ? (adShield.blockedPopupsCount > 0 
-            ? `${adShield.blockedPopupsCount} Popups Defused • Stream Protected` 
-            : 'Popups & Redirects Defused • Video Stream Unlocked')
-        : 'AdBlock disabled • Popups and redirects allowed';
-    }
-    if (adShieldLabel) {
-      adShieldLabel.textContent = isEn ? 'Blocker ON' : 'Blocker OFF';
-    }
-    refreshIcons();
-  }
-
-  adShieldBtn?.addEventListener('click', () => {
+  adBlockBtn?.addEventListener('click', () => {
     const newState = adShield.toggle();
-    updateAdShieldUI();
-    showToast(newState ? 'AdShield Active: Popups & Redirects Blocked' : 'AdShield Disabled: Permissive Mode');
-    loadStreamIntoPlayer();
+    adBlockBtn.classList.toggle('active', newState);
+    adBlockDot?.classList.toggle('active', newState);
+    if (adBlockState) adBlockState.textContent = newState ? 'ON' : 'OFF';
+    showToast(newState ? 'AdBlock Active: Popups Defused' : 'AdBlock Disabled');
   });
 
-  adShield.onStateChange(() => {
-    updateAdShieldUI();
+  adShield.onStateChange((isEnabled) => {
+    if (adBlockBtn) adBlockBtn.classList.toggle('active', isEnabled);
+    if (adBlockDot) adBlockDot.classList.toggle('active', isEnabled);
+    if (adBlockState) adBlockState.textContent = isEnabled ? 'ON' : 'OFF';
   });
 
   document.getElementById('player-reload-btn')?.addEventListener('click', () => {
@@ -1184,14 +1151,11 @@ function loadStreamIntoPlayer() {
     return;
   }
 
-  const sandboxAttr = adShield.getIframeSandbox();
-  const sandboxSnippet = sandboxAttr ? `sandbox="${sandboxAttr}"` : '';
-
   frameContainer.innerHTML = `
     <iframe 
       class="video-iframe"
       src="${server.embed_url}" 
-      ${sandboxSnippet}
+      referrerpolicy="no-referrer"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
       allowfullscreen
       scrolling="no"

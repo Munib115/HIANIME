@@ -192,12 +192,18 @@ class AdShieldEngine {
    * - `allow-top-navigation` is OMITTED (iframe cannot redirect this site to ads).
    * - `allow-top-navigation-by-user-activation` is OMITTED (clicks cannot redirect top).
    * - `allow-popups-to-escape-sandbox` is OMITTED (any popup inherits sandbox confinement).
+  /**
+   * Embed providers (Zoko / MegaCloud) explicitly check if their iframe is sandboxed
+   * and refuse to stream if the 'sandbox' attribute is detected.
+   * Therefore, we omit the sandbox attribute completely so video streaming works 100%
+   * uninterrupted without any EMBED BLOCKED errors.
    */
   getIframeSandbox() {
-    if (!this.enabled) {
-      return null; // Raw unsandboxed mode if user explicitly turns AdShield OFF
-    }
-    return 'allow-scripts allow-same-origin allow-forms allow-presentation allow-popups';
+    return null;
+  }
+
+  getIframeAttributes() {
+    return 'referrerpolicy="no-referrer" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen scrolling="no"';
   }
 }
 

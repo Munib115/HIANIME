@@ -61,16 +61,22 @@ html {
   font-size: 16px;
   background-color: var(--bg-app);
   color-scheme: dark;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  position: relative;
 }
 
 body {
   width: 100%;
+  max-width: 100vw;
   min-height: 100vh;
   background-color: var(--bg-app);
   color: var(--text-primary);
   font-family: var(--font-family);
   line-height: 1.45;
   overflow-x: hidden;
+  position: relative;
   user-select: none;
   -webkit-user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -298,6 +304,9 @@ button, input, select, textarea, optgroup {
 .view-screen {
   display: none;
   animation: viewFade 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 100%;
+  max-width: 100vw;
+  box-sizing: border-box;
 }
 
 .view-screen.active {
@@ -307,7 +316,9 @@ button, input, select, textarea, optgroup {
 .view-screen:not(#view-home) {
   padding-top: calc(var(--nav-height) + 16px);
   max-width: 1540px;
+  width: 100%;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 @keyframes viewFade {
@@ -1320,27 +1331,35 @@ button, input, select, textarea, optgroup {
 
 /* ─── Grid View (Browse, Search, Watchlist) ───────────────────────── */
 .browse-header {
-  padding: 20px 20px 14px;
+  padding: 18px clamp(14px, 4vw, 24px) 14px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .page-title {
   font-family: var(--font-family);
-  font-size: 1.6rem;
+  font-size: clamp(1.4rem, 5vw, 1.85rem);
   font-weight: 900;
   letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 .page-subtitle {
   color: var(--text-secondary);
-  font-size: 0.88rem;
-  margin-top: 3px;
+  font-size: clamp(0.8rem, 2.8vw, 0.9rem);
+  margin-top: 4px;
+  line-height: 1.35;
 }
 
 .anime-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
-  padding: 0 20px;
+  padding: 0 clamp(14px, 4vw, 24px);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 @media (min-width: 480px) {
@@ -1367,11 +1386,16 @@ button, input, select, textarea, optgroup {
 .anime-grid .anime-card {
   flex: none;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* ─── Filter Controls ─────────────────────────────────────────────── */
 .filter-bar {
-  padding: 0 20px 16px;
+  padding: 0 clamp(14px, 4vw, 24px) 16px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .filter-chips-scroll {
@@ -1380,6 +1404,9 @@ button, input, select, textarea, optgroup {
   overflow-x: auto;
   scrollbar-width: none;
   padding-bottom: 12px;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+  max-width: 100%;
 }
 
 .filter-chips-scroll::-webkit-scrollbar {
@@ -1398,6 +1425,7 @@ button, input, select, textarea, optgroup {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .chip-btn.active {
@@ -1408,22 +1436,48 @@ button, input, select, textarea, optgroup {
 }
 
 .filter-controls-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 520px) {
+  .filter-controls-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .filter-controls-row #browse-sort-select {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 769px) {
+  .filter-controls-row {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
 }
 
 .filter-select {
-  flex: 1;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border);
   color: var(--text-primary);
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-family: var(--font-family);
   font-weight: 600;
   outline: none;
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .filter-select:focus {
@@ -2016,141 +2070,81 @@ button, input, select, textarea, optgroup {
   margin-bottom: 8px;
 }
 
-/* ─── AdShield Protection Bar (Brave & AdGuard Engineered) ────────── */
-.adshield-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  background: rgba(16, 185, 129, 0.08);
-  border: 1px solid rgba(16, 185, 129, 0.28);
-  border-radius: var(--radius-sm);
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.adshield-bar.disabled {
-  background: rgba(239, 68, 68, 0.06);
-  border-color: rgba(239, 68, 68, 0.22);
-}
-
-.adshield-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.adshield-icon-badge {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(16, 185, 129, 0.2);
-  color: #10b981;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-}
-
-.adshield-bar.disabled .adshield-icon-badge {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-}
-
-.adshield-icon-badge svg {
-  width: 18px;
-  height: 18px;
-}
-
-.adshield-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.adshield-title-row {
+/* ─── Compact AdBlock Pill (Professional Glassmorphic) ───────────── */
+.player-header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
-.adshield-title {
+.player-adblock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
   font-family: var(--font-family);
-  font-size: 0.84rem;
-  font-weight: 800;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.player-adblock-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
-  letter-spacing: -0.01em;
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
-.adshield-tag {
-  font-size: 0.65rem;
-  font-weight: 800;
-  padding: 1px 6px;
-  border-radius: 4px;
-  text-transform: uppercase;
-  background: #10b981;
-  color: #000;
-  letter-spacing: 0.04em;
-}
-
-.adshield-bar.disabled .adshield-tag {
-  background: #ef4444;
+.player-adblock-pill.active {
+  background: rgba(255, 42, 77, 0.12);
+  border-color: rgba(255, 42, 77, 0.35);
   color: #fff;
 }
 
-.adshield-subtitle {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.player-adblock-pill svg {
+  width: 14px;
+  height: 14px;
+  stroke: var(--text-muted);
+  transition: stroke 0.15s ease;
 }
 
-.adshield-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(16, 185, 129, 0.18);
-  border: 1px solid rgba(16, 185, 129, 0.45);
-  color: #10b981;
-  padding: 6px 12px;
-  border-radius: var(--radius-full);
-  font-family: var(--font-family);
-  font-size: 0.78rem;
-  font-weight: 700;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.18s ease;
+.player-adblock-pill.active svg {
+  stroke: var(--accent);
 }
 
-.adshield-toggle-btn:hover {
-  background: rgba(16, 185, 129, 0.28);
-  border-color: #10b981;
-  box-shadow: 0 0 14px rgba(16, 185, 129, 0.35);
-}
-
-.adshield-bar.disabled .adshield-toggle-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--border);
-  color: var(--text-muted);
-}
-
-.adshield-toggle-dot {
-  width: 8px;
-  height: 8px;
+.adblock-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
-  transition: all 0.2s ease;
+  background: #64748b;
+  transition: all 0.15s ease;
 }
 
-.adshield-bar.disabled .adshield-toggle-dot {
-  background: #64748b;
-  box-shadow: none;
+.player-adblock-pill.active .adblock-dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.adblock-state {
+  font-weight: 800;
+  font-size: 0.72rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+
+.player-adblock-pill.active .adblock-state {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* Audio Segmented Switcher */
