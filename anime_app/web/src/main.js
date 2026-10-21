@@ -23,7 +23,8 @@ import {
   Film,
   Bell,
   ExternalLink,
-  Download
+  Download,
+  Plus
 } from 'lucide';
 
 // ─── Global State & Storage ─────────────────────────────────────────
@@ -59,7 +60,7 @@ function refreshIcons() {
     icons: {
       Home, Compass, Search, Bookmark, Play, Star, ArrowLeft,
       Layers, Volume2, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
-      ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download
+      ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download, Plus
     }
   });
 }

@@ -2093,7 +2093,7 @@ button, input, select, textarea, optgroup {
   }
 }
 
-/* ─── Centered Inbox Message Modal (Brave Recommendation) ──────────── */
+/* ─── Centered Inbox Message Modal (Material You & Satoshi Typography) ─ */
 .inbox-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2101,14 +2101,14 @@ button, input, select, textarea, optgroup {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(4, 6, 12, 0.82);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  padding: 18px;
+  background: rgba(4, 6, 12, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 14px;
   box-sizing: border-box;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.25s ease, visibility 0.25s ease;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .inbox-modal-backdrop.active {
@@ -2119,18 +2119,19 @@ button, input, select, textarea, optgroup {
 .inbox-modal-card {
   position: relative;
   width: 100%;
-  max-width: 480px;
-  max-height: 92vh;
+  max-width: 360px;
+  max-height: 90vh;
   overflow-y: auto;
-  background: linear-gradient(165deg, #131724 0%, #0b0d15 100%);
-  border: 1.5px solid rgba(255, 87, 34, 0.38);
-  border-radius: 22px;
-  box-shadow: 0 28px 75px rgba(0, 0, 0, 0.9), 0 0 40px rgba(255, 87, 34, 0.2);
+  font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f121a;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.04);
   box-sizing: border-box;
-  transform: scale(0.92) translateY(12px);
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: scale(0.94) translateY(6px);
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 87, 34, 0.4) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
 
 .inbox-modal-backdrop.active .inbox-modal-card {
@@ -2138,242 +2139,204 @@ button, input, select, textarea, optgroup {
 }
 
 .inbox-modal-glow {
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: linear-gradient(90deg, #ff2a4d 0%, #ff5722 50%, #ff9800 100%);
-  border-radius: 22px 22px 0 0;
-  z-index: 6;
+  display: none;
 }
 
 .inbox-modal-close {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: 12px;
+  right: 12px;
   z-index: 7;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #949eb5;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
 }
 
 .inbox-modal-close:hover {
-  background: rgba(255, 42, 77, 0.25);
-  border-color: #ff2a4d;
-  color: #fff;
-  transform: scale(1.05);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
 }
 
-.inbox-modal-close svg {
-  width: 17px;
-  height: 17px;
+.inbox-modal-close .material-symbols-rounded {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .inbox-badge-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 10px;
+  padding: 18px 18px 10px;
   gap: 8px;
 }
 
 .inbox-pill-tag {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   padding: 4px 10px;
-  background: rgba(255, 87, 34, 0.16);
-  border: 1px solid rgba(255, 87, 34, 0.45);
-  border-radius: var(--radius-full);
+  background: rgba(255, 87, 34, 0.12);
+  border: 1px solid rgba(255, 87, 34, 0.25);
+  border-radius: 8px;
+  font-family: 'Satoshi', sans-serif;
   font-size: 0.72rem;
-  font-weight: 800;
-  color: #ff8a65;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.inbox-pill-tag svg {
-  width: 13px;
-  height: 13px;
-}
-
-.inbox-date-tag {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  font-weight: 500;
-  padding-right: 32px; /* avoid close button overlap */
-}
-
-.inbox-gif-container {
-  position: relative;
-  margin: 0 18px 14px;
-  border-radius: 14px;
-  overflow: hidden;
-  background: #000;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-}
-
-.inbox-anime-gif {
-  width: 100%;
-  height: 170px;
-  object-fit: cover;
-  object-position: center 25%;
-  display: block;
-}
-
-.inbox-gif-overlay {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, transparent 45%, rgba(11, 13, 21, 0.88) 100%);
-  display: flex;
-  align-items: flex-end;
-  padding: 10px 14px;
-  pointer-events: none;
-}
-
-.inbox-gif-badge {
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 87, 34, 0.45);
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-  font-size: 0.74rem;
   font-weight: 700;
-  color: #fff;
+  color: #ff7a59;
   letter-spacing: 0.02em;
 }
 
+.inbox-pill-tag .material-symbols-rounded {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.inbox-date-tag {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.7rem;
+  color: #6b7588;
+  font-weight: 500;
+  padding-right: 28px;
+}
+
 .inbox-modal-body {
-  padding: 0 20px 20px;
+  padding: 0 18px 18px;
 }
 
 .inbox-modal-title {
-  font-family: var(--font-display, var(--font-family));
-  font-size: 1.3rem;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 1.18rem;
   font-weight: 800;
-  line-height: 1.3;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
   margin-bottom: 8px;
-  color: #fff;
+  color: #f1f3f8;
 }
 
 .text-brave-gradient {
-  background: linear-gradient(135deg, #ff5722 0%, #ff8a00 50%, #ff2a4d 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 900;
+  color: #ff5722;
+  font-weight: 800;
+  background: none;
+  -webkit-text-fill-color: initial;
 }
 
 .inbox-modal-desc {
-  font-size: 0.86rem;
-  line-height: 1.5;
-  color: #94a3b8;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.8rem;
+  line-height: 1.48;
+  color: #949eb5;
   margin-bottom: 14px;
 }
 
 .inbox-modal-desc strong {
-  color: #f1f5f9;
-  font-weight: 600;
+  color: #e2e6f0;
+  font-weight: 700;
 }
 
 .inbox-features-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 18px;
+  gap: 7px;
+  margin-bottom: 14px;
 }
 
 .inbox-feature-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 9px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 11px;
+  padding: 8px 11px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
 }
 
 .inbox-feature-icon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 8px;
-  background: rgba(255, 87, 34, 0.16);
-  border: 1px solid rgba(255, 87, 34, 0.35);
-  color: #ff7043;
+  background: rgba(255, 87, 34, 0.1);
+  border: 1px solid rgba(255, 87, 34, 0.2);
+  color: #ff7a59;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.inbox-feature-icon svg {
-  width: 17px;
-  height: 17px;
+.inbox-feature-icon .material-symbols-rounded {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .inbox-feature-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
 }
 
 .inbox-feature-text strong {
-  font-size: 0.82rem;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.8rem;
   font-weight: 700;
-  color: #f1f5f9;
+  color: #f1f3f8;
+  white-space: normal;
 }
 
 .inbox-feature-text span {
-  font-size: 0.74rem;
-  color: #94a3b8;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.72rem;
+  color: #7b8599;
+  white-space: normal;
+  line-height: 1.35;
 }
 
 .inbox-modal-actions {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .btn-brave-primary {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
-  padding: 12px 18px;
+  padding: 10px 16px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #ff5722 0%, #ff2a4d 100%);
-  color: #fff;
+  background: #ff5722;
+  color: #ffffff;
+  font-family: 'Satoshi', sans-serif;
   font-weight: 700;
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   text-decoration: none;
   border: none;
-  box-shadow: 0 4px 18px rgba(255, 87, 34, 0.35);
+  box-shadow: 0 4px 14px rgba(255, 87, 34, 0.28);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
   box-sizing: border-box;
 }
 
 .btn-brave-primary:hover {
+  background: #f4511e;
   transform: translateY(-1px);
-  box-shadow: 0 6px 24px rgba(255, 87, 34, 0.55);
-  color: #fff;
+  box-shadow: 0 6px 18px rgba(255, 87, 34, 0.38);
+  color: #ffffff;
 }
 
-.btn-brave-primary svg {
-  width: 16px;
-  height: 16px;
+.btn-brave-primary .material-symbols-rounded {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .btn-brave-secondary {
@@ -2381,30 +2344,32 @@ button, input, select, textarea, optgroup {
   align-items: center;
   justify-content: center;
   width: 100%;
-  padding: 10px 18px;
+  padding: 9px 16px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #c4c9d6;
+  font-family: 'Satoshi', sans-serif;
   font-weight: 600;
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
   box-sizing: border-box;
 }
 
 .btn-brave-secondary:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
 }
 
 .inbox-dont-show-row {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  font-size: 0.78rem;
-  color: #64748b;
+  gap: 7px;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.74rem;
+  color: #647087;
   cursor: pointer;
   user-select: none;
 }
@@ -2412,12 +2377,59 @@ button, input, select, textarea, optgroup {
 .inbox-dont-show-row input[type="checkbox"] {
   accent-color: #ff5722;
   cursor: pointer;
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
 }
 
 .inbox-dont-show-row:hover span {
-  color: #94a3b8;
+  color: #8c97ad;
+}
+
+@media (max-width: 480px) {
+  .inbox-modal-backdrop {
+    padding: 10px;
+  }
+  .inbox-modal-card {
+    max-width: 100%;
+    border-radius: 18px;
+    max-height: 94vh;
+  }
+  .inbox-badge-row {
+    padding: 14px 14px 8px;
+  }
+  .inbox-modal-body {
+    padding: 0 14px 14px;
+  }
+  .inbox-modal-title {
+    font-size: 1.08rem;
+  }
+  .inbox-modal-desc {
+    font-size: 0.76rem;
+    margin-bottom: 10px;
+  }
+  .inbox-features-list {
+    gap: 5px;
+    margin-bottom: 12px;
+  }
+  .inbox-feature-item {
+    padding: 7px 9px;
+    gap: 9px;
+  }
+  .inbox-feature-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .inbox-feature-icon .material-symbols-rounded {
+    font-size: 16px;
+  }
+  .btn-brave-primary {
+    padding: 9px 14px;
+    font-size: 0.82rem;
+  }
+  .btn-brave-secondary {
+    padding: 8px 14px;
+    font-size: 0.78rem;
+  }
 }
 
 /* Audio Segmented Switcher */
