@@ -9,7 +9,11 @@ Runs continuously in the background to keep the catalog fresh:
 5. Sleeps for interval (default 5 minutes) and repeats indefinitely.
 """
 import sys, io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import requests, base64, json, re, time, sqlite3, os, shutil
 from bs4 import BeautifulSoup
@@ -47,7 +51,10 @@ last_request_time = 0.0
 
 def log(msg):
     line = "[" + time.strftime("%H:%M:%S") + "] " + str(msg)
-    print(line, flush=True)
+    try:
+        print(line, flush=True)
+    except Exception:
+        pass
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")

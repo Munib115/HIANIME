@@ -10,7 +10,11 @@ Scrapes all newly added and currently airing anime from HiAnime:
 Fast, multi-threaded with bounded episode stream fetching so it never stalls.
 """
 import sys, io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import requests, base64, json, re, time, sqlite3, os, shutil
 from bs4 import BeautifulSoup
@@ -48,9 +52,15 @@ last_request_time = 0.0
 
 def log(msg):
     line = "[" + time.strftime("%H:%M:%S") + "] " + str(msg)
-    print(line, flush=True)
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    try:
+        print(line, flush=True)
+    except Exception:
+        pass
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 def fetch(url, retries=3, timeout=8, as_json=False):
     global last_request_time
