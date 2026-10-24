@@ -1,7 +1,8 @@
 import sqlite3, os, sys, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-DB_PATH = r"C:\Users\Munib Raza\OneDrive\Desktop\hianime_output\hianime.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "hianime.db")
 
 def inspect_db():
     if not os.path.exists(DB_PATH):

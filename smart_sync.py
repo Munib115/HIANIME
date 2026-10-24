@@ -258,6 +258,26 @@ def fetch_single_episode_servers(ep):
             "embed_url": url,
             "provider": prov_name,
         })
+    if not out:
+        for s in soup.select(".server-item"):
+            sname = (s.get("data-server-name", "") or "Server").strip()
+            shash = s.get("data-hash", "")
+            try:
+                url = base64.b64decode(shash).decode("utf-8", errors="ignore").strip()
+            except Exception:
+                url = ""
+            if not url or not url.startswith("http"): continue
+            provider = re.search(r"https?://([^/]+)", url)
+            prov_name = provider.group(1) if provider else ""
+            out.append({
+                "episode_id": ep_id,
+                "episode_number": ep_num,
+                "episode_title": ep_title,
+                "server_name": sname,
+                "type": (s.get("data-type", "") or "sub").strip().lower(),
+                "embed_url": url,
+                "provider": prov_name,
+            })
     return out
 
 def get_all_episode_streams(episodes):
@@ -300,6 +320,10 @@ def run():
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA synchronous = NORMAL;")
     c = conn.cursor()
+
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_episodes_anime_ep ON episodes(anime_id, episode_id);")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_streams_ep_server_type ON streams(episode_id, server_name, type);")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_seasons_parent_season ON anime_seasons(parent_anime_id, season_anime_id);")
 
     c.execute("SELECT COUNT(*) FROM anime")
     init_anime_count = c.fetchone()[0]
@@ -493,7 +517,13 @@ def run():
                 VALUES (?,?,?,?,?,?,?,?,?)
                 """, (aid, title, s.get("episode_id"), s.get("episode_number", 0), s.get("episode_title", ""), s.get("type", "sub"), s.get("server_name", "ZokoAnime"), s.get("provider", ""), s.get("embed_url", "")))
 
-            c.execute("UPDATE anime SET episode_count = ?, scraped_at = ? WHERE anime_id = ?", (len(remote_eps), int(time.time()), aid))
+            c.execute("""
+                UPDATE anime 
+                SET episode_count = ?, 
+                    scraped_at = ?,
+                    status = CASE WHEN status = 'Not yet aired' THEN 'Currently Airing' ELSE status END
+                WHERE anime_id = ?
+            """, (len(remote_eps), int(time.time()), aid))
             conn.commit()
             db_anime[aid] = len(remote_eps)
             updated_anime_count += 1
@@ -532,5 +562,25 @@ def run():
     sync_db_copies()
     log("All database replicas synchronized successfully!")
 
+def run_daemon(poll_interval_sec=300):
+    log("=" * 65)
+    log(f"HiAnime Continuous Smart Scraper Daemon (polling every {poll_interval_sec}s)")
+    log("=" * 65)
+    try:
+        while True:
+            try:
+                run()
+            except Exception as e:
+                log(f"Daemon error during sync cycle: {e}")
+            log(f"Sleeping for {poll_interval_sec}s before next check...")
+            time.sleep(poll_interval_sec)
+    except KeyboardInterrupt:
+        log("Daemon terminated by user.")
+
 if __name__ == "__main__":
-    run()
+    if "--daemon" in sys.argv:
+        idx = sys.argv.index("--daemon")
+        interval = int(sys.argv[idx + 1]) if len(sys.argv) > idx + 1 and sys.argv[idx + 1].isdigit() else 300
+        run_daemon(interval)
+    else:
+        run()
