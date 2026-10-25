@@ -107,7 +107,13 @@ query ($search: String) {
 """
 
 def enrich_anilist(title):
-    clean = re.sub(r"\(TV\)|\(Dub\)|\(Sub\)|Season \d+|2nd Season|3rd Season|4th Season", "", title).strip()
+    clean = re.sub(
+        r"\(TV\)|\(Dub\)|\(Sub\)|\(Uncensored\)|\(UNCENSORED\)|\[Uncensored\]|\[UNCENSORED\]|Season \d+|2nd Season|3rd Season|4th Season|Part \d+",
+        "",
+        title,
+        flags=re.IGNORECASE
+    ).strip()
+    clean = re.sub(r"\s+", " ", clean)
     try:
         r = requests.post(
             ANILIST_API,
@@ -320,6 +326,9 @@ def sync_cycle(conn):
     for p in range(1, 10): scan_feed(f"{BASE_URL}/recently-updated?page={p}")
     for p in range(1, 10): scan_feed(f"{BASE_URL}/new-anime?page={p}")
     for p in range(1, 6): scan_feed(f"{BASE_URL}/top-airing?page={p}")
+    for p in range(1, 4): scan_feed(f"{BASE_URL}/search?keyword=uncensored&page={p}")
+    for p in range(1, 3): scan_feed(f"{BASE_URL}/search?keyword=uncensor&page={p}")
+    for p in range(1, 10): scan_feed(f"{BASE_URL}/genres/hentai?page={p}")
 
     log(f"Feed scan complete: {len(recent_targets)} titles inspected.")
     updated_count = 0

@@ -34,6 +34,13 @@ HEADERS = {
 
 session = requests.Session()
 session.headers.update(HEADERS)
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=30,
+    pool_maxsize=30,
+    max_retries=requests.adapters.Retry(total=2, backoff_factor=0.2, status_forcelist=[500, 502, 503, 504])
+)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
 
 def log(msg):
     line = "[" + time.strftime("%H:%M:%S") + "] " + str(msg)
@@ -47,23 +54,24 @@ def log(msg):
     except Exception:
         pass
 
-def fetch(url, retries=3, timeout=10, as_json=False, delay=0.4):
-    time.sleep(delay)
+def fetch(url, retries=3, timeout=10, as_json=False, delay=0.12):
+    if delay > 0:
+        time.sleep(delay)
     for attempt in range(retries):
         try:
             r = session.get(url, timeout=timeout)
             if r.status_code == 200:
                 return r.json() if as_json else r.text
             elif r.status_code == 429:
-                wait = 6 * (attempt + 1)
+                wait = 5 * (attempt + 1)
                 log(f"  [429] Rate limit hit on {url[:60]} - sleeping {wait}s")
                 time.sleep(wait)
             elif r.status_code == 404:
                 return None
             else:
-                time.sleep(1.0)
+                time.sleep(0.5)
         except Exception:
-            time.sleep(1.0)
+            time.sleep(0.5)
     return None
 
 ANILIST_QUERY = """
@@ -86,9 +94,15 @@ query ($search: String) {
 """
 
 def enrich_anilist(title):
-    clean = re.sub(r"\(TV\)|\(Dub\)|\(Sub\)|Season \d+|2nd Season|3rd Season|4th Season", "", title).strip()
+    clean = re.sub(
+        r"\(TV\)|\(Dub\)|\(Sub\)|[\(\[]uncensored[\)\]]|[\(\[]uncut[\)\]]|Season \d+|2nd Season|3rd Season|4th Season|Part \d+",
+        "",
+        title,
+        flags=re.IGNORECASE
+    ).strip()
+    clean = re.sub(r"\s+", " ", clean)
     try:
-        time.sleep(0.3)
+        time.sleep(0.12)
         r = requests.post(
             ANILIST_API,
             json={"query": ANILIST_QUERY, "variables": {"search": clean}},
@@ -232,7 +246,7 @@ def fetch_single_episode_servers(ep):
     ep_title = ep.get("title", "")
     if not ep_id: return []
 
-    data = fetch(API_BASE + "episode/servers?episodeId=" + str(ep_id), as_json=True, delay=0.3)
+    data = fetch(API_BASE + "episode/servers?episodeId=" + str(ep_id), as_json=True, delay=0.1)
     if not data or not data.get("status"): return []
 
     soup = BeautifulSoup(data.get("html", ""), "lxml")
@@ -288,13 +302,15 @@ def get_all_episode_streams(episodes):
         target_eps = episodes
 
     all_streams = []
-    for ep in target_eps:
-        try:
-            s_list = fetch_single_episode_servers(ep)
-            if s_list:
-                all_streams.extend(s_list)
-        except Exception:
-            pass
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        futs = {ex.submit(fetch_single_episode_servers, ep): ep for ep in target_eps}
+        for f in as_completed(futs):
+            try:
+                res = f.result()
+                if res:
+                    all_streams.extend(res)
+            except Exception:
+                pass
     return all_streams
 
 def sync_db_copies():
@@ -376,16 +392,54 @@ def run():
             pass
 
     feed_urls = []
+    # 1. Recently updated & new anime releases
     for p in range(1, 16): feed_urls.append(f"{BASE_URL}/recently-updated?page={p}")
     for p in range(1, 26): feed_urls.append(f"{BASE_URL}/new-anime?page={p}")
+    # 2. Currently Airing anime
     for p in range(1, 11): feed_urls.append(f"{BASE_URL}/top-airing?page={p}")
     for p in range(1, 16): feed_urls.append(f"{BASE_URL}/filter?status=releasing&sort=updated_date&page={p}")
+    for p in range(1, 6):  feed_urls.append(f"{BASE_URL}/filter?status=releasing&sort=trending&page={p}")
+    # 3. Uncensored searches
+    for p in range(1, 4):  feed_urls.append(f"{BASE_URL}/search?keyword=uncensored&page={p}")
+    for p in range(1, 3):  feed_urls.append(f"{BASE_URL}/search?keyword=uncensor&page={p}")
+    # 4. Hentai & 18+ category
+    for p in range(1, 10): feed_urls.append(f"{BASE_URL}/genres/hentai?page={p}")
 
-    log(f"Scanning {len(feed_urls)} catalog feed pages...")
+    log(f"Scanning {len(feed_urls)} catalog feed and search pages...")
     with ThreadPoolExecutor(max_workers=6) as ex:
         list(ex.map(scan_page, feed_urls))
 
-    log(f"Discovered {len(targets)} total unique titles across all feeds.")
+    log(f"Discovered {len(targets)} unique titles from feed scans.")
+
+    # 4. Explicitly ensure all uncensored anime from anime_url_list.json are loaded
+    url_list_path = os.path.join(BASE_DIR, "anime_url_list.json")
+    if os.path.exists(url_list_path):
+        try:
+            with open(url_list_path, "r", encoding="utf-8") as f:
+                url_data = json.load(f)
+            uncensored_injected = 0
+            for item in url_data:
+                u_title = item.get("title", "")
+                u_url = item.get("url", "")
+                if "uncensored" in u_title.lower() or "uncensored" in u_url.lower() or "uncut" in u_title.lower():
+                    m = re.search(r"-(\d+)$", u_url)
+                    if m:
+                        aid = int(m.group(1))
+                        full_u_url = u_url if u_url.startswith("http") else BASE_URL + u_url
+                        cur_cnt = db_anime.get(aid, 0)
+                        if aid not in targets:
+                            targets[aid] = {
+                                "anime_id": aid,
+                                "title": u_title,
+                                "url": full_u_url,
+                                "card_cnt": 999 if cur_cnt == 0 else cur_cnt,
+                            }
+                            uncensored_injected += 1
+                        elif cur_cnt == 0 and targets[aid]["card_cnt"] == 0:
+                            targets[aid]["card_cnt"] = 999
+            log(f"Verified uncensored titles ({uncensored_injected} added from catalog archive).")
+        except Exception as e:
+            log(f"Notice loading archive uncensored list: {e}")
 
     new_titles = [t for aid, t in targets.items() if aid not in db_anime or db_anime.get(aid, 0) == 0]
     need_eps   = [t for aid, t in targets.items() if aid in db_anime and db_anime[aid] < t["card_cnt"]]
@@ -499,10 +553,14 @@ def run():
 
             # Fetch streams for the newly dropped episodes
             streams = []
-            for ep in new_eps:
-                s_list = fetch_single_episode_servers(ep)
-                if s_list:
-                    streams.extend(s_list)
+            with ThreadPoolExecutor(max_workers=5) as ex:
+                futs = {ex.submit(fetch_single_episode_servers, ep): ep for ep in new_eps}
+                for f in as_completed(futs):
+                    try:
+                        res = f.result()
+                        if res: streams.extend(res)
+                    except Exception:
+                        pass
 
             for ep in new_eps:
                 c.execute("""
@@ -533,6 +591,56 @@ def run():
 
         except Exception as e:
             log(f"  -> Error updating episodes for {title}: {e}")
+
+    # 3. Check for any uncensored anime in DB missing AniList enrichment
+    c.execute("SELECT anime_id, title FROM anime WHERE (instr(lower(title), 'uncensored') OR instr(lower(title), 'uncut')) AND anilist_id IS NULL")
+    missing_enrichment = c.fetchall()
+    if missing_enrichment:
+        log(f"Found {len(missing_enrichment)} uncensored anime in DB without AniList data. Enriching...")
+        for aid, title in missing_enrichment:
+            try:
+                al = enrich_anilist(title)
+                if al and al.get("anilist_id"):
+                    c.execute("""
+                        UPDATE anime
+                        SET anilist_id = ?,
+                            title_romaji = ?,
+                            title_english = ?,
+                            title_native = ?,
+                            anilist_score = ?,
+                            anilist_popularity = ?,
+                            poster_large = COALESCE(NULLIF(poster_large, ''), ?),
+                            banner_image = COALESCE(NULLIF(banner_image, ''), ?),
+                            anilist_status = ?,
+                            al_episodes = ?,
+                            season = ?,
+                            season_year = ?,
+                            al_genres = ?,
+                            al_description = ?,
+                            enriched_at = ?
+                        WHERE anime_id = ?
+                    """, (
+                        al.get("anilist_id"),
+                        al.get("title_romaji", ""),
+                        al.get("title_english", ""),
+                        al.get("title_native", ""),
+                        al.get("anilist_score"),
+                        al.get("anilist_popularity"),
+                        al.get("poster_large", ""),
+                        al.get("banner_image", ""),
+                        al.get("anilist_status"),
+                        al.get("episodes"),
+                        al.get("season", ""),
+                        al.get("season_year"),
+                        al.get("al_genres", ""),
+                        al.get("al_description", ""),
+                        int(time.time()),
+                        aid
+                    ))
+                    conn.commit()
+                    log(f"  -> Successfully enriched {title} (AniList #{al.get('anilist_id')})")
+            except Exception as e:
+                log(f"  -> Error enriching uncensored {title}: {e}")
 
     # Checkpoint and sync
     log("Check-pointing SQLite WAL to persist all changes...")
