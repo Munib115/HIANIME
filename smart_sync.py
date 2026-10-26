@@ -355,11 +355,14 @@ def run():
     c.execute("SELECT DISTINCT episode_id FROM episodes WHERE episode_id IS NOT NULL")
     db_ep_ids = set(str(row[0]) for row in c.fetchall() if row[0])
 
+    c.execute("SELECT DISTINCT episode_id FROM streams WHERE episode_id IS NOT NULL")
+    db_stream_ep_ids = set(str(row[0]) for row in c.fetchall() if row[0])
+
     targets = {}
     target_lock = Lock()
 
     def scan_page(url):
-        time.sleep(0.15)
+        time.sleep(0.12)
         try:
             r = session.get(url, timeout=10)
             if r.status_code != 200: return
@@ -376,9 +379,11 @@ def run():
 
                 sub = item.select_one(".tick-sub")
                 dub = item.select_one(".tick-dub")
+                eps = item.select_one(".tick-eps")
                 sub_cnt = int(sub.get_text(strip=True)) if sub and sub.get_text(strip=True).isdigit() else 0
                 dub_cnt = int(dub.get_text(strip=True)) if dub and dub.get_text(strip=True).isdigit() else 0
-                card_cnt = max(sub_cnt, dub_cnt)
+                eps_cnt = int(eps.get_text(strip=True)) if eps and eps.get_text(strip=True).isdigit() else 0
+                card_cnt = max(sub_cnt, dub_cnt) or eps_cnt
 
                 with target_lock:
                     if aid not in targets or card_cnt > targets[aid]["card_cnt"]:
@@ -393,17 +398,18 @@ def run():
 
     feed_urls = []
     # 1. Recently updated & new anime releases
-    for p in range(1, 16): feed_urls.append(f"{BASE_URL}/recently-updated?page={p}")
-    for p in range(1, 26): feed_urls.append(f"{BASE_URL}/new-anime?page={p}")
+    for p in range(1, 17): feed_urls.append(f"{BASE_URL}/recently-updated?page={p}")
+    for p in range(1, 31): feed_urls.append(f"{BASE_URL}/new-anime?page={p}")
     # 2. Currently Airing anime
-    for p in range(1, 11): feed_urls.append(f"{BASE_URL}/top-airing?page={p}")
-    for p in range(1, 16): feed_urls.append(f"{BASE_URL}/filter?status=releasing&sort=updated_date&page={p}")
-    for p in range(1, 6):  feed_urls.append(f"{BASE_URL}/filter?status=releasing&sort=trending&page={p}")
+    for p in range(1, 17): feed_urls.append(f"{BASE_URL}/top-airing?page={p}")
+    for p in range(1, 17): feed_urls.append(f"{BASE_URL}/filter?status=releasing&sort=updated_date&page={p}")
+    for p in range(1, 8):  feed_urls.append(f"{BASE_URL}/filter?status=releasing&sort=trending&page={p}")
     # 3. Uncensored searches
-    for p in range(1, 4):  feed_urls.append(f"{BASE_URL}/search?keyword=uncensored&page={p}")
-    for p in range(1, 3):  feed_urls.append(f"{BASE_URL}/search?keyword=uncensor&page={p}")
-    # 4. Hentai & 18+ category
-    for p in range(1, 10): feed_urls.append(f"{BASE_URL}/genres/hentai?page={p}")
+    for p in range(1, 5):  feed_urls.append(f"{BASE_URL}/search?keyword=uncensored&page={p}")
+    for p in range(1, 4):  feed_urls.append(f"{BASE_URL}/search?keyword=uncensor&page={p}")
+    # 4. Hentai & Erotica category
+    for p in range(1, 18): feed_urls.append(f"{BASE_URL}/genres/hentai?page={p}")
+    for p in range(1, 3):  feed_urls.append(f"{BASE_URL}/genres/erotica?page={p}")
 
     log(f"Scanning {len(feed_urls)} catalog feed and search pages...")
     with ThreadPoolExecutor(max_workers=6) as ex:
@@ -441,7 +447,7 @@ def run():
         except Exception as e:
             log(f"Notice loading archive uncensored list: {e}")
 
-    new_titles = [t for aid, t in targets.items() if aid not in db_anime or db_anime.get(aid, 0) == 0]
+    new_titles = [t for aid, t in targets.items() if aid not in db_anime or (db_anime.get(aid, 0) == 0 and t["card_cnt"] > 0)]
     need_eps   = [t for aid, t in targets.items() if aid in db_anime and db_anime[aid] < t["card_cnt"]]
 
     log(f"Identified {len(new_titles)} brand new anime to add.")
@@ -520,6 +526,8 @@ def run():
                 INSERT OR IGNORE INTO streams (anime_id, anime_title, episode_id, episode_number, episode_title, type, server_name, provider, embed_url)
                 VALUES (?,?,?,?,?,?,?,?,?)
                 """, (aid, meta["title"], s.get("episode_id"), s.get("episode_number", 0), s.get("episode_title", ""), s.get("type", "sub"), s.get("server_name", "ZokoAnime"), s.get("provider", ""), s.get("embed_url", "")))
+                if s.get("episode_id"):
+                    db_stream_ep_ids.add(str(s.get("episode_id")))
 
             conn.commit()
             db_anime[aid] = len(eps)
@@ -545,22 +553,27 @@ def run():
                 continue
 
             new_eps = [ep for ep in remote_eps if ep.get("episode_id") and str(ep.get("episode_id")) not in db_ep_ids]
-            if not new_eps:
+            missing_stream_eps = [ep for ep in remote_eps[-5:] if ep.get("episode_id") and str(ep.get("episode_id")) not in db_stream_ep_ids]
+            eps_to_stream_map = {ep["episode_id"]: ep for ep in (new_eps + missing_stream_eps) if ep.get("episode_id")}
+            eps_to_stream = list(eps_to_stream_map.values())
+
+            if not new_eps and not eps_to_stream:
                 c.execute("UPDATE anime SET episode_count = ? WHERE anime_id = ?", (len(remote_eps), aid))
                 conn.commit()
                 db_anime[aid] = len(remote_eps)
                 continue
 
-            # Fetch streams for the newly dropped episodes
+            # Fetch streams for the newly dropped episodes or missing streams
             streams = []
-            with ThreadPoolExecutor(max_workers=5) as ex:
-                futs = {ex.submit(fetch_single_episode_servers, ep): ep for ep in new_eps}
-                for f in as_completed(futs):
-                    try:
-                        res = f.result()
-                        if res: streams.extend(res)
-                    except Exception:
-                        pass
+            if eps_to_stream:
+                with ThreadPoolExecutor(max_workers=5) as ex:
+                    futs = {ex.submit(fetch_single_episode_servers, ep): ep for ep in eps_to_stream}
+                    for f in as_completed(futs):
+                        try:
+                            res = f.result()
+                            if res: streams.extend(res)
+                        except Exception:
+                            pass
 
             for ep in new_eps:
                 c.execute("""
@@ -574,6 +587,8 @@ def run():
                 INSERT OR IGNORE INTO streams (anime_id, anime_title, episode_id, episode_number, episode_title, type, server_name, provider, embed_url)
                 VALUES (?,?,?,?,?,?,?,?,?)
                 """, (aid, title, s.get("episode_id"), s.get("episode_number", 0), s.get("episode_title", ""), s.get("type", "sub"), s.get("server_name", "ZokoAnime"), s.get("provider", ""), s.get("embed_url", "")))
+                if s.get("episode_id"):
+                    db_stream_ep_ids.add(str(s.get("episode_id")))
 
             c.execute("""
                 UPDATE anime 
@@ -584,10 +599,11 @@ def run():
             """, (len(remote_eps), int(time.time()), aid))
             conn.commit()
             db_anime[aid] = len(remote_eps)
-            updated_anime_count += 1
-            total_new_eps_added += len(new_eps)
-            total_new_streams_added += len(streams)
-            log(f"  -> Added {len(new_eps)} new episodes and {len(streams)} streams for {title} (now {len(remote_eps)} eps)")
+            if new_eps or streams:
+                updated_anime_count += 1
+                total_new_eps_added += len(new_eps)
+                total_new_streams_added += len(streams)
+                log(f"  -> Added {len(new_eps)} new episodes and {len(streams)} streams for {title} (now {len(remote_eps)} eps)")
 
         except Exception as e:
             log(f"  -> Error updating episodes for {title}: {e}")
