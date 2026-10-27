@@ -1,4 +1,7 @@
 import './style.css';
+import { NetflixPlayer } from './netflix_player.js';
+
+let activePlayerInstance = null;
 import { 
   createIcons, 
   Home, 
@@ -76,9 +79,12 @@ function showToast(msg) {
 
 // ─── Video Playback Controller ──────────────────────────────────────
 function stopVideoPlayback() {
+  if (activePlayerInstance) {
+    try { activePlayerInstance.destroy(); } catch (e) {}
+    activePlayerInstance = null;
+  }
   const frameContainer = document.getElementById('video-frame-container');
   if (frameContainer) {
-    // Clear innerHTML to completely unload the iframe and silence audio
     frameContainer.innerHTML = '';
   }
 }
@@ -959,16 +965,19 @@ async function openWatchPlayer(episodeIndex) {
         <!-- Injected below -->
       </div>
 
-      <!-- Previous / Next Controls -->
+      <!-- Previous / Next / Download Controls -->
       <div class="ep-nav-buttons-row">
         <button class="ep-nav-btn" id="player-prev-ep-btn" ${episodeIndex <= 0 ? 'disabled style="opacity:0.4"' : ''}>
-          <i data-lucide="chevron-left"></i> Previous Ep
+          <i data-lucide="chevron-left"></i> Prev
+        </button>
+        <button class="ep-nav-btn" id="player-download-ep-btn" style="border-color:rgba(255,42,77,0.45);color:#fff;">
+          <i data-lucide="download"></i> Download Ep
         </button>
         <button class="ep-nav-btn" id="player-reload-btn">
           <i data-lucide="rotate-ccw"></i> Reload
         </button>
         <button class="ep-nav-btn" id="player-next-ep-btn" ${episodeIndex >= state.activeEpisodes.length - 1 ? 'disabled style="opacity:0.4"' : ''}>
-          Next Ep <i data-lucide="chevron-right"></i>
+          Next <i data-lucide="chevron-right"></i>
         </button>
       </div>
     </div>
@@ -1027,6 +1036,15 @@ async function openWatchPlayer(episodeIndex) {
 
   document.getElementById('player-reload-btn')?.addEventListener('click', () => {
     loadStreamIntoPlayer();
+  });
+
+  document.getElementById('player-download-ep-btn')?.addEventListener('click', () => {
+    const dlModal = document.getElementById('nf-download-modal');
+    if (dlModal) {
+      dlModal.classList.add('open');
+    } else {
+      showToast('Stream is still loading...');
+    }
   });
 
   document.getElementById('btn-audio-sub')?.addEventListener('click', () => {
@@ -1110,7 +1128,23 @@ function loadStreamIntoPlayer() {
   const frameContainer = document.getElementById('video-frame-container');
   if (!frameContainer) return;
 
-  const list = state.currentStreams[state.activeAudioType] || [];
+  if (activePlayerInstance) {
+    try { activePlayerInstance.destroy(); } catch (e) {}
+    activePlayerInstance = null;
+  }
+
+  let list = state.currentStreams[state.activeAudioType] || [];
+  if (!list.length) {
+    const fallbackType = state.activeAudioType === 'sub' ? 'dub' : 'sub';
+    if ((state.currentStreams[fallbackType] || []).length > 0) {
+      state.activeAudioType = fallbackType;
+      list = state.currentStreams[fallbackType];
+      document.getElementById('btn-audio-sub')?.classList.toggle('active', fallbackType === 'sub');
+      document.getElementById('btn-audio-dub')?.classList.toggle('active', fallbackType === 'dub');
+      renderServerChips();
+    }
+  }
+
   const server = list[state.activeServerIndex];
 
   if (!server || !server.embed_url) {
@@ -1125,17 +1159,49 @@ function loadStreamIntoPlayer() {
     return;
   }
 
-  frameContainer.innerHTML = `
-    <iframe 
-      id="main-stream-iframe"
-      class="video-iframe"
-      src="${server.embed_url}" 
-      referrerpolicy="no-referrer"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-      allowfullscreen
-      scrolling="no"
-    ></iframe>
-  `;
+  const anime = state.activeAnimeData || {};
+  const ep = state.activeEpisodes[state.activeEpisodeIndex] || {};
+
+  activePlayerInstance = new NetflixPlayer({
+    container: frameContainer,
+    apiBase: API_BASE,
+    embedUrl: server.embed_url,
+    animeTitle: anime.title || 'Anime',
+    animeId: anime.anime_id,
+    episodeNumber: ep.episode_number || (state.activeEpisodeIndex + 1),
+    episodeTitle: ep.title || '',
+    episodeId: ep.episode_id || '',
+    audioType: state.activeAudioType,
+    hasSub: (state.currentStreams.sub || []).length > 0,
+    hasDub: (state.currentStreams.dub || []).length > 0,
+    hasNextEp: state.activeEpisodeIndex < state.activeEpisodes.length - 1,
+    hasPrevEp: state.activeEpisodeIndex > 0,
+    poster: anime.banner_image || anime.poster_large || anime.poster || '',
+    onNextEpisode: () => {
+      if (state.activeEpisodeIndex < state.activeEpisodes.length - 1) {
+        openWatchPlayer(state.activeEpisodeIndex + 1);
+      }
+    },
+    onPrevEpisode: () => {
+      if (state.activeEpisodeIndex > 0) {
+        openWatchPlayer(state.activeEpisodeIndex - 1);
+      }
+    },
+    onSwitchAudio: (targetAudio) => {
+      if ((state.currentStreams[targetAudio] || []).length > 0) {
+        state.activeAudioType = targetAudio;
+        state.activeServerIndex = 0;
+        document.getElementById('btn-audio-sub')?.classList.toggle('active', targetAudio === 'sub');
+        document.getElementById('btn-audio-dub')?.classList.toggle('active', targetAudio === 'dub');
+        renderServerChips();
+        loadStreamIntoPlayer();
+        showToast(`Switched to ${targetAudio.toUpperCase()} audio`);
+      } else {
+        showToast(`No ${targetAudio.toUpperCase()} stream available for this episode`);
+      }
+    },
+    onToast: (msg) => showToast(msg),
+  });
 
   refreshIcons();
 }

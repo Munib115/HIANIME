@@ -1,14 +1,31 @@
 """
 KuroAnime API — Vercel Serverless & Standalone FastAPI Backend
-Provides JSON API over SQLite hianime.db
+Provides JSON API over SQLite hianime.db + Direct Ad-Free HLS Stream Resolver & Proxy
 """
 import os
 import sqlite3
 import re
+import base64
+import json
+import urllib.parse
 from typing import Optional
 
+import requests as _requests
+from requests.adapters import HTTPAdapter
 from fastapi import FastAPI, HTTPException, Query, APIRouter
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+# ─── Persistent HTTP Pool for Fast HLS Segment Proxying ─────────────
+_STREAM_SESSION = _requests.Session()
+_STREAM_ADAPTER = HTTPAdapter(pool_connections=30, pool_maxsize=30)
+_STREAM_SESSION.mount("https://", _STREAM_ADAPTER)
+_STREAM_SESSION.mount("http://", _STREAM_ADAPTER)
+_STREAM_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Referer": "https://zokoanime.video/",
+    "Origin": "https://zokoanime.video",
+}
 
 # ─── Locate Database File ────────────────────────────────────────────
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -92,8 +109,6 @@ def db():
     return conn
 
 
-
-
 def rows(sql, params=()):
     with db() as conn:
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
@@ -138,7 +153,6 @@ def health():
 
 @router.get("/stats")
 def stats():
-
     return {
         "anime": one("SELECT COUNT(*) n FROM anime")["n"],
         "episodes": one("SELECT COUNT(*) n FROM episodes")["n"],
@@ -225,8 +239,6 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
     }
 
 
-
-
 @router.get("/search")
 def search(q: str = Query(..., min_length=1), limit: int = 30):
     query_str = q.strip()
@@ -311,6 +323,397 @@ def genres():
             if g:
                 counts[g] = counts.get(g, 0) + 1
     return {"genres": sorted(counts, key=lambda g: -counts[g])}
+
+
+# ─── Direct Ad-Free HLS Stream Resolver & Proxy ─────────────────────
+
+def _deobfuscate_payload(blob: str, key: str = "otaku-embed-v1") -> dict:
+    raw = base64.b64decode(blob).decode("latin1")
+    xored = "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(raw))
+    return json.loads(urllib.parse.unquote(xored))
+
+
+def _parse_master_variants(master_text: str, master_url: str):
+    """Extract quality levels from master.m3u8 text."""
+    lines = [ln.strip() for ln in master_text.splitlines() if ln.strip()]
+    qualities = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if ln.startswith("#EXT-X-STREAM-INF:"):
+            bw_match = re.search(r"BANDWIDTH=(\d+)", ln)
+            res_match = re.search(r"RESOLUTION=(\d+)x(\d+)", ln)
+            bandwidth = int(bw_match.group(1)) if bw_match else 0
+            width = int(res_match.group(1)) if res_match else 0
+            height = int(res_match.group(2)) if res_match else 0
+            if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
+                uri = lines[i + 1]
+                full_url = urllib.parse.urljoin(master_url, uri)
+                label = f"{height}p" if height else "Auto"
+                if height >= 1080:
+                    label = "1080p FHD"
+                elif height >= 720:
+                    label = "720p HD"
+                elif height > 0:
+                    label = f"{height}p SD"
+                qualities.append({
+                    "height": height,
+                    "width": width,
+                    "bandwidth": bandwidth,
+                    "label": label,
+                    "raw_url": full_url,
+                    "url": f"/api/player/hls?url={urllib.parse.quote(full_url, safe='')}",
+                })
+                i += 2
+                continue
+        i += 1
+    qualities.sort(key=lambda q: q["height"], reverse=True)
+    return qualities
+
+
+@router.get("/player/resolve")
+def player_resolve(url: str = Query(...)):
+    """
+    Extract direct HLS master playlist, quality variants, multi-language VTT subtitles,
+    and intro/outro skip timestamps from an embed URL.
+    """
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid embed URL")
+
+    try:
+        r = _STREAM_SESSION.get(url, headers={
+            "User-Agent": _STREAM_HEADERS["User-Agent"],
+            "Referer": "https://hianime.at/",
+        }, timeout=12)
+        if r.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Upstream embed returned {r.status_code}")
+
+        m = re.search(r'window\.__P\s*=\s*["\']([^"\']+)["\']', r.text)
+        if not m:
+            raise HTTPException(status_code=422, detail="Stream payload not found in embed page")
+
+        payload = _deobfuscate_payload(m.group(1))
+        master_url = payload.get("src") or ""
+        if not master_url:
+            raise HTTPException(status_code=422, detail="No HLS source URL in payload")
+
+        # Fetch master.m3u8 to discover quality variants
+        qualities = []
+        try:
+            mr = _STREAM_SESSION.get(master_url, headers=_STREAM_HEADERS, timeout=10)
+            if mr.status_code == 200 and "#EXTM3U" in mr.text:
+                qualities = _parse_master_variants(mr.text, master_url)
+        except Exception:
+            pass
+
+        raw_subs = payload.get("subtitles") or []
+        subtitles = []
+        for s in raw_subs:
+            sub_src = s.get("src") or ""
+            if not sub_src:
+                continue
+            subtitles.append({
+                "lang": s.get("lang") or "und",
+                "label": s.get("label") or s.get("lang") or "Subtitle",
+                "default": bool(s.get("default")),
+                "raw_url": sub_src,
+                "url": f"/api/player/vtt?url={urllib.parse.quote(sub_src, safe='')}",
+            })
+
+        return {
+            "ok": True,
+            "embed_url": url,
+            "raw_master_url": master_url,
+            "master_url": f"/api/player/hls?url={urllib.parse.quote(master_url, safe='')}",
+            "qualities": qualities,
+            "subtitles": subtitles,
+            "skip": payload.get("skip") or {"intro": None, "outro": None},
+            "poster": payload.get("poster") or "",
+            "video_id": payload.get("video_id"),
+            "download_url": payload.get("download_url") or "",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stream resolve failed: {str(e)}")
+
+
+def _normalize_segment_url(seg_url: str, origin: str) -> str:
+    """Normalize edge segment URLs (/s/...) to the primary HLS origin so they never 403."""
+    parsed = urllib.parse.urlparse(seg_url)
+    if parsed.path.startswith("/s/"):
+        return f"{origin}{parsed.path}{'?' + parsed.query if parsed.query else ''}"
+    return seg_url
+
+
+@router.get("/player/hls")
+def player_hls(url: str = Query(...)):
+    """Proxy and rewrite master or media .m3u8 playlists so all requests route with clean CORS and Referer."""
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid HLS URL")
+
+    try:
+        r = _STREAM_SESSION.get(url, headers=_STREAM_HEADERS, timeout=12)
+        if r.status_code != 200:
+            raise HTTPException(status_code=r.status_code, detail="Upstream HLS playlist error")
+
+        parsed_base = urllib.parse.urlparse(url)
+        origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
+
+        out_lines = []
+        for raw_line in r.text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                out_lines.append("")
+                continue
+
+            if line.startswith("#"):
+                # Rewrite URI="..." inside #EXT-X-KEY or #EXT-X-MAP if present
+                if 'URI="' in line:
+                    def _repl_uri(match):
+                        u = urllib.parse.urljoin(url, match.group(1))
+                        u_norm = _normalize_segment_url(u, origin)
+                        return f'URI="/api/player/segment?url={urllib.parse.quote(u_norm, safe="")}"'
+                    line = re.sub(r'URI="([^"]+)"', _repl_uri, line)
+                out_lines.append(line)
+                continue
+
+            full_url = urllib.parse.urljoin(url, line)
+            parsed_target = urllib.parse.urlparse(full_url)
+            if parsed_target.path.endswith(".m3u8"):
+                out_lines.append(f"/api/player/hls?url={urllib.parse.quote(full_url, safe='')}")
+            else:
+                norm_seg = _normalize_segment_url(full_url, origin)
+                out_lines.append(f"/api/player/segment?url={urllib.parse.quote(norm_seg, safe='')}")
+
+        content = "\n".join(out_lines)
+        return Response(
+            content=content,
+            media_type="application/vnd.apple.mpegurl",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "no-cache",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"HLS proxy error: {str(e)}")
+
+
+@router.get("/player/segment")
+def player_segment(url: str = Query(...)):
+    """Proxy an individual MPEG-TS video segment with Referer authentication and automatic edge failover."""
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid segment URL")
+
+    parsed = urllib.parse.urlparse(url)
+    candidate_urls = [url]
+    if parsed.path.startswith("/s/"):
+        for fallback_host in ("https://hls.dramahot.top", "https://hls1.zoko1.cfd", "https://hls1.proxy1.cfd"):
+            alt = f"{fallback_host}{parsed.path}{'?' + parsed.query if parsed.query else ''}"
+            if alt not in candidate_urls:
+                candidate_urls.append(alt)
+
+    last_status = 502
+    for target in candidate_urls:
+        try:
+            r = _STREAM_SESSION.get(target, headers=_STREAM_HEADERS, timeout=15)
+            last_status = r.status_code
+            if r.status_code == 200 and r.content:
+                return Response(
+                    content=r.content,
+                    media_type="video/mp2t",
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=86400, immutable",
+                    },
+                )
+        except Exception:
+            continue
+
+    raise HTTPException(status_code=last_status, detail="Failed to fetch video segment")
+
+
+@router.get("/player/vtt")
+def player_vtt(url: str = Query(...)):
+    """Proxy WebVTT subtitle tracks with CORS headers so <track> and custom subtitle renderer work cleanly."""
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid VTT URL")
+
+    try:
+        r = _STREAM_SESSION.get(url, headers=_STREAM_HEADERS, timeout=10)
+        if r.status_code != 200:
+            raise HTTPException(status_code=r.status_code, detail="Failed to fetch subtitle file")
+        return Response(
+            content=r.content,
+            media_type="text/vtt; charset=utf-8",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=86400",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Subtitle proxy error: {str(e)}")
+
+
+@router.get("/player/playlist-segments")
+def player_playlist_segments(url: str = Query(...)):
+    """
+    Parse a specific resolution media playlist (e.g. 1080/index.m3u8) and return all proxied segment URLs
+    and total duration for the in-player episode downloader.
+    """
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid playlist URL")
+
+    try:
+        r = _STREAM_SESSION.get(url, headers=_STREAM_HEADERS, timeout=12)
+        if r.status_code != 200:
+            raise HTTPException(status_code=r.status_code, detail="Upstream playlist fetch failed")
+
+        parsed_base = urllib.parse.urlparse(url)
+        origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
+
+        segments = []
+        total_duration = 0.0
+        for raw_line in r.text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#EXTINF:"):
+                dur_str = line.split(":", 1)[1].split(",")[0].strip()
+                try:
+                    total_duration += float(dur_str)
+                except ValueError:
+                    pass
+            elif not line.startswith("#"):
+                full_url = urllib.parse.urljoin(url, line)
+                norm_seg = _normalize_segment_url(full_url, origin)
+                segments.append({
+                    "raw_url": norm_seg,
+                    "url": f"/api/player/segment?url={urllib.parse.quote(norm_seg, safe='')}",
+                })
+
+        return {
+            "ok": True,
+            "count": len(segments),
+            "duration": round(total_duration, 2),
+            "segments": segments,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Playlist parse failed: {str(e)}")
+
+
+@router.get("/player/download")
+def player_download(url: str = Query(...), filename: str = Query("KuroAnime_Episode.ts")):
+    """Direct streaming download endpoint that concatenates MPEG-TS segments on the fly."""
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid playlist URL")
+
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', filename)
+    if not safe_name.endswith(".ts") and not safe_name.endswith(".mp4"):
+        safe_name += ".ts"
+
+    r = _STREAM_SESSION.get(url, headers=_STREAM_HEADERS, timeout=12)
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail="Failed to fetch playlist for download")
+
+    parsed_base = urllib.parse.urlparse(url)
+    origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
+
+    seg_urls = []
+    for raw_line in r.text.splitlines():
+        line = raw_line.strip()
+        if line and not line.startswith("#"):
+            full_url = urllib.parse.urljoin(url, line)
+            seg_urls.append(_normalize_segment_url(full_url, origin))
+
+    def _stream_generator():
+        for seg_url in seg_urls:
+            try:
+                sr = _STREAM_SESSION.get(seg_url, headers=_STREAM_HEADERS, timeout=15)
+                if sr.status_code == 200 and sr.content:
+                    yield sr.content
+            except Exception:
+                continue
+
+    return StreamingResponse(
+        _stream_generator(),
+        media_type="video/mp2t",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.get("/clean-stream", response_class=HTMLResponse)
+def clean_stream(url: str = Query(...)):
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid stream URL")
+    
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": url,
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        parsed = urllib.parse.urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+
+        # 1. Strip the ad network container (<div id="adbar">...</div>)
+        html = re.sub(r'<div id=["\']adbar["\'].*?</div>', '', html, flags=re.DOTALL | re.IGNORECASE)
+
+        # 2. Strip any ad script tags (butchestusker, popads, etc.)
+        html = re.sub(r'<script[^>]*src=["\'][^"\']*(butchestusker|popads|propeller|adsterra|monetag|onclick|syndication|click|banner)[^"\']*["\'][^>]*></script>', '', html, flags=re.IGNORECASE)
+
+        # 3. Inject base href so relative assets resolve cleanly to host origin
+        if "<head>" in html:
+            html = html.replace("<head>", f'<head><base href="{origin}/">')
+        elif "<html" in html:
+            html = re.sub(r'(<html[^>]*>)', rf'\1<head><base href="{origin}/"></head>', html, flags=re.IGNORECASE)
+
+        # 4. Inject bulletproof popup defuser script inside player DOM
+        cleaner_script = """
+        <script>
+        (function() {
+          var dummy = { closed: false, close: function(){}, focus: function(){}, blur: function(){}, postMessage: function(){} };
+          try {
+            Object.defineProperty(window, 'open', {
+              value: function() { console.warn('[AdShield] Blocked in-player popup.'); return dummy; },
+              writable: false,
+              configurable: false
+            });
+          } catch(e) { window.open = function() { return dummy; }; }
+          try { if (window.top && window.top !== window) window.top.open = window.open; } catch(e){}
+          try { if (window.parent && window.parent !== window) window.parent.open = window.open; } catch(e){}
+          document.addEventListener('click', function(e) {
+            var a = e.target.closest ? e.target.closest('a') : null;
+            if (a && (a.target === '_blank' || !a.href.startsWith(location.origin))) {
+              e.preventDefault();
+              e.stopPropagation();
+              console.warn('[AdShield] Blocked popup anchor link.');
+            }
+          }, true);
+        })();
+        </script>
+        """
+        if "</head>" in html:
+            html = html.replace("</head>", cleaner_script + "</head>")
+        else:
+            html = cleaner_script + html
+
+        return HTMLResponse(content=html, media_type="text/html")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch clean stream: {str(e)}")
 
 
 # Mount both /api and root routes so that rewrites work seamlessly
