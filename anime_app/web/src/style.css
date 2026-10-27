@@ -2915,8 +2915,13 @@ button, input, select, textarea, optgroup {
   opacity: 1;
 }
 
-.nf-center-btn {
+.nf-player-root.controls-visible .nf-center-btn,
+.nf-player-root.is-paused .nf-center-btn {
   pointer-events: auto;
+}
+
+.nf-center-btn {
+  pointer-events: none;
   position: relative;
   display: flex;
   align-items: center;
@@ -3666,5 +3671,63 @@ button, input, select, textarea, optgroup {
   .nf-ctrl-btn {
     width: 28px;
     height: 28px;
+  }
+}
+
+
+/* ─── Fixed Responsive Episode Action Row (Zero Text Clipping) ───── */
+.ep-nav-buttons-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ep-nav-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 42px;
+  padding: 8px 10px;
+  font-size: clamp(0.74rem, 2.2vw, 0.84rem);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.ep-nav-btn svg {
+  width: 15px !important;
+  height: 15px !important;
+  flex-shrink: 0 !important;
+}
+
+.ep-nav-btn-download {
+  flex: 1.35 1 auto;
+  border-color: rgba(255, 42, 77, 0.5) !important;
+  background: rgba(255, 42, 77, 0.12) !important;
+  color: #ffffff !important;
+}
+
+.ep-nav-btn-download:hover {
+  background: rgba(255, 42, 77, 0.24) !important;
+  border-color: var(--accent) !important;
+}
+
+@media (max-width: 390px) {
+  .ep-nav-buttons-row {
+    gap: 6px;
+  }
+  .ep-nav-btn {
+    padding: 8px 6px;
+    font-size: 0.72rem;
+    gap: 4px;
+  }
+  .ep-nav-btn svg {
+    width: 13px !important;
+    height: 13px !important;
   }
 }

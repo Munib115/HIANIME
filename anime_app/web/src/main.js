@@ -968,16 +968,16 @@ async function openWatchPlayer(episodeIndex) {
       <!-- Previous / Next / Download Controls -->
       <div class="ep-nav-buttons-row">
         <button class="ep-nav-btn" id="player-prev-ep-btn" ${episodeIndex <= 0 ? 'disabled style="opacity:0.4"' : ''}>
-          <i data-lucide="chevron-left"></i> Prev
+          <i data-lucide="chevron-left"></i><span>Prev</span>
         </button>
-        <button class="ep-nav-btn" id="player-download-ep-btn" style="border-color:rgba(255,42,77,0.45);color:#fff;">
-          <i data-lucide="download"></i> Download Ep
+        <button class="ep-nav-btn ep-nav-btn-download" id="player-download-ep-btn">
+          <i data-lucide="download"></i><span>Download</span>
         </button>
         <button class="ep-nav-btn" id="player-reload-btn">
-          <i data-lucide="rotate-ccw"></i> Reload
+          <i data-lucide="rotate-ccw"></i><span>Reload</span>
         </button>
         <button class="ep-nav-btn" id="player-next-ep-btn" ${episodeIndex >= state.activeEpisodes.length - 1 ? 'disabled style="opacity:0.4"' : ''}>
-          Next <i data-lucide="chevron-right"></i>
+          <span>Next</span><i data-lucide="chevron-right"></i>
         </button>
       </div>
     </div>

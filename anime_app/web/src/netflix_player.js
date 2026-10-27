@@ -363,57 +363,97 @@ export class NetflixPlayer {
   bindEvents() {
     if (!this.root || !this.video) return;
 
-    const showControls = () => {
-      if (!this.root) return;
-      this.root.classList.add('controls-visible');
+    const scheduleHideControls = (delay = 4200) => {
       clearTimeout(this.controlsTimeout);
       if (!this.video.paused) {
         this.controlsTimeout = setTimeout(() => {
           if (!this.isPopoverOpen() && !this.video.paused) {
             this.root?.classList.remove('controls-visible');
           }
-        }, 3200);
+        }, delay);
       }
     };
 
-    this.root.addEventListener('mousemove', showControls, { passive: true });
-    this.root.addEventListener('touchstart', (e) => {
-      // Handle double-tap left/right seek on video stage
-      if (e.target === this.video || e.target.id === 'nf-center-controls' || e.target.id === 'nf-subtitle-layer') {
-        const now = Date.now();
-        const rect = this.root.getBoundingClientRect();
-        const touchX = e.touches[0].clientX - rect.left;
-        const side = touchX < rect.width * 0.38 ? 'left' : (touchX > rect.width * 0.62 ? 'right' : 'center');
+    const showControls = (delay = 4200) => {
+      if (!this.root) return;
+      this.root.classList.add('controls-visible');
+      scheduleHideControls(delay);
+    };
 
-        if (side !== 'center' && now - this.lastTapTime < 300 && this.lastTapSide === side) {
-          e.preventDefault();
-          if (side === 'left') {
-            this.seekRelative(-10);
-            this.triggerRipple('left');
-          } else {
-            this.seekRelative(10);
-            this.triggerRipple('right');
-          }
-          this.lastTapTime = 0;
-          return;
-        }
-        this.lastTapTime = now;
-        this.lastTapSide = side;
+    // Desktop mouse movement shows controls; ignore synthetic mousemove after mobile touch
+    this.root.addEventListener('mousemove', () => {
+      if (Date.now() - (this._lastTouchTime || 0) < 850) return;
+      showControls(3500);
+    }, { passive: true });
+
+    // Prevent ghost clicks when a tap was only meant to reveal hidden controls
+    this.root.addEventListener('click', (e) => {
+      if (Date.now() - (this._justRevealedAt || 0) < 380) {
+        e.stopPropagation();
+        e.preventDefault();
       }
-      showControls();
+    }, true);
+
+    // Mobile touch handling: single tap toggles controls cleanly; double tap seeks 10s
+    this.root.addEventListener('touchstart', (e) => {
+      this._lastTouchTime = Date.now();
+      const isVisible = this.root.classList.contains('controls-visible') || this.video.paused;
+
+      // If controls are currently hidden, any tap on the player reveals them first
+      if (!isVisible) {
+        this._justRevealedAt = Date.now();
+        showControls(4500);
+        return;
+      }
+
+      const hitInteractive = e.target.closest(
+        'button, input, a, .nf-timeline-container, .nf-popover, .nf-download-card, .nf-top-bar, .nf-bottom-bar'
+      );
+      if (hitInteractive) {
+        showControls(4500);
+        return;
+      }
+
+      if (this.isPopoverOpen()) {
+        this.closeAllPopovers();
+        showControls(4500);
+        return;
+      }
+
+      const now = Date.now();
+      const rect = this.root.getBoundingClientRect();
+      const touchX = e.touches[0].clientX - rect.left;
+      const side = touchX < rect.width * 0.36 ? 'left' : (touchX > rect.width * 0.64 ? 'right' : 'center');
+
+      if (side !== 'center' && now - this.lastTapTime < 300 && this.lastTapSide === side) {
+        if (e.cancelable) e.preventDefault();
+        if (side === 'left') {
+          this.seekRelative(-10);
+          this.triggerRipple('left');
+        } else {
+          this.seekRelative(10);
+          this.triggerRipple('right');
+        }
+        showControls(4500);
+        this.lastTapTime = 0;
+        return;
+      }
+      this.lastTapTime = now;
+      this.lastTapSide = side;
+
+      // Controls were already visible and user tapped empty video area -> hide controls
+      clearTimeout(this.controlsTimeout);
+      this.root.classList.remove('controls-visible');
     }, { passive: false });
 
-    // Click on video background toggles play/pause on desktop or controls on mobile
+    // Desktop click on video toggles play/pause; ignore synthetic click after mobile touch
     this.video.addEventListener('click', () => {
+      if (Date.now() - (this._lastTouchTime || 0) < 850) return;
       if (this.isPopoverOpen()) {
         this.closeAllPopovers();
         return;
       }
-      if (window.matchMedia('(pointer: coarse)').matches) {
-        this.root.classList.toggle('controls-visible');
-      } else {
-        this.togglePlay();
-      }
+      this.togglePlay();
     });
 
     // Play / Pause buttons
