@@ -450,6 +450,51 @@ def run():
     new_titles = [t for aid, t in targets.items() if aid not in db_anime or (db_anime.get(aid, 0) == 0 and t["card_cnt"] > 0)]
     need_eps   = [t for aid, t in targets.items() if aid in db_anime and db_anime[aid] < t["card_cnt"]]
 
+    # If live front feeds have no new anime, discover missing un-scraped anime from catalog archive
+    if len(new_titles) == 0 and os.path.exists(url_list_path):
+        backfill_batch = 5
+        for arg in sys.argv:
+            if arg.startswith("--batch=") or arg.startswith("--new="):
+                try: backfill_batch = int(arg.split("=")[1])
+                except Exception: pass
+            elif arg.isdigit():
+                try: backfill_batch = int(arg)
+                except Exception: pass
+        if "--batch" in sys.argv:
+            idx = sys.argv.index("--batch")
+            if len(sys.argv) > idx + 1 and sys.argv[idx + 1].isdigit():
+                backfill_batch = int(sys.argv[idx + 1])
+        elif "--new" in sys.argv:
+            idx = sys.argv.index("--new")
+            if len(sys.argv) > idx + 1 and sys.argv[idx + 1].isdigit():
+                backfill_batch = int(sys.argv[idx + 1])
+
+        try:
+            with open(url_list_path, "r", encoding="utf-8") as f:
+                archive_items = json.load(f)
+            missing_candidates = []
+            for item in archive_items:
+                m_aid = item.get("anime_id")
+                if not m_aid:
+                    m = re.search(r"-(\d+)$", item.get("url", ""))
+                    if m: m_aid = int(m.group(1))
+                if m_aid and m_aid not in db_anime:
+                    u = item.get("url", "")
+                    full_u = u if u.startswith("http") else BASE_URL + u
+                    missing_candidates.append({
+                        "anime_id": m_aid,
+                        "title": item.get("title", ""),
+                        "url": full_u,
+                        "card_cnt": 999
+                    })
+                    if len(missing_candidates) >= backfill_batch:
+                        break
+            if missing_candidates:
+                log(f"Live feeds already up to date: Found {len(missing_candidates)} new anime from archive to scrape.")
+                new_titles = missing_candidates
+        except Exception as e:
+            log(f"Notice inspecting archive for missing anime: {e}")
+
     log(f"Identified {len(new_titles)} brand new anime to add.")
     log(f"Identified {len(need_eps)} existing anime with new episode drops.")
 
