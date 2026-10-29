@@ -468,10 +468,14 @@ def player_hls(url: str = Query(...)):
                 continue
 
             if line.startswith("#"):
-                # Rewrite URI="..." inside #EXT-X-KEY or #EXT-X-MAP if present
+                # Rewrite URI="..." inside #EXT-X-KEY, #EXT-X-MAP, or #EXT-X-MEDIA
                 if 'URI="' in line:
                     def _repl_uri(match):
-                        u = urllib.parse.urljoin(url, match.group(1))
+                        raw_uri = match.group(1)
+                        u = urllib.parse.urljoin(url, raw_uri)
+                        parsed_u = urllib.parse.urlparse(u)
+                        if parsed_u.path.endswith(".m3u8"):
+                            return f'URI="/api/player/hls?url={urllib.parse.quote(u, safe="")}"'
                         u_norm = _normalize_segment_url(u, origin)
                         return f'URI="/api/player/segment?url={urllib.parse.quote(u_norm, safe="")}"'
                     line = re.sub(r'URI="([^"]+)"', _repl_uri, line)
