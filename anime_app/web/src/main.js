@@ -1338,69 +1338,318 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Centered Inbox Message / Announcement Modal (Brave Browser)
+  // Centered Server Funding Announcement Modal (BNB Smart Chain)
+  const BNB_WALLET_ADDRESS = '0x1Df63Bbf9fb1b9f1BfabD66C1c37450237454d93';
   const inboxModal = document.getElementById('brave-inbox-modal');
   const btnCloseInbox = document.getElementById('btn-close-inbox-modal');
   const btnContinue = document.getElementById('btn-continue-site');
-  const btnGetBrave = document.getElementById('btn-get-brave');
-  const cbDontShow = document.getElementById('brave-dont-show-again');
+  const btnCopyWallet = document.getElementById('btn-copy-wallet');
+  const walletCardBox = document.getElementById('wallet-card-box');
+  const copyWalletText = document.getElementById('copy-wallet-text');
   const headerInboxBtn = document.getElementById('header-inbox-btn');
   const inboxBadge = document.getElementById('inbox-badge');
+  let isClosingModal = false;
 
-  function openBraveModal() {
+  function openAnnouncementModal() {
     if (!inboxModal) return;
+    isClosingModal = false;
+    const card = inboxModal.querySelector('.inbox-modal-card');
+    if (card) {
+      card.style.removeProperty('--fly-x');
+      card.style.removeProperty('--fly-y');
+    }
+    inboxModal.classList.remove('closing');
     inboxModal.classList.add('active');
     inboxModal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
-    refreshIcons();
   }
 
-  function closeBraveModal() {
-    if (!inboxModal) return;
-    inboxModal.classList.remove('active');
+  function closeAnnouncementModal() {
+    if (!inboxModal || isClosingModal || !inboxModal.classList.contains('active')) return;
+    isClosingModal = true;
+
+    // Calculate dynamic flight path to the Notification Bell icon
+    const bellBtn = document.getElementById('header-inbox-btn');
+    const card = inboxModal.querySelector('.inbox-modal-card');
+    if (bellBtn && card) {
+      const bellRect = bellBtn.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+
+      const bellCenterX = bellRect.left + bellRect.width / 2;
+      const bellCenterY = bellRect.top + bellRect.height / 2;
+
+      const cardCenterX = cardRect.left + cardRect.width / 2;
+      const cardCenterY = cardRect.top + cardRect.height / 2;
+
+      const deltaX = Math.round(bellCenterX - cardCenterX);
+      const deltaY = Math.round(bellCenterY - cardCenterY);
+
+      card.style.setProperty('--fly-x', `${deltaX}px`);
+      card.style.setProperty('--fly-y', `${deltaY}px`);
+    }
+
+    inboxModal.classList.add('closing');
     inboxModal.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = '';
-    if (cbDontShow?.checked) {
-      localStorage.setItem('kuro_brave_notice_dismissed', 'true');
-      if (inboxBadge) inboxBadge.style.display = 'none';
+
+    setTimeout(() => {
+      inboxModal.classList.remove('active', 'closing');
+      document.body.style.overflow = '';
+      isClosingModal = false;
+
+      // Pulse the notification bell icon to signify it is stored in the inbox panel
+      if (bellBtn) {
+        bellBtn.classList.remove('bell-ring-pulse');
+        void bellBtn.offsetWidth; // Force layout recalculation
+        bellBtn.classList.add('bell-ring-pulse');
+        setTimeout(() => bellBtn.classList.remove('bell-ring-pulse'), 500);
+      }
+    }, 260);
+  }
+
+  async function copyBnbWalletAddress() {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(BNB_WALLET_ADDRESS);
+      } else {
+        const tempInput = document.createElement('textarea');
+        tempInput.value = BNB_WALLET_ADDRESS;
+        tempInput.style.position = 'fixed';
+        tempInput.style.opacity = '0';
+        document.body.appendChild(tempInput);
+        tempInput.focus();
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+      }
+
+      // Visual feedback on buttons and strip
+      document.querySelectorAll('#btn-copy-wallet, #wallet-card-box').forEach(el => el.classList.add('copied'));
+      document.querySelectorAll('.icon-copy-default').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.icon-copy-check').forEach(el => el.style.display = 'block');
+      if (copyWalletText) copyWalletText.textContent = 'Address Copied to Clipboard!';
+
+      showToast('BNB Smart Chain address copied!');
+
+      setTimeout(() => {
+        document.querySelectorAll('#btn-copy-wallet, #wallet-card-box').forEach(el => el.classList.remove('copied'));
+        document.querySelectorAll('.icon-copy-default').forEach(el => el.style.display = 'block');
+        document.querySelectorAll('.icon-copy-check').forEach(el => el.style.display = 'none');
+        if (copyWalletText) copyWalletText.textContent = 'Copy BNB Wallet Address';
+      }, 2600);
+    } catch (err) {
+      showToast('Press and hold address to copy');
     }
   }
 
   headerInboxBtn?.addEventListener('click', () => {
-    openBraveModal();
+    openAnnouncementModal();
   });
 
-  btnCloseInbox?.addEventListener('click', closeBraveModal);
-  btnContinue?.addEventListener('click', closeBraveModal);
-  btnGetBrave?.addEventListener('click', () => {
-    // When user clicks download, close modal after short delay
-    setTimeout(closeBraveModal, 600);
-  });
+  btnCloseInbox?.addEventListener('click', closeAnnouncementModal);
+  btnContinue?.addEventListener('click', closeAnnouncementModal);
+  btnCopyWallet?.addEventListener('click', copyBnbWalletAddress);
+  walletCardBox?.addEventListener('click', copyBnbWalletAddress);
 
   inboxModal?.addEventListener('click', (e) => {
     if (e.target === inboxModal) {
-      closeBraveModal();
+      closeAnnouncementModal();
     }
   });
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && inboxModal?.classList.contains('active')) {
-      closeBraveModal();
+      closeAnnouncementModal();
+    }
+    if (e.key === 'Escape' && vegetaChatCard?.classList.contains('open')) {
+      toggleVegetaChat(false);
     }
   });
 
-  // Check dismissal state
-  const isDismissed = localStorage.getItem('kuro_brave_notice_dismissed') === 'true';
   if (inboxBadge) {
-    inboxBadge.style.display = isDismissed ? 'none' : 'block';
+    inboxBadge.style.display = 'block';
   }
 
-  // When user opens website, show inbox message in center
-  if (!isDismissed) {
-    setTimeout(() => {
-      openBraveModal();
-    }, 450);
+  // Show server funding announcement on initial site open
+  setTimeout(() => {
+    openAnnouncementModal();
+  }, 400);
+
+  // ─── Prince Vegeta AI Anime Advisor ──────────────────────────────
+  const vegetaToggleBtn = document.getElementById('btn-vegeta-toggle');
+  const vegetaChatCard = document.getElementById('vegeta-chat-card');
+  const vegetaCloseBtn = document.getElementById('btn-vegeta-close');
+  const vegetaMessagesBox = document.getElementById('vegeta-messages-box');
+  const vegetaTypingIndicator = document.getElementById('vegeta-typing-indicator');
+  const vegetaChatForm = document.getElementById('vegeta-chat-form');
+  const vegetaChatInput = document.getElementById('vegeta-chat-input');
+
+  function toggleVegetaChat(forceOpen) {
+    if (!vegetaChatCard) return;
+    const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !vegetaChatCard.classList.contains('open');
+    if (shouldOpen) {
+      vegetaChatCard.classList.add('open');
+      vegetaChatCard.setAttribute('aria-hidden', 'false');
+      setTimeout(() => vegetaChatInput?.focus(), 150);
+    } else {
+      vegetaChatCard.classList.remove('open');
+      vegetaChatCard.setAttribute('aria-hidden', 'true');
+    }
   }
+
+  vegetaToggleBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleVegetaChat();
+  });
+
+  vegetaCloseBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleVegetaChat(false);
+  });
+
+  // Markdown renderer for Vegeta's formatted output with Material You icons
+  function renderVegetaMarkdown(raw) {
+    if (!raw) return '';
+    let text = raw
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Headings: ## 1. Anime Title
+    text = text.replace(/^##\s*(.*?)$/gm, '<div class="vegeta-rec-header"><span class="rec-hash">##</span> $1</div>');
+
+    // Bold text: **bold**
+    text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+    // Star rating highlight: ★ [Score]
+    text = text.replace(/★\s*([\d\.]+(?:\/10)?(?:\s*\([^\)]+\))?)/g, '<span class="vegeta-star-pill">★ $1</span>');
+
+    // Watch Links: [▶ Watch on KuroAnime](#anime/123) or [Watch on KuroAnime](#anime/123)
+    text = text.replace(/\[([^\]]+)\]\(#anime\/(\d+)\)/g, (match, label, animeId) => {
+      const cleanLabel = label.replace(/^[▶\s]+/, '');
+      return `<button type="button" class="vegeta-watch-link" data-anime-id="${animeId}">${cleanLabel}</button>`;
+    });
+
+    // Handle quote blocks: > Quote
+    text = text.replace(/^>\s*(.*?)$/gm, '<blockquote style="border-left: 2px solid #FF2A4D; padding-left: 8px; margin: 6px 0; color: #94A3B8; font-size: 0.72rem;">$1</blockquote>');
+
+    // Split paragraphs
+    const paragraphs = text.split(/\n{2,}/).map(p => {
+      const trimmed = p.trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('<div') || trimmed.startsWith('<blockquote')) return trimmed;
+      return `<p>${trimmed.replace(/\n/g, '<br/>')}</p>`;
+    }).filter(Boolean);
+
+    return paragraphs.join('');
+  }
+
+  function appendVegetaMessage(role, content) {
+    if (!vegetaMessagesBox) return;
+    const row = document.createElement('div');
+    row.className = `vegeta-msg-row vegeta-${role}`;
+
+    if (role === 'bot') {
+      const avatar = document.createElement('div');
+      avatar.className = 'vegeta-msg-avatar';
+      avatar.innerHTML = '<img src="/vegeta.gif?v=2" alt="Vegeta" />';
+      row.appendChild(avatar);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'vegeta-msg-bubble';
+
+    if (role === 'user') {
+      const p = document.createElement('p');
+      p.textContent = content;
+      bubble.appendChild(p);
+    } else {
+      bubble.innerHTML = renderVegetaMarkdown(content);
+      bubble.querySelectorAll('.vegeta-watch-link').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const animeId = Number(btn.getAttribute('data-anime-id'));
+          if (animeId) {
+            openAnimeDetail(animeId, true);
+          }
+        });
+      });
+    }
+
+    row.appendChild(bubble);
+    vegetaMessagesBox.appendChild(row);
+    vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
+  }
+
+  async function sendVegetaMessage(promptText) {
+    const text = (promptText || vegetaChatInput?.value || '').trim();
+    if (!text) return;
+
+    if (vegetaChatInput) vegetaChatInput.value = '';
+
+    appendVegetaMessage('user', text);
+
+    if (vegetaTypingIndicator) {
+      vegetaTypingIndicator.style.display = 'flex';
+      vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
+    }
+
+    localStorage.removeItem('kuro_gemini_api_key');
+    const payload = { message: text };
+
+    try {
+      let res;
+      try {
+        res = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (networkErr) {
+        res = await fetch('http://127.0.0.1:8000/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
+
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (vegetaTypingIndicator) vegetaTypingIndicator.style.display = 'none';
+
+      if (data && data.reply) {
+        appendVegetaMessage('bot', data.reply);
+      } else {
+        appendVegetaMessage('bot', 'Hmph! Even the Prince of Saiyans got no answer from this archive. Try another genre, warrior!');
+      }
+    } catch (err) {
+      console.error('Vegeta Advisor error:', err);
+      if (vegetaTypingIndicator) vegetaTypingIndicator.style.display = 'none';
+      appendVegetaMessage('bot', 'Tch! A temporary signal disruption stood in my way. Ask me again, warrior!');
+    }
+  }
+
+  vegetaChatForm?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendVegetaMessage();
+  });
+
+  vegetaMessagesBox?.addEventListener('click', (e) => {
+    const chip = e.target.closest('.quick-chip');
+    if (chip) {
+      const prompt = chip.getAttribute('data-prompt') || chip.textContent.trim();
+      sendVegetaMessage(prompt);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    const root = document.getElementById('vegeta-ai-root');
+    if (root && !root.contains(e.target) && vegetaChatCard?.classList.contains('open')) {
+      toggleVegetaChat(false);
+    }
+  });
 
   // Init App
   updateWatchlistBadge();

@@ -5,14 +5,21 @@ Provides JSON API over SQLite hianime.db + Direct Ad-Free HLS Stream Resolver & 
 import os
 import sqlite3
 import re
+import difflib
 import base64
 import json
 import urllib.parse
 from typing import Optional
 
 import requests as _requests
+from dotenv import load_dotenv
+
+# Auto-load .env.local and .env
+for _env_file in ['.env.local', '.env', 'anime_app/web/.env.local', 'anime_app/web/.env']:
+    if os.path.exists(_env_file):
+        load_dotenv(_env_file, override=True)
 from requests.adapters import HTTPAdapter
-from fastapi import FastAPI, HTTPException, Query, APIRouter
+from fastapi import FastAPI, HTTPException, Query, APIRouter, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -720,6 +727,742 @@ def clean_stream(url: str = Query(...)):
         raise HTTPException(status_code=502, detail=f"Failed to fetch clean stream: {str(e)}")
 
 
-# Mount both /api and root routes so that rewrites work seamlessly
+
+# ─── Prince Vegeta High-Level AI Anime Brain (5,564 Catalog Knowledge) ───────
+
+_VEGETA_KB = None
+
+COMMON_ALIASES = {
+    "aot": "attack on titan",
+    "snk": "shingeki no kyojin",
+    "jjk": "jujutsu kaisen",
+    "op": "one piece",
+    "mha": "my hero academia",
+    "bnha": "boku no hero academia",
+    "fmab": "fullmetal alchemist brotherhood",
+    "fma": "fullmetal alchemist",
+    "csm": "chainsaw man",
+    "dbz": "dragon ball z",
+    "dbs": "dragon ball super",
+    "db": "dragon ball",
+    "sao": "sword art online",
+    "hxh": "hunter x hunter",
+    "tybw": "bleach thousand year blood war",
+    "opm": "one punch man",
+    "kny": "demon slayer kimetsu no yaiba",
+    "ds": "demon slayer",
+    "tg": "tokyo ghoul",
+    "code geass": "code geass",
+    "rezero": "re zero",
+    "re zero": "re zero starting life in another world",
+    "danmachi": "is it wrong to try to pick up girls in a dungeon",
+    "tensura": "that time i got reincarnated as a slime",
+    "slime": "that time i got reincarnated as a slime",
+    "konosuba": "konosuba",
+    "oregairu": "my teen romantic comedy snafu",
+    "bunny girl": "rascal does not dream of bunny girl senpai",
+    "jjba": "jojo's bizarre adventure",
+    "jojo": "jojo's bizarre adventure",
+    "eva": "neon genesis evangelion",
+    "nge": "neon genesis evangelion",
+    "bsd": "bungo stray dogs",
+    "blue lock": "blue lock",
+    "solo leveling": "solo leveling",
+    "frieren": "frieren beyond journey's end",
+    "apothecary diaries": "the apothecary diaries",
+    "dandadan": "dandadan",
+    "vinland": "vinland saga",
+    "edgerunners": "cyberpunk edgerunners",
+    "steins gate": "steins gate",
+    "monster": "monster",
+    "death note": "death note",
+    "naruto": "naruto",
+    "bleach": "bleach",
+    "gintama": "gintama",
+    "dr stone": "dr stone",
+    "mob psycho": "mob psycho 100",
+    "haikyuu": "haikyu",
+    "haikyu": "haikyu",
+    "black clover": "black clover",
+    "hells paradise": "hell's paradise",
+    "jigokuraku": "hell's paradise",
+    "fate": "fate stay night",
+    "clannad": "clannad",
+    "your lie in april": "your lie in april",
+    "cowboy bebop": "cowboy bebop",
+    "berserk": "berserk",
+    "violet evergarden": "violet evergarden",
+}
+
+GENRE_MAP = {
+    "action": ["action"],
+    "adventure": ["adventure"],
+    "comedy": ["comedy", "funny", "humor", "gag", "hilarious"],
+    "drama": ["drama", "dramatic", "emotional", "sad"],
+    "fantasy": ["fantasy"],
+    "dark fantasy": ["dark fantasy", "grimdark"],
+    "urban fantasy": ["urban fantasy"],
+    "romance": ["romance", "romantic", "love story"],
+    "sci-fi": ["sci-fi", "scifi", "science fiction", "futuristic"],
+    "cyberpunk": ["cyberpunk"],
+    "slice of life": ["slice of life", "sol", "wholesome", "everyday", "relaxing", "chill"],
+    "supernatural": ["supernatural", "paranormal"],
+    "shounen": ["shounen", "shonen", "battle shounen"],
+    "seinen": ["seinen", "mature"],
+    "shoujo": ["shoujo", "shojo"],
+    "josei": ["josei"],
+    "school": ["school", "high school", "academy"],
+    "mystery": ["mystery", "investigation"],
+    "detective": ["detective", "police", "crime"],
+    "sports": ["sports", "sport", "athletic", "basketball", "soccer", "volleyball", "boxing"],
+    "psychological": ["psychological", "mind game", "mind games"],
+    "suspense": ["suspense", "thriller"],
+    "horror": ["horror", "scary", "creepy"],
+    "mecha": ["mecha", "robot", "robots", "gundam"],
+    "music": ["music", "band", "musical", "singing", "idol", "idols"],
+    "historical": ["historical", "period", "ancient", "feudal", "history"],
+    "martial arts": ["martial arts", "kung fu", "karate", "hand to hand"],
+    "samurai": ["samurai", "sword", "swordsman", "katana"],
+    "military": ["military", "war", "army", "soldier"],
+    "super power": ["super power", "super powers", "superpower", "superpowers"],
+    "isekai": ["isekai", "another world", "transported to another world", "reincarnated"],
+    "reincarnation": ["reincarnation"],
+    "magic": ["magic", "magical", "sorcery", "wizard", "witch"],
+    "mahou shoujo": ["mahou shoujo", "magical girl", "magical girls"],
+    "game": ["game", "gaming", "video game", "mmo", "mmorpg", "vrmmo"],
+    "parody": ["parody", "satire", "spoof"],
+    "gore": ["gore", "bloody", "violent", "violence"],
+    "survival": ["survival", "death game"],
+    "demons": ["demons", "demon", "devil"],
+    "vampire": ["vampire", "vampires"],
+    "space": ["space", "galaxy", "intergalactic"],
+    "time travel": ["time travel", "time loop", "time leaping"],
+    "ecchi": ["ecchi"],
+    "harem": ["harem", "reverse harem"],
+    "iyashikei": ["iyashikei", "healing"],
+    "workplace": ["workplace", "office", "working"],
+    "cgdct": ["cgdct", "cute girls"],
+}
+
+KNOWN_STUDIOS = [
+    "mappa", "ufotable", "madhouse", "bones", "wit studio", "toei animation",
+    "pierrot", "cloverworks", "a-1 pictures", "kyoto animation", "trigger",
+    "sunrise", "production i.g", "david production", "studio bind", "white fox",
+    "shaft", "j.c.staff", "science saru", "comix wave", "lerche", "tms entertainment",
+    "kinema citrus", "p.a. works", "brain's base", "eight bit", "silver link"
+]
+
+STOP_WORDS = {
+    "what", "which", "where", "when", "who", "whom", "whose", "why", "how",
+    "anime", "show", "series", "watch", "good", "best", "top", "great", "peak",
+    "recommend", "recommendation", "recommendations", "suggest", "suggestion",
+    "tell", "about", "info", "information", "details", "explain", "summary",
+    "synopsis", "plot", "story", "like", "similar", "some", "any", "give",
+    "find", "search", "looking", "want", "need", "please", "vegeta", "prince",
+    "have", "does", "website", "kuroanime", "site", "catalog", "with", "from",
+    "that", "this", "there", "their", "they", "them", "worth", "watching",
+    "episodes", "episode", "many", "much", "rating", "score", "tier", "most",
+    "more", "very", "really", "super", "ultra", "list", "names", "title", "titles"
+}
+
+
+def _clean_html(raw: str) -> str:
+    if not raw:
+        return ""
+    text = re.sub(r"<br\s*/?>", " ", raw, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\(Source:.*?\)", "", text, flags=re.I)
+    text = re.sub(r"\[Written by.*?\]", "", text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_str(s: str) -> str:
+    if not s:
+        return ""
+    return re.sub(r"[^a-z0-9\s]", " ", s.lower()).strip()
+
+
+
+KNOWN_GENRES = list(GENRE_MAP.keys())
+
+def get_vegeta_knowledge_base(conn_or_fn=None):
+    global _VEGETA_KB
+    if _VEGETA_KB is not None:
+        return _VEGETA_KB
+
+    if hasattr(conn_or_fn, "cursor"):
+        conn = conn_or_fn
+    elif callable(conn_or_fn):
+        conn = conn_or_fn()
+    else:
+        conn = db()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM episodes")
+    total_episodes = c.fetchone()[0]
+
+    c.execute("""
+        SELECT anime_id, title, title_english, title_romaji, synonyms,
+               type, status, premiered, season, season_year,
+               mal_score, anilist_score, anilist_popularity,
+               studios, duration, episode_count, genres, al_genres,
+               synopsis, al_description
+        FROM anime
+    """)
+    rows = c.fetchall()
+
+    items = []
+    for r in rows:
+        a_id = r[0]
+        title = (r[1] or "").strip()
+        title_eng = (r[2] or title).strip()
+        title_rom = (r[3] or "").strip()
+        synonyms = (r[4] or "").strip()
+        a_type = (r[5] or "TV").strip()
+        status = (r[6] or "Finished Airing").strip()
+        premiered = (r[7] or "").strip()
+        season = (r[8] or "").strip()
+        season_year = r[9]
+
+        mal_raw = r[10]
+        al_raw = r[11]
+        pop = r[12] or 0
+
+        score = 0.0
+        if al_raw:
+            try:
+                score = float(al_raw) / 10.0 if float(al_raw) > 10 else float(al_raw)
+            except Exception:
+                pass
+        if score == 0.0 and mal_raw:
+            try:
+                score = float(mal_raw)
+            except Exception:
+                pass
+        score = round(score, 1) if score > 0 else 7.5
+
+        studios = (r[13] or "").strip()
+        duration = (r[14] or "24m").strip()
+        ep_count = r[15] or 1
+
+        raw_genres = f"{r[16] or ''}, {r[17] or ''}"
+        g_tokens = []
+        for g in re.split(r"[,/]", raw_genres):
+            g = g.strip()
+            if g and g not in g_tokens:
+                g_tokens.append(g)
+        if len(g_tokens) <= 1 and r[16]:
+            low_g = r[16].lower()
+            for kg in KNOWN_GENRES:
+                if kg in low_g and kg.title() not in g_tokens:
+                    g_tokens.append(kg.title())
+
+        genres_display = ", ".join(g_tokens[:5]) if g_tokens else "Action, Adventure"
+        genres_lower = (" ".join(g_tokens) + " " + raw_genres).lower()
+
+        syn_clean = _clean_html(r[18] or r[19] or "")
+        year_str = str(season_year) if season_year else ""
+        if not year_str and premiered:
+            m = re.findall(r"\d{4}", premiered)
+            if m:
+                year_str = m[0]
+
+        all_titles_norm = [
+            _normalize_str(title),
+            _normalize_str(title_eng),
+            _normalize_str(title_rom),
+        ]
+        if synonyms:
+            for s_part in synonyms.split(","):
+                ns = _normalize_str(s_part)
+                if ns:
+                    all_titles_norm.append(ns)
+        all_titles_norm = [t for t in dict.fromkeys(all_titles_norm) if t]
+
+        items.append({
+            "anime_id": a_id,
+            "title": title,
+            "title_english": title_eng,
+            "title_romaji": title_rom,
+            "synonyms": synonyms,
+            "all_titles_norm": all_titles_norm,
+            "franchise": _franchise_key(title_eng or title),
+            "type": a_type,
+            "status": status,
+            "year": year_str,
+            "season_year": int(year_str) if year_str.isdigit() else 0,
+            "score": score,
+            "popularity": pop,
+            "studios": studios or "Animation Studio",
+            "studios_lower": studios.lower(),
+            "duration": duration,
+            "episode_count": ep_count,
+            "genres": genres_display,
+            "genres_lower": genres_lower,
+            "synopsis": syn_clean,
+            "synopsis_lower": syn_clean.lower(),
+        })
+
+    # Sort items by score and popularity so top anime rank highest by default
+    items.sort(key=lambda x: (x["score"], x["popularity"]), reverse=True)
+
+    _VEGETA_KB = {
+        "items": items,
+        "total_anime": len(items),
+        "total_episodes": total_episodes,
+    }
+    return _VEGETA_KB
+
+
+
+def _franchise_key(title: str) -> str:
+    t = title.lower()
+    t = re.sub(r"\b(\\d+(st|nd|rd|th)?\\s+(season|part|cour)|season\\s*\\d+|part\\s*\\d+|final season|movie|film|ova|special)\b.*", "", t)
+    t = re.sub(r":.*", "", t)
+    t = re.sub(r"\s+-\\s+.*", "", t)
+    t = re.sub(r"\b(season|part|cour|stage|final|act|chapter)\b.*", "", t)
+    t = re.sub(r"[^a-z0-9]", "", t)
+    return t[:16] or title.lower()[:16]
+
+
+def _clean_base_title(t: str) -> str:
+    t = re.sub(r"\b(\\d+(st|nd|rd|th)?\\s+(season|part|cour)|season\\s*\\d+|part\\s*\\d+|final season|movie|film|ova|special)\b.*", "", (t or "").lower())
+    t = re.sub(r":.*", "", t)
+    t = re.sub(r"\s+-\\s+.*", "", t)
+    return re.sub(r"[^a-z0-9]", "", t)[:14]
+
+
+def _clean_genres_str(raw_str: str) -> str:
+    low = (raw_str or "").lower()
+    found = []
+    for g in GENRE_MAP.keys():
+        if re.search(rf"\b{re.escape(g)}\b", low):
+            found.append(g.title())
+    return ", ".join(found[:5]) if found else "Action, Adventure"
+
+
+def _detect_query_genres(msg: str):
+    low = msg.lower()
+    detected = []
+    for g, syns in sorted(GENRE_MAP.items(), key=lambda x: -len(x[0])):
+        for s in syns:
+            if re.search(rf"\b{re.escape(s)}\b", low):
+                if g not in detected:
+                    detected.append(g)
+                break
+    return detected
+
+
+GENRE_KEYWORDS = set(GENRE_MAP.keys()) | {
+    "action", "romance", "comedy", "fantasy", "sports", "drama", "horror",
+    "thriller", "mystery", "sci-fi", "scifi", "isekai", "shounen", "shoujo",
+    "seinen", "mecha", "adventure", "supernatural", "music", "psychological",
+    "slice of life", "dark fantasy", "martial arts"
+}
+
+
+def _is_pure_genre_query(q_str: str) -> bool:
+    cleaned = re.sub(r"\b(i want to watch|recommend|give me|popular|best|good|anime|shows?|series|top|some|what|any)\b", "", q_str.lower()).strip()
+    return cleaned in GENRE_KEYWORDS or cleaned in GENRE_MAP
+
+
+def _find_exact_or_fuzzy_title(user_msg: str, kb_items: list):
+    """High-precision matching against all 5,564 anime titles, aliases, and acronyms."""
+    q = re.sub(r"[^\w\s]", " ", user_msg.lower()).strip()
+    q = re.sub(r"^(tell me about|tell about|can you tell me about|i want to know about|what is|what s|what about|how about|info on|information on|synopsis for|synopsis of|details about|details on|how many episodes in|how many episodes does|who made|who animated|is|are there|can you find|have you got|do you have|watch|stream|search|anime|explain|describe|review of)\\s+", "", q).strip()
+    q = re.sub(r"\s+(about|anime|show|series|season|have|website|kuroanime|all about|on this site|on here|good|worth watching|worth it|any good)$", "", q).strip()
+
+    if not q or len(q) < 2 or _is_pure_genre_query(q):
+        return None, []
+
+    check_phrase = COMMON_ALIASES.get(q, q)
+    for alias, full in COMMON_ALIASES.items():
+        if re.search(rf"\b{re.escape(alias)}\b", check_phrase) and len(alias) >= 3:
+            check_phrase = re.sub(rf"\b{re.escape(alias)}\b", full, check_phrase)
+
+    scored = []
+    q_words = set(check_phrase.split())
+
+    for it in kb_items:
+        best_title_score = 0.0
+        is_primary_exact = (_normalize_str(it["title"]) == check_phrase)
+        is_eng_exact = (_normalize_str(it["title_english"]) == check_phrase)
+
+        for t in it["all_titles_norm"]:
+            if not t:
+                continue
+            if t == check_phrase:
+                best_title_score = max(best_title_score, 100.0)
+            elif check_phrase in t:
+                ratio = len(check_phrase) / max(len(t), 1)
+                best_title_score = max(best_title_score, 70.0 + ratio * 20.0)
+            elif t in check_phrase and len(t) >= 4:
+                ratio = len(t) / max(len(check_phrase), 1)
+                best_title_score = max(best_title_score, 65.0 + ratio * 20.0)
+            else:
+                t_words = set(t.split())
+                if q_words and t_words and len(q_words & t_words) >= min(len(q_words), 3) and len(q_words) >= 2:
+                    sim = difflib.SequenceMatcher(None, check_phrase, t).ratio()
+                    if sim >= 0.65:
+                        best_title_score = max(best_title_score, 55.0 + sim * 30.0)
+
+        if best_title_score >= 60.0:
+            primary_boost = 30.0 if is_primary_exact else 0.0
+            eng_boost = 15.0 if is_eng_exact else 0.0
+            movie_penalty = -35.0 if ("movie" in it["title"].lower() and "movie" not in check_phrase) else 0.0
+            tv_boost = 10.0 if it["type"] == "TV" else 0.0
+            pop_boost = min((it["popularity"] or 0) / 10000.0, 20.0)
+            ep_boost = min((it["episode_count"] or 1) / 10.0, 15.0)
+            score_boost = (it["score"] / 10.0) * 5.0
+            total = best_title_score + primary_boost + eng_boost + movie_penalty + tv_boost + pop_boost + ep_boost + score_boost
+            scored.append((total, it))
+
+    if not scored:
+        return None, []
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_item = scored[0][1]
+
+    # Collect related adaptations / seasons
+    related = []
+    best_franchise = best_item["franchise"]
+    for sc in scored[1:]:
+        cand = sc[1]
+        if cand["anime_id"] != best_item["anime_id"] and (cand["franchise"] == best_franchise or cand["title_english"].startswith(best_item["title_english"][:10])):
+            if cand not in related:
+                related.append(cand)
+        if len(related) >= 4:
+            break
+
+    return best_item, related
+
+
+def _generate_vegeta_response(user_msg: str, kb: dict) -> str:
+    """Generate in-character Prince Vegeta response grounded in all 5,564 anime."""
+    items = kb["items"]
+    total_anime = kb["total_anime"]
+    total_eps = kb["total_episodes"]
+    msg_low = user_msg.lower().strip()
+
+    # 1. Total Catalog / System stats inquiry
+    if any(k in msg_low for k in ["how many anime", "how many shows", "total anime", "catalog size", "all anime", "who are you"]):
+        if "who are you" in msg_low:
+            return (
+                f"## Prince Vegeta • The Supreme Saiyan Anime Advisor\\n"
+                f"- **Identity:** Prince of all Saiyans and royal arbiter of KuroAnime's archives.\\n"
+                f"- **Catalog Mastery:** I oversee all **{total_anime:,} anime series** and **{total_eps:,} streaming episodes** across this platform.\\n"
+                f"- **The Prince's Standard:** I do not tolerate pathetic filler or weakling storylines. Tell me what genre, studio, or battle you hunger for, and I will summon true masterpiece fiction!\\n\\n"
+                f"> Tip: Name any anime title or genre, and I will present its data and direct stream link!"
+            )
+        return (
+            f"## KuroAnime Master Archives\\n"
+            f"- **Total Catalog:** **{total_anime:,} Anime Titles** verified in high definition.\\n"
+            f"- **Episode Archive:** Over **{total_eps:,} Sub & Dub streaming episodes** available with zero advertisements.\\n"
+            f"- **Status:** Every single title is cataloged under my royal inspection. Name any show—from legendary classics to brand-new seasonal simulcasts—and I will bring you its full dossier!\\n"
+        )
+
+    # 2. Complete Genres Inquiry
+    if any(k in msg_low for k in ["what genres", "list genres", "all genres", "show genres", "which genres"]):
+        return (
+            f"## KuroAnime Complete Genre Directory\\n"
+            f"As Prince of all Saiyans, I maintain absolute command over every genre recorded across our **{total_anime:,} anime** archives:\\n\\n"
+            f"- **Battle & Adrenaline:** Action, Shounen, Martial Arts, Super Power, Samurai, Military, Mecha\\n"
+            f"- **Dark & Gripping:** Dark Fantasy, Psychological, Thriller, Suspense, Horror, Gore, Demons, Vampire\\n"
+            f"- **High Fantasy & Worlds:** Fantasy, Isekai, Reincarnation, Magic, Mahou Shoujo, Mythology, Urban Fantasy, Space, Sci-Fi, Cyberpunk\\n"
+            f"- **Mystery & Intrigue:** Mystery, Detective, Police, Time Travel, Survival, Game\\n"
+            f"- **Heart & Emotion:** Drama, Romance, Slice of Life, School, Workplace, Iyashikei, Adult Cast, Shoujo, Josei\\n"
+            f"- **Entertainment & Skill:** Sports, Comedy, Parody, Music, Seinen, CGDCT\\n\\n"
+            f"Tell me which category you demand, and I will present its undisputed champions!"
+        )
+
+    # 3. Specific anime title inquiry (tell me about anime when ask)
+    if not _is_pure_genre_query(msg_low):
+        specific, related = _find_exact_or_fuzzy_title(user_msg, items)
+        if specific:
+            title_main = specific["title_english"] if specific["title_english"] != specific["title"] else specific["title"]
+            alt_titles = []
+            if specific["title_romaji"] and specific["title_romaji"] != title_main:
+                alt_titles.append(specific["title_romaji"])
+            if specific["title"] != title_main:
+                alt_titles.append(specific["title"])
+            alt_str = f" *({', '.join(alt_titles[:2])})*" if alt_titles else ""
+
+            tier = "Masterpiece" if specific["score"] >= 8.5 else ("Elite" if specific["score"] >= 7.8 else "Standard Warrior Tier")
+
+            syn = specific["synopsis"]
+            if not syn or len(syn) < 30:
+                syn = "A renowned saga recorded in the KuroAnime chronicles. Prepare your spirit and witness every battle firsthand."
+
+            out = [
+                f"## {title_main}{alt_str}",
+                f"- **Rating:** ★ {specific['score']}/10 ({tier})",
+                f"- **Format:** {specific['episode_count']} Episodes • {specific['type']} ({specific['status']}) | **Studio:** {specific['studios']}",
+                f"- **Genres:** {specific['genres']}",
+                f"- **The Prince's Dossier & Plot:** {syn}",
+                f"- **The Prince's Verdict:** A battle saga recorded in our archives with supreme pride. Power through every episode without delay!",
+                f"- `[Watch on KuroAnime](#anime/{specific['anime_id']})`\\n"
+            ]
+
+            if related:
+                out.append("### Related Adaptations & Releases:")
+                for rel in related[:3]:
+                    rel_title = rel["title_english"] or rel["title"]
+                    out.append(f"- **{rel_title}** ({rel['type']}, {rel['episode_count']} eps, ★ {rel['score']}) • [Watch on KuroAnime](#anime/{rel['anime_id']})")
+                out.append("")
+
+            out.append("Now cease your hesitation and start streaming! A true warrior never leaves peak fiction unwatched.")
+            return "\\n".join(out)
+
+    # 4. Genre / Category / Popular Recommendations Inquiry (e.g. 'i want to watch action anime')
+    detected_genres = _detect_query_genres(msg_low)
+    by_franchise = {}
+    
+    if detected_genres:
+        genre_label = ", ".join(g.title() for g in detected_genres)
+        for it in items:
+            is_match = False
+            for dg in detected_genres:
+                syns = GENRE_MAP.get(dg, [dg])
+                if dg in it["genres_lower"]:
+                    is_match = True
+                    break
+                if any(s in it["genres_lower"] for s in syns):
+                    is_match = True
+                    break
+            if not is_match:
+                continue
+            b = _clean_base_title(it["title_english"] or it["title"])
+            if b not in by_franchise or (it.get("popularity", 0) > by_franchise[b].get("popularity", 0)):
+                by_franchise[b] = it
+    else:
+        genre_label = "Popular Masterpieces"
+        for it in items:
+            if it.get("score", 0) < 7.8:
+                continue
+            b = _clean_base_title(it["title_english"] or it["title"])
+            if b not in by_franchise or (it.get("popularity", 0) > by_franchise[b].get("popularity", 0)):
+                by_franchise[b] = it
+
+    cands = list(by_franchise.values())
+    # Sort primarily by popularity, secondarily by score
+    cands.sort(key=lambda x: (x.get("popularity", 0) or 0, x.get("score", 0) or 0), reverse=True)
+    top_candidates = cands[:4] if cands else items[:4]
+
+    out = [
+        f"Hmph! Listen well, warrior! As Prince of all Saiyans, my standards for combat and power are absolute. Here are the most popular, elite champions of **{genre_label}** on KuroAnime:\\n"
+    ]
+
+    for i, it in enumerate(top_candidates, 1):
+        tier = "Masterpiece" if it["score"] >= 8.8 else ("Elite" if it["score"] >= 8.0 else "Top Tier")
+        out.append(f"## {i}. {it['title_english'] or it['title']}")
+        out.append(f"- **Rating:** ★ {it['score']}/10 ({tier})")
+        out.append(f"- **Format:** {it['episode_count']} Eps • {it['type']} ({it['status']}) | **Studio:** {it['studios']}")
+        out.append(f"- **Genres:** {it['genres']}")
+        syn = it["synopsis"][:230].rsplit(" ", 1)[0] + "..." if len(it["synopsis"]) > 230 else it["synopsis"]
+        out.append(f"- **The Prince's Verdict:** {syn}")
+        out.append(f"- `[Watch on KuroAnime](#anime/{it['anime_id']})`\\n")
+
+    out.append("Now stop wasting time and start streaming! A true warrior never settles for mediocre filler.")
+    return "\\n".join(out)
+
+
+@router.get("/ai/status")
+def ai_status():
+    kb = get_vegeta_knowledge_base()
+    env_gemini_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("VITE_GEMINI_API_KEY") or "").strip()
+    return {
+        "status": "ready",
+        "name": "Prince Vegeta Anime Advisor",
+        "total_anime": kb["total_anime"],
+        "total_episodes": kb["total_episodes"],
+        "has_gemini_key": bool(env_gemini_key and not env_gemini_key.startswith("0x")),
+    }
+
+
+@router.post("/ai/chat")
+async def ai_chat(req: Request):
+    """Prince Vegeta AI Advisor powered by Google Gemini with instant High-Level 5,564 Knowledge Base Fallback."""
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+
+    # Auto-reload .env.local so changes take effect immediately
+    for _env_file in [".env.local", ".env", "anime_app/web/.env.local", "anime_app/web/.env"]:
+        if os.path.exists(_env_file):
+            load_dotenv(_env_file, override=True)
+
+    user_msg = (body.get("message") or "").strip()
+    env_gemini_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("VITE_GEMINI_API_KEY") or "").strip()
+    client_key = (body.get("apiKey") or "").strip()
+    api_key = env_gemini_key or client_key
+    if api_key.startswith("0x") and env_gemini_key:
+        api_key = env_gemini_key
+
+    if not user_msg:
+        raise HTTPException(status_code=400, detail="Message is required")
+
+    kb = get_vegeta_knowledge_base()
+    items = kb["items"]
+    msg_low = user_msg.lower().strip()
+
+    # If Gemini API Key is present, try Gemini API with specialized intent handling
+    if api_key and not api_key.startswith("0x"):
+        is_genre_query = _is_pure_genre_query(msg_low)
+        specific = None
+        related = []
+        if not is_genre_query:
+            specific, related = _find_exact_or_fuzzy_title(user_msg, items)
+
+        detected_genres = _detect_query_genres(msg_low)
+
+        if specific:
+            # SPECIFIC ANIME DOSSIER PROMPT
+            target = specific
+            target_name = target["title_english"] or target["title"]
+            target_str = (
+                f"- [ID: {target['anime_id']}] '{target['title']}' (English: '{target['title_english']}') | "
+                f"Score: ★ {target['score']}/10 | Popularity: {target['popularity']:,} | "
+                f"Format: {target['type']} ({target['episode_count']} eps, {target['status']}) | "
+                f"Studio: {target['studios']} | Genres: {target['genres']} | Full Synopsis: {target['synopsis']}"
+            )
+            related_items = []
+            for r in related[:3]:
+                related_items.append(f"- [ID: {r['anime_id']}] '{r['title_english'] or r['title']}' ({r['type']}, ★ {r['score']})")
+            related_str = "\\n".join(related_items) if related_items else "None"
+
+            system_instruction = f"""You are Prince Vegeta, the proud, powerful, and elite Prince of all Saiyans from Dragon Ball. You are acting as the AI Anime Advisor on KuroAnime (an ad-free streaming platform with 5,500+ anime).
+
+CORE PERSONALITY & TONE:
+- Speak with fierce Saiyan pride, confidence, authority, and witty banter ("Hmph!", "Listen well, warrior!", "Only the strong survive!").
+- While boastful, you have master knowledge of all anime. Always stay in character as Prince Vegeta.
+
+TASK:
+The user is asking you to tell them all about the anime: "{target_name}".
+Provide a complete, detailed, exciting briefing explaining what this anime is about, its main characters, the conflict, the battles, the stakes, and what makes it extraordinary.
+
+RESPONSE FORMATTING (STRICT REQUIREMENT):
+Format your response cleanly in Markdown without decorative icons:
+## {target_name}
+- ★ {target['score']}/10 (Masterpiece / High Tier / Elite)
+- **Format:** {target['episode_count']} Episodes • {target['type']} ({target['status']}) | **Studio:** {target['studios']}
+- **Genres:** {target['genres']}
+- **The Prince's Dossier & Plot:** [Detail what this anime is about: premise, main character, stakes, battles, and why it is thrilling]
+- **The Prince's Verdict:** [Vegeta's honest judgment on whether a true warrior should stream it]
+- `[Watch on KuroAnime](#anime/{target['anime_id']})`
+{f"- Related Releases: mention related seasons or movies from KuroAnime archives with their watch links: `[Watch on KuroAnime](#anime/{{ID}})`" if related_items else ""}
+- End with a proud Vegeta signoff commanding them to watch!
+
+TARGET ANIME DATA:
+{target_str}
+
+RELATED KUROANIME ARCHIVES:
+{related_str}
+"""
+        else:
+            # GENRE / POPULAR RECOMMENDATION PROMPT
+            by_franchise = {}
+            if detected_genres:
+                genre_label = ", ".join(g.title() for g in detected_genres)
+                for it in items:
+                    is_match = False
+                    for dg in detected_genres:
+                        syns = GENRE_MAP.get(dg, [dg])
+                        if dg in it["genres_lower"]:
+                            is_match = True
+                            break
+                        if any(s in it["genres_lower"] for s in syns):
+                            is_match = True
+                            break
+                    if not is_match:
+                        continue
+                    b = _clean_base_title(it["title_english"] or it["title"])
+                    if b not in by_franchise or (it.get("popularity", 0) > by_franchise[b].get("popularity", 0)):
+                        by_franchise[b] = it
+            else:
+                genre_label = "Popular Masterpieces"
+                for it in items:
+                    if it.get("score", 0) < 7.8:
+                        continue
+                    b = _clean_base_title(it["title_english"] or it["title"])
+                    if b not in by_franchise or (it.get("popularity", 0) > by_franchise[b].get("popularity", 0)):
+                        by_franchise[b] = it
+
+            cands = list(by_franchise.values())
+            cands.sort(key=lambda x: (x.get("popularity", 0) or 0, x.get("score", 0) or 0), reverse=True)
+            top_cands = cands[:5]
+
+            catalog_items = []
+            for c in top_cands:
+                catalog_items.append(
+                    f"- [ID: {c['anime_id']}] '{c['title_english'] or c['title']}' | "
+                    f"Score: ★ {c['score']}/10 | Popularity: {c['popularity']:,} | Format: {c['type']} ({c['episode_count']} eps) | "
+                    f"Studio: {c['studios']} | Genres: {c['genres']} | Synopsis: {c['synopsis'][:200]}..."
+                )
+            catalog_str = "\\n".join(catalog_items)
+
+            system_instruction = f"""You are Prince Vegeta, the proud, powerful, and elite Prince of all Saiyans from Dragon Ball. You are acting as the AI Anime Advisor on KuroAnime (an ad-free streaming platform with 5,500+ anime).
+
+CORE PERSONALITY & TONE:
+- Speak with fierce Saiyan pride, confidence, authority, and witty banter ("Hmph!", "Listen well, warrior!", "A true warrior demands peak fiction!").
+- While boastful, you have master knowledge of all anime. Always stay in character as Prince Vegeta.
+
+TASK:
+The user says: "{user_msg}".
+Present the top popular {genre_label} anime champions from the verified KuroAnime catalog below.
+
+RESPONSE FORMATTING (STRICT REQUIREMENT):
+Format your response cleanly in Markdown without decorative icons:
+For each recommendation, use:
+## 1. [Anime Title] (or 2., 3., etc.)
+- ★ [Score]/10 (Masterpiece / High Tier / Elite)
+- **Format:** [Episodes] Eps • [Type] | **Genres:** [Genres]
+- **The Prince's Verdict:** [Explanation of why this popular anime is an absolute must-watch in this genre]
+- `[Watch on KuroAnime](#anime/{{ID}})` with exact ID from candidates.
+End with a proud Vegeta signoff commanding them to watch!
+
+VERIFIED KUROANIME CANDIDATES:
+{catalog_str}
+"""
+
+        models = ["gemini-2.5-flash", "gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-pro"]
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 2048,
+                    "thinkingConfig": {"thinkingBudget": 0}
+                }
+            }
+            try:
+                res = _requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=18)
+                if res.status_code == 200:
+                    data = res.json()
+                    candidates_list = data.get("candidates") or []
+                    if candidates_list:
+                        reply_text = candidates_list[0]["content"]["parts"][0]["text"]
+                        return {
+                            "ok": True,
+                            "reply": reply_text,
+                            "used_gemini": True,
+                            "model": model,
+                        }
+                else:
+                    print(f"Gemini API returned {res.status_code} for {model}: {res.text[:200]}")
+            except Exception as gemini_err:
+                print(f"Gemini API error ({model}): {gemini_err}")
+                continue
+
+    # Fallback immediately to high-level local Vegeta brain when API key limit is reached or missing
+    reply_text = _generate_vegeta_response(user_msg, kb)
+    return {
+        "ok": True,
+        "reply": reply_text,
+        "used_gemini": False,
+    }
+
+
 app.include_router(router, prefix="/api")
 app.include_router(router)

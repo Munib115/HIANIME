@@ -53,7 +53,7 @@
           </nav>
 
           <div class="header-actions">
-            <button class="header-icon-btn" id="header-inbox-btn" aria-label="Announcements & Tips" title="Inbox: Ad-Free Streaming Tip">
+            <button class="header-icon-btn" id="header-inbox-btn" aria-label="Server Announcement" title="Server Funding Announcement">
               <i data-lucide="bell"></i>
               <span class="badge-dot badge-dot-alert" id="inbox-badge"></span>
             </button>
@@ -228,82 +228,163 @@
         </button>
       </nav>
 
-      <!-- Centered Inbox Message / Announcement Modal (Brave Recommendation) -->
+      <!-- Centered Server Funding Announcement Modal -->
       <div class="inbox-modal-backdrop" id="brave-inbox-modal" aria-hidden="true">
         <div class="inbox-modal-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
-          <!-- Top Colored Accent Bar -->
+          <!-- Top Crimson Hairline Accent -->
           <div class="inbox-modal-glow"></div>
-          
+
           <!-- Close Button -->
-          <button class="inbox-modal-close" id="btn-close-inbox-modal" aria-label="Close message">
-            <span class="material-symbols-rounded">close</span>
+          <button class="inbox-modal-close" id="btn-close-inbox-modal" aria-label="Close announcement">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
           </button>
 
-          <!-- Header Badge Row -->
+          <!-- Header Status Row -->
           <div class="inbox-badge-row">
-            <span class="inbox-pill-tag">
-              <span class="material-symbols-rounded">campaign</span> Announcement
-            </span>
-            <span class="inbox-date-tag">Tip</span>
+            <div class="inbox-pill-tag">
+              <span class="live-status-dot"></span>
+              <span>COMMUNITY NOTICE</span>
+            </div>
+            <span class="inbox-date-tag">Target: $20 USD</span>
           </div>
 
           <!-- Modal Body -->
           <div class="inbox-modal-body">
             <h2 class="inbox-modal-title" id="inbox-modal-title">
-              Stream Without Ads Using <span class="text-brave-gradient">Brave Browser</span>
+              Help Keep <span class="text-crimson-accent">KuroAnime</span> Online
             </h2>
             <p class="inbox-modal-desc">
-              Tired of video ads, pop-up tabs, and redirects? For the best ad-free anime streaming experience, we recommend using <strong>Brave Browser</strong> with built-in Shields.
+              KuroAnime is <strong>100% ad-free</strong>. We need <strong>$20</strong> to keep dedicated streaming servers live. Even a <strong>$1 donation</strong> keeps instant HD Sub &amp; Dub playback alive for everyone.
             </p>
 
-            <!-- Feature Highlights -->
-            <div class="inbox-features-list">
-              <div class="inbox-feature-item">
-                <div class="inbox-feature-icon">
-                  <span class="material-symbols-rounded">shield</span>
-                </div>
-                <div class="inbox-feature-text">
-                  <strong>Blocks Video Ads & Popups</strong>
-                  <span>Shields defuses unwanted redirect taps automatically</span>
-                </div>
+            <!-- Compact Funding Progress Tracker -->
+            <div class="funding-meter-card">
+              <div class="funding-meter-header">
+                <span class="funding-meter-title">Server Uptime Fund</span>
+                <span class="funding-meter-goal">$20.00 Goal</span>
               </div>
-              <div class="inbox-feature-item">
-                <div class="inbox-feature-icon">
-                  <span class="material-symbols-rounded">hd</span>
+              <div class="funding-progress-track">
+                <div class="funding-progress-fill"></div>
+              </div>
+            </div>
+
+            <!-- BNB Smart Chain Address Card with Quick-Copy -->
+            <div class="wallet-copy-strip" id="wallet-card-box" role="button" tabindex="0" title="Click to copy BNB Smart Chain address">
+              <div class="wallet-strip-info">
+                <div class="wallet-strip-tags">
+                  <span class="chain-pill">BNB Smart Chain (BEP20)</span>
+                  <span class="tokens-pill">BNB • USDT • USDC</span>
                 </div>
-                <div class="inbox-feature-text">
-                  <strong>Smooth HD Playback</strong>
-                  <span>Fast buffering with zero intrusive tracker scripts</span>
-                </div>
+                <code class="wallet-address-code" id="bnb-wallet-address">0x1Df63Bbf9fb1b9f1BfabD66C1c37450237454d93</code>
+              </div>
+              <div class="wallet-quick-copy" aria-label="Copy address">
+                <svg class="icon-copy-default" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <svg class="icon-copy-check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
               </div>
             </div>
 
             <!-- Action Buttons -->
             <div class="inbox-modal-actions">
-              <a 
-                href="https://brave.com/download/" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                class="btn-brave-primary"
-                id="btn-get-brave"
-              >
-                <span class="material-symbols-rounded">download</span>
-                <span>Get Brave Browser</span>
-                <span class="material-symbols-rounded">open_in_new</span>
-              </a>
-              <button class="btn-brave-secondary" id="btn-continue-site">
+              <button type="button" class="btn-funding-primary" id="btn-copy-wallet">
+                <svg class="icon-copy-default" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <svg class="icon-copy-check" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span id="copy-wallet-text">Copy BNB Wallet Address</span>
+              </button>
+              <button type="button" class="btn-funding-text" id="btn-continue-site">
                 Continue to KuroAnime
               </button>
             </div>
-
-            <!-- Don't Show Again Option -->
-            <label class="inbox-dont-show-row" for="brave-dont-show-again">
-              <input type="checkbox" id="brave-dont-show-again" />
-              <span>Don't show this announcement again</span>
-            </label>
           </div>
         </div>
       </div>
+
+      <!-- Floating Vegeta AI Anime Advisor Widget -->
+      <aside class="vegeta-ai-root" id="vegeta-ai-root" aria-label="Vegeta Anime Advisor">
+        <!-- Floating Trigger Button -->
+        <button type="button" class="vegeta-trigger-btn" id="btn-vegeta-toggle" aria-label="Open Vegeta Anime Advisor" title="Ask Prince Vegeta for Anime Recommendations">
+          <div class="vegeta-avatar-wrapper">
+            <img src="/vegeta.gif?v=2" alt="Prince Vegeta" class="vegeta-avatar-img" />
+            <span class="saiyan-aura-ring"></span>
+          </div>
+          <span class="vegeta-trigger-label">
+            <span class="vegeta-label-title">Prince Vegeta</span>
+            <span class="vegeta-label-sub">Anime Advisor</span>
+          </span>
+        </button>
+
+        <!-- Floating Chat Card -->
+        <div class="vegeta-chat-card" id="vegeta-chat-card" aria-hidden="true">
+          <!-- Top Saiyan Aura Line -->
+          <div class="vegeta-card-header-bar">
+            <div class="vegeta-header-left">
+              <div class="vegeta-header-avatar">
+                <img src="/vegeta.gif?v=2" alt="Vegeta" />
+              </div>
+              <div class="vegeta-header-text">
+                <h3 class="vegeta-name">Prince Vegeta</h3>
+                <span class="vegeta-subtitle">KuroAnime Official Advisor</span>
+              </div>
+            </div>
+            <div class="vegeta-header-actions">
+              <button type="button" class="vegeta-icon-btn" id="btn-vegeta-close" title="Minimize Advisor" aria-label="Close">
+                <span class="material-symbols-rounded">close</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Chat Messages Area -->
+          <div class="vegeta-messages-box" id="vegeta-messages-box">
+            <!-- Initial Greeting -->
+            <div class="vegeta-msg-row vegeta-bot">
+              <div class="vegeta-msg-avatar">
+                <img src="/vegeta.gif?v=2" alt="Vegeta" />
+              </div>
+              <div class="vegeta-msg-bubble">
+                <p><strong>Hmph!</strong> So you dare ask the Prince of all Saiyans for anime guidance? Listen well, warrior.</p>
+                <p>I have surveyed all <strong>5,500+ anime</strong> in KuroAnime's archives. Tell me what genres or battles you hunger for, or select a category below:</p>
+                <div class="vegeta-quick-chips">
+                  <button type="button" class="quick-chip" data-prompt="Recommend peak action and shounen anime with top tier fights">Peak Shounen &amp; Fights</button>
+                  <button type="button" class="quick-chip" data-prompt="Recommend dark fantasy anime with high stakes and grit">Dark Fantasy</button>
+                  <button type="button" class="quick-chip" data-prompt="Recommend psychological thrillers with mind-bending plot twists">Psychological Thrillers</button>
+                  <button type="button" class="quick-chip" data-prompt="What are the highest rated anime masterpieces in our catalog?">Elite Masterpieces (9.0+)</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Typing Indicator -->
+          <div class="vegeta-typing-indicator" id="vegeta-typing-indicator" style="display:none">
+            <span class="vegeta-typing-avatar"><img src="/vegeta.gif?v=2" alt="Vegeta" /></span>
+            <div class="typing-bubble">
+              <span class="typing-text">Vegeta is judging the catalog...</span>
+              <div class="typing-dots">
+                <span></span><span></span><span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Input Bar -->
+          <form class="vegeta-input-bar" id="vegeta-chat-form">
+            <input type="text" id="vegeta-chat-input" class="vegeta-text-input" placeholder="Ask Vegeta (e.g. Action with dark twists)..." autocomplete="off" />
+            <button type="submit" class="vegeta-send-btn" id="btn-vegeta-send" aria-label="Send message">
+              <span class="material-symbols-rounded">send</span>
+            </button>
+          </form>
+        </div>
+      </aside>
 
       <!-- Global Toast Notification -->
       <div class="toast-notification" id="toast-notification"></div>
