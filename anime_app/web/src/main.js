@@ -1,5 +1,9 @@
 import './style.css';
+import { inject } from '@vercel/analytics';
 import { NetflixPlayer } from './netflix_player.js';
+
+// Initialize Vercel Web Analytics
+inject();
 
 let activePlayerInstance = null;
 import { 
