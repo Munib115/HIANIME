@@ -1,8 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
+    "api/index.py": {
+      "includeFiles": "api/hianime.db",
+      "maxDuration": 60
+    },
+    "api/*.py": {
+      "includeFiles": "api/hianime.db",
+      "maxDuration": 60
+    },
     "api/**/*.py": {
-      "includeFiles": "api/hianime.db"
+      "includeFiles": "api/hianime.db",
+      "maxDuration": 60
     }
   },
   "rewrites": [

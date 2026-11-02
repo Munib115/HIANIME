@@ -12,12 +12,13 @@ import urllib.parse
 from typing import Optional
 
 import requests as _requests
-from dotenv import load_dotenv
-
-# Auto-load .env.local and .env
-for _env_file in ['.env.local', '.env', 'anime_app/web/.env.local', 'anime_app/web/.env']:
-    if os.path.exists(_env_file):
-        load_dotenv(_env_file, override=True)
+try:
+    from dotenv import load_dotenv
+    for _env_file in ['.env.local', '.env', 'anime_app/web/.env.local', 'anime_app/web/.env']:
+        if os.path.exists(_env_file):
+            load_dotenv(_env_file, override=True)
+except Exception:
+    pass
 from requests.adapters import HTTPAdapter
 from fastapi import FastAPI, HTTPException, Query, APIRouter, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
@@ -89,29 +90,17 @@ def get_db_path():
     if not source or not os.path.exists(source):
         raise HTTPException(status_code=500, detail="Database file not found on server")
 
-    # On Lambda / Vercel, copy to /tmp so SQLite has full read/lock access without journal errors
-    if os.name != 'nt' and os.path.exists('/tmp'):
-        target = '/tmp/hianime.db'
-        try:
-            if not os.path.exists(target) or os.path.getsize(target) != os.path.getsize(source):
-                import shutil
-                shutil.copyfile(source, target)
-            _INITIALIZED_DB = target
-            return target
-        except Exception:
-            pass
-
     _INITIALIZED_DB = source
     return source
 
 
 def db():
     path = get_db_path()
+    uri_path = os.path.abspath(path).replace("\\", "/")
     try:
-        conn = sqlite3.connect(path, timeout=10)
-    except Exception:
-        uri_path = path.replace("\\", "/")
         conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=10)
+    except Exception:
+        conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -1287,9 +1276,13 @@ async def ai_chat(req: Request):
         body = {}
 
     # Auto-reload .env.local so changes take effect immediately
-    for _env_file in [".env.local", ".env", "anime_app/web/.env.local", "anime_app/web/.env"]:
-        if os.path.exists(_env_file):
-            load_dotenv(_env_file, override=True)
+    try:
+        from dotenv import load_dotenv
+        for _env_file in [".env.local", ".env", "anime_app/web/.env.local", "anime_app/web/.env"]:
+            if os.path.exists(_env_file):
+                load_dotenv(_env_file, override=True)
+    except Exception:
+        pass
 
     user_msg = (body.get("message") or "").strip()
     env_gemini_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("VITE_GEMINI_API_KEY") or "").strip()
