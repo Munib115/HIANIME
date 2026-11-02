@@ -72,6 +72,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    return Response(
+        content=json.dumps({
+            "error": str(exc),
+            "type": type(exc).__name__,
+            "path": request.url.path,
+            "traceback": traceback.format_exc(),
+        }),
+        status_code=500,
+        media_type="application/json",
+    )
+
 router = APIRouter()
 
 CARD_COLS = """anime_id, title, title_english, type, status, episode_count,
@@ -90,30 +105,79 @@ def get_db_path():
     if not source or not os.path.exists(source):
         raise HTTPException(status_code=500, detail="Database file not found on server")
 
+    # In serverless read-only environments (e.g. Vercel / AWS Lambda), copy DB to /tmp
+    # to guarantee fully concurrent read/write locks, -shm/-wal handling, and zero disk errors
+    if os.environ.get("VERCEL") or os.path.exists("/tmp"):
+        tmp_db = "/tmp/hianime.db"
+        try:
+            if not os.path.exists(tmp_db) or os.path.getsize(tmp_db) != os.path.getsize(source):
+                import shutil
+                shutil.copyfile(source, tmp_db)
+            if os.path.exists(tmp_db) and os.path.getsize(tmp_db) > 0:
+                _INITIALIZED_DB = tmp_db
+                return _INITIALIZED_DB
+        except Exception:
+            pass
+
     _INITIALIZED_DB = source
     return source
 
 
 def db():
     path = get_db_path()
-    uri_path = os.path.abspath(path).replace("\\", "/")
+
+    # If DB is in /tmp, direct connection has full local filesystem support
+    if path.startswith("/tmp"):
+        try:
+            conn = sqlite3.connect(path, timeout=15, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except Exception:
+            pass
+
+    norm_path = os.path.abspath(path).replace("\\", "/")
+    if not norm_path.startswith("/"):
+        norm_path = "/" + norm_path
+
+    # On read-only media like /var/task, immutable=1 completely disables WAL/SHM file locking
     try:
-        conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=10)
+        conn = sqlite3.connect(f"file://{norm_path}?mode=ro&immutable=1", uri=True, timeout=15, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
     except Exception:
-        conn = sqlite3.connect(path, timeout=10)
+        pass
+
+    try:
+        conn = sqlite3.connect(f"file://{norm_path}?mode=ro", uri=True, timeout=15, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception:
+        pass
+
+    conn = sqlite3.connect(path, timeout=15, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def rows(sql, params=()):
-    with db() as conn:
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+    conn = db()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def one(sql, params=()):
-    with db() as conn:
-        r = conn.execute(sql, params).fetchone()
+    conn = db()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        r = cur.fetchone()
         return dict(r) if r else None
+    finally:
+        conn.close()
 
 
 def audio_flags(anime_ids):
@@ -145,6 +209,33 @@ def health():
         "db_size": os.path.getsize(db_file) if os.path.exists(db_file) else 0,
         "files_here": os.listdir(CURRENT_DIR) if os.path.exists(CURRENT_DIR) else [],
     }
+
+
+@router.get("/debug-db")
+def debug_db():
+    import traceback
+    result = {
+        "ok": False,
+        "db_path": None,
+        "db_exists": False,
+        "db_size": 0,
+        "tmp_exists": os.path.exists("/tmp/hianime.db") if os.path.exists("/tmp") else False,
+        "count_anime": None,
+        "error": None,
+        "traceback": None,
+    }
+    try:
+        path = get_db_path()
+        result["db_path"] = path
+        result["db_exists"] = os.path.exists(path)
+        result["db_size"] = os.path.getsize(path) if os.path.exists(path) else 0
+        res = rows("SELECT COUNT(*) AS n FROM anime")
+        result["count_anime"] = res[0]["n"]
+        result["ok"] = True
+    except Exception as e:
+        result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+    return result
 
 
 @router.get("/stats")
@@ -879,28 +970,36 @@ def get_vegeta_knowledge_base(conn_or_fn=None):
     if _VEGETA_KB is not None:
         return _VEGETA_KB
 
+    should_close = False
     if hasattr(conn_or_fn, "cursor"):
         conn = conn_or_fn
     elif callable(conn_or_fn):
         conn = conn_or_fn()
+        should_close = True
     else:
         conn = db()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM episodes")
-    total_episodes = c.fetchone()[0]
+        should_close = True
 
-    c.execute("""
-        SELECT anime_id, title, title_english, title_romaji, synonyms,
-               type, status, premiered, season, season_year,
-               mal_score, anilist_score, anilist_popularity,
-               studios, duration, episode_count, genres, al_genres,
-               synopsis, al_description
-        FROM anime
-    """)
-    rows = c.fetchall()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM episodes")
+        total_episodes = c.fetchone()[0]
+
+        c.execute("""
+            SELECT anime_id, title, title_english, title_romaji, synonyms,
+                   type, status, premiered, season, season_year,
+                   mal_score, anilist_score, anilist_popularity,
+                   studios, duration, episode_count, genres, al_genres,
+                   synopsis, al_description
+            FROM anime
+        """)
+        kb_rows = c.fetchall()
+    finally:
+        if should_close:
+            conn.close()
 
     items = []
-    for r in rows:
+    for r in kb_rows:
         a_id = r[0]
         title = (r[1] or "").strip()
         title_eng = (r[2] or title).strip()
