@@ -309,29 +309,39 @@ def main():
     # ─────────────────────────────────────────────────────────────
     # STEP 1: Discover newly dropped episodes on airing/updated anime
     # ─────────────────────────────────────────────────────────────
-    print("\nScanning /recently-updated for episode drops...")
+    print("\nScanning /recently-updated and /top-airing for episode drops...")
     updated_anime_targets = []
-    for p in range(1, 11):
-        html = fetch(f"{BASE_URL}/recently-updated?page={p}")
-        if not html: break
-        soup = BeautifulSoup(html, "html.parser")
-        for item in soup.select(".film_list-wrap .flw-item"):
-            a = item.select_one(".film-name a")
-            if not a or not a.get("href"): continue
-            m = re.search(r"-(\d+)$", a.get("href"))
-            if not m: continue
-            aid = int(m.group(1))
+    seen_target_ids = set()
 
-            ep_sub = item.select_one(".tick-sub")
-            ep_num = int(ep_sub.text.strip()) if (ep_sub and ep_sub.text.strip().isdigit()) else 0
-            old_ep = db_anime.get(aid, 0)
-            if aid in db_anime and ep_num > old_ep:
-                updated_anime_targets.append({
-                    "anime_id": aid,
-                    "title": a.text.strip(),
-                    "old_count": old_ep,
-                    "expected_count": ep_num,
-                })
+    scan_sources = [
+        (f"{BASE_URL}/recently-updated?page={{}}", 15),
+        (f"{BASE_URL}/top-airing?page={{}}", 6),
+    ]
+
+    for url_pattern, max_pages in scan_sources:
+        for p in range(1, max_pages + 1):
+            html = fetch(url_pattern.format(p))
+            if not html: break
+            soup = BeautifulSoup(html, "html.parser")
+            for item in soup.select(".film_list-wrap .flw-item"):
+                a = item.select_one(".film-name a")
+                if not a or not a.get("href"): continue
+                m = re.search(r"-(\d+)$", a.get("href"))
+                if not m: continue
+                aid = int(m.group(1))
+                if aid in seen_target_ids: continue
+
+                ep_sub = item.select_one(".tick-sub")
+                ep_num = int(ep_sub.text.strip()) if (ep_sub and ep_sub.text.strip().isdigit()) else 0
+                old_ep = db_anime.get(aid, 0)
+                if aid in db_anime and ep_num > old_ep:
+                    seen_target_ids.add(aid)
+                    updated_anime_targets.append({
+                        "anime_id": aid,
+                        "title": a.text.strip(),
+                        "old_count": old_ep,
+                        "expected_count": ep_num,
+                    })
 
     print(f"Found {len(updated_anime_targets)} anime with newly dropped episodes.")
 
@@ -382,7 +392,9 @@ def main():
     # ─────────────────────────────────────────────────────────────
     print("\nScanning /new-anime for brand-new anime titles...")
     new_anime_targets = []
-    for p in range(1, 10):
+    seen_new_ids = set()
+
+    for p in range(1, 15):
         html = fetch(f"{BASE_URL}/new-anime?page={p}")
         if not html: break
         soup = BeautifulSoup(html, "html.parser")
@@ -392,7 +404,8 @@ def main():
             m = re.search(r"-(\d+)$", a.get("href"))
             if not m: continue
             aid = int(m.group(1))
-            if aid not in db_anime or db_anime.get(aid, 0) == 0:
+            if (aid not in db_anime or db_anime.get(aid, 0) == 0) and aid not in seen_new_ids:
+                seen_new_ids.add(aid)
                 full_url = a.get("href") if a.get("href").startswith("http") else BASE_URL + a.get("href")
                 new_anime_targets.append({
                     "anime_id": aid,

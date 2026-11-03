@@ -321,8 +321,20 @@ button, input, select, textarea, optgroup {
 }
 
 @keyframes viewFade {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.view-screen.active {
+  display: block;
+  animation: viewFade 0.35s var(--ease-fluid) forwards;
+  will-change: opacity, transform;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -4366,4 +4378,242 @@ button, input, select, textarea, optgroup {
     height: min(510px, calc(100dvh - 145px));
     border-radius: 18px;
   }
+}
+
+/* ─── In-Player Back Button ────────────────────────────────────────── */
+.nf-player-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.nf-player-back-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+  transform: scale(1.06);
+}
+
+/* ─── Mobile Landscape Cinema Mode (Like Netflix App) ──────────────── */
+@media (max-height: 520px) and (orientation: landscape) {
+  #view-watch.active {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .player-header {
+    display: none !important;
+  }
+  .video-frame-wrapper {
+    height: 100vh !important;
+    max-height: 100vh !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    aspect-ratio: auto !important;
+    box-shadow: none !important;
+  }
+  .nf-player-root {
+    height: 100vh !important;
+    width: 100vw !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   SUPER SMOOTH PHYSICS ANIMATION SUITE (Apple & Netflix Design Standard)
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Smooth momentum scrolling across all carousel rows */
+.hero-genre-track,
+.anime-carousel,
+.seasons-track,
+.audio-toggle-bar,
+.server-chips-row {
+  scroll-behavior: smooth !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Anime Card Physics: Elastic Lift & Tactile Compression */
+.anime-card {
+  transition: transform 0.32s var(--ease-fluid), box-shadow 0.32s var(--ease-fluid) !important;
+  will-change: transform;
+}
+.anime-card:hover {
+  transform: translateY(-7px) scale(1.025) !important;
+}
+.anime-card:active {
+  transform: translateY(-2px) scale(0.965) !important;
+  transition: transform 0.12s var(--ease-fluid) !important;
+}
+
+.card-poster-img {
+  transition: transform 0.42s var(--ease-fluid), filter 0.32s ease !important;
+  will-change: transform;
+}
+.anime-card:hover .card-poster-img {
+  transform: scale(1.07) !important;
+}
+
+.card-poster-wrapper {
+  transition: box-shadow 0.32s var(--ease-fluid), border-color 0.32s var(--ease-fluid) !important;
+}
+.anime-card:hover .card-poster-wrapper {
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(229, 9, 20, 0.28) !important;
+  border-color: rgba(229, 9, 20, 0.45) !important;
+}
+
+/* Continue Watching Card Physics */
+.continue-card {
+  transition: transform 0.32s var(--ease-fluid), box-shadow 0.32s var(--ease-fluid), border-color 0.28s ease !important;
+  will-change: transform;
+}
+.continue-card:hover {
+  transform: translateY(-5px) scale(1.02) !important;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.75), 0 0 18px rgba(229, 9, 20, 0.22) !important;
+  border-color: rgba(229, 9, 20, 0.4) !important;
+}
+.continue-card:active {
+  transform: scale(0.97) !important;
+  transition: transform 0.12s var(--ease-fluid) !important;
+}
+.continue-play-icon {
+  transition: transform 0.28s var(--ease-spring), box-shadow 0.28s var(--ease-fluid) !important;
+}
+.continue-card:hover .continue-play-icon {
+  transform: scale(1.15) !important;
+  box-shadow: 0 4px 18px var(--accent-glow) !important;
+}
+
+/* Interactive Button Physics: Tactile Spring Responses */
+.hero-btn {
+  transition: transform 0.24s var(--ease-spring), box-shadow 0.24s var(--ease-fluid), background 0.2s ease !important;
+  will-change: transform;
+}
+.hero-btn:hover {
+  transform: translateY(-2px) scale(1.025) !important;
+}
+.hero-btn:active {
+  transform: translateY(1px) scale(0.965) !important;
+}
+
+.genre-pill {
+  transition: transform 0.26s var(--ease-fluid), background 0.2s ease, border-color 0.26s var(--ease-fluid) !important;
+  will-change: transform;
+}
+.genre-pill:hover {
+  transform: translateY(-2px) scale(1.03) !important;
+}
+.genre-pill:active {
+  transform: scale(0.96) !important;
+}
+
+.episode-btn {
+  transition: transform 0.22s var(--ease-spring), background 0.2s ease, border-color 0.2s ease, box-shadow 0.22s var(--ease-fluid) !important;
+  will-change: transform;
+}
+.episode-btn:hover {
+  transform: translateY(-2px) scale(1.06) !important;
+}
+.episode-btn:active {
+  transform: scale(0.93) !important;
+}
+
+.server-chip {
+  transition: transform 0.22s var(--ease-spring), background 0.2s ease, border-color 0.2s ease, box-shadow 0.22s var(--ease-fluid) !important;
+  will-change: transform;
+}
+.server-chip:hover {
+  transform: translateY(-2px) scale(1.03) !important;
+}
+.server-chip:active {
+  transform: scale(0.96) !important;
+}
+
+.ep-nav-btn {
+  transition: transform 0.22s var(--ease-spring), background 0.2s ease, border-color 0.2s ease !important;
+  will-change: transform;
+}
+.ep-nav-btn:not(:disabled):hover {
+  transform: translateY(-2px) scale(1.03) !important;
+}
+.ep-nav-btn:not(:disabled):active {
+  transform: scale(0.96) !important;
+}
+
+/* Mobile Bottom Navigation Haptic Physics */
+.mobile-bottom-nav .tab-item {
+  transition: transform 0.22s var(--ease-spring), color 0.2s ease !important;
+}
+.mobile-bottom-nav .tab-item:active {
+  transform: scale(0.88) !important;
+}
+.mobile-bottom-nav .tab-item.active i {
+  transform: scale(1.12);
+  transition: transform 0.26s var(--ease-spring) !important;
+}
+
+/* Player Center & Prompt Controls Physics */
+.nf-center-btn {
+  transition: transform 0.24s var(--ease-spring), background 0.2s ease, box-shadow 0.24s var(--ease-fluid) !important;
+}
+.nf-center-btn:hover {
+  transform: scale(1.12) !important;
+}
+.nf-center-btn:active {
+  transform: scale(0.9) !important;
+}
+
+.nf-next-ep-prompt,
+.nf-skip-btn {
+  transition: transform 0.28s var(--ease-spring), background 0.2s ease, box-shadow 0.28s var(--ease-fluid) !important;
+  animation: promptSpringIn 0.36s var(--ease-spring) forwards !important;
+}
+.nf-next-ep-prompt:hover,
+.nf-skip-btn:hover {
+  transform: translateY(-2px) scale(1.05) !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.85) !important;
+}
+.nf-next-ep-prompt:active,
+.nf-skip-btn:active {
+  transform: scale(0.95) !important;
+}
+
+@keyframes promptSpringIn {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Popovers & Glass Panels Spring Physics */
+.nf-popover {
+  transform: translateY(12px) scale(0.94);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.3s var(--ease-fluid), opacity 0.24s ease !important;
+}
+.nf-popover.open {
+  transform: translateY(0) scale(1) !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* Modal Smooth Physics */
+.nf-download-card {
+  transform: scale(0.94) translateY(12px);
+  transition: transform 0.34s var(--ease-spring), opacity 0.25s ease !important;
+}
+.nf-download-modal.open .nf-download-card {
+  transform: scale(1) translateY(0) !important;
 }

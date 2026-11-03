@@ -91,6 +91,35 @@ function stopVideoPlayback() {
   if (frameContainer) {
     frameContainer.innerHTML = '';
   }
+  // Thoroughly pause, reset and unload all video and audio elements
+  document.querySelectorAll('video, audio').forEach(media => {
+    try {
+      media.pause();
+      media.currentTime = 0;
+      media.removeAttribute('src');
+      media.load();
+    } catch (e) {}
+  });
+  // Unload any iframe stream instances
+  document.querySelectorAll('#video-frame-container iframe, .video-iframe').forEach(iframe => {
+    try {
+      iframe.src = 'about:blank';
+      iframe.remove();
+    } catch (e) {}
+  });
+  // Exit fullscreen & unlock orientation if active
+  const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  if (isFs) {
+    try {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch (e) {}
+  }
+  try {
+    if (screen.orientation && screen.orientation.unlock) {
+      screen.orientation.unlock();
+    }
+  } catch (e) {}
 }
 
 // ─── View Routing ───────────────────────────────────────────────────
@@ -928,6 +957,79 @@ async function openWatchPlayer(episodeIndex) {
   const container = document.getElementById('player-page-container');
   if (!container) return;
 
+  const frameContainer = document.getElementById('video-frame-container');
+
+  // If the player is already mounted and active for this anime:
+  // Seamlessly transition in-place without wiping container.innerHTML
+  // This preserves Fullscreen mode & Landscape orientation on mobile!
+  if (frameContainer && activePlayerInstance && !activePlayerInstance.isDestroyed) {
+    // 1. Update Episode Title in header
+    const epTitleEl = container.querySelector('.player-ep-title');
+    if (epTitleEl) {
+      epTitleEl.textContent = `Episode ${ep.episode_number}${ep.title ? `: ${ep.title}` : ''}`;
+    }
+
+    // 2. Update Prev / Next buttons state outside player
+    const prevBtn = document.getElementById('player-prev-ep-btn');
+    if (prevBtn) {
+      prevBtn.disabled = episodeIndex <= 0;
+      prevBtn.style.opacity = episodeIndex <= 0 ? '0.4' : '1';
+    }
+    const nextBtn = document.getElementById('player-next-ep-btn');
+    if (nextBtn) {
+      nextBtn.disabled = episodeIndex >= state.activeEpisodes.length - 1;
+      nextBtn.style.opacity = episodeIndex >= state.activeEpisodes.length - 1 ? '0.4' : '1';
+    }
+
+    // 3. Update Drawer active episode button highlight
+    container.querySelectorAll('#player-episodes-drawer .episode-btn').forEach((btn, idx) => {
+      btn.classList.toggle('active', idx === episodeIndex);
+    });
+
+    // 4. Show smooth loading overlay inside player while fetching new streams
+    activePlayerInstance.setLoader(true, `Loading Episode ${ep.episode_number}...`);
+
+    // 5. Fetch streams for the new episode
+    const streamsData = await fetchApi(`/episode/${ep.episode_id}/streams?anime_id=${anime.anime_id}`);
+    state.currentStreams = streamsData || { sub: [], dub: [] };
+    state.activeServerIndex = 0;
+
+    renderServerChips();
+
+    // 6. Resolve selected server
+    let list = state.currentStreams[state.activeAudioType] || [];
+    if (!list.length) {
+      const fallbackType = state.activeAudioType === 'sub' ? 'dub' : 'sub';
+      if ((state.currentStreams[fallbackType] || []).length > 0) {
+        state.activeAudioType = fallbackType;
+        list = state.currentStreams[fallbackType];
+        document.getElementById('btn-audio-sub')?.classList.toggle('active', fallbackType === 'sub');
+        document.getElementById('btn-audio-dub')?.classList.toggle('active', fallbackType === 'dub');
+        renderServerChips();
+      }
+    }
+
+    const server = list[state.activeServerIndex];
+    if (server && server.embed_url) {
+      await activePlayerInstance.updateEpisode({
+        embedUrl: server.embed_url,
+        episodeNumber: ep.episode_number || (episodeIndex + 1),
+        episodeTitle: ep.title || '',
+        episodeId: ep.episode_id || '',
+        hasNextEp: episodeIndex < state.activeEpisodes.length - 1,
+        hasPrevEp: episodeIndex > 0,
+        audioType: state.activeAudioType,
+        hasSub: (state.currentStreams.sub || []).length > 0,
+        hasDub: (state.currentStreams.dub || []).length > 0,
+      });
+    } else {
+      loadStreamIntoPlayer();
+    }
+
+    refreshIcons();
+    return;
+  }
+
   container.innerHTML = `
     <div class="player-header">
       <button class="detail-back-btn" id="player-back-detail-btn" style="position:static">
@@ -1132,11 +1234,6 @@ function loadStreamIntoPlayer() {
   const frameContainer = document.getElementById('video-frame-container');
   if (!frameContainer) return;
 
-  if (activePlayerInstance) {
-    try { activePlayerInstance.destroy(); } catch (e) {}
-    activePlayerInstance = null;
-  }
-
   let list = state.currentStreams[state.activeAudioType] || [];
   if (!list.length) {
     const fallbackType = state.activeAudioType === 'sub' ? 'dub' : 'sub';
@@ -1152,6 +1249,7 @@ function loadStreamIntoPlayer() {
   const server = list[state.activeServerIndex];
 
   if (!server || !server.embed_url) {
+    stopVideoPlayback();
     frameContainer.innerHTML = `
       <div class="empty-state" style="padding: 60px 16px;">
         <i data-lucide="film" class="empty-state-icon"></i><br/>
@@ -1165,6 +1263,28 @@ function loadStreamIntoPlayer() {
 
   const anime = state.activeAnimeData || {};
   const ep = state.activeEpisodes[state.activeEpisodeIndex] || {};
+
+  // If player already mounted, update stream in-place (keeps fullscreen & landscape!)
+  if (activePlayerInstance && !activePlayerInstance.isDestroyed && activePlayerInstance.root) {
+    activePlayerInstance.updateEpisode({
+      embedUrl: server.embed_url,
+      episodeNumber: ep.episode_number || (state.activeEpisodeIndex + 1),
+      episodeTitle: ep.title || '',
+      episodeId: ep.episode_id || '',
+      audioType: state.activeAudioType,
+      hasSub: (state.currentStreams.sub || []).length > 0,
+      hasDub: (state.currentStreams.dub || []).length > 0,
+      hasNextEp: state.activeEpisodeIndex < state.activeEpisodes.length - 1,
+      hasPrevEp: state.activeEpisodeIndex > 0,
+    });
+    refreshIcons();
+    return;
+  }
+
+  if (activePlayerInstance) {
+    try { activePlayerInstance.destroy(); } catch (e) {}
+    activePlayerInstance = null;
+  }
 
   activePlayerInstance = new NetflixPlayer({
     container: frameContainer,
@@ -1204,6 +1324,7 @@ function loadStreamIntoPlayer() {
         showToast(`No ${targetAudio.toUpperCase()} stream available for this episode`);
       }
     },
+    onBack: () => showView('view-detail'),
     onToast: (msg) => showToast(msg),
   });
 
@@ -1655,4 +1776,19 @@ document.addEventListener('DOMContentLoaded', () => {
   updateWatchlistBadge();
   initHome();
   refreshIcons();
+});
+
+// ─── Lifecycle Background Audio / Video Cutoff ───────────────────────
+window.addEventListener('pagehide', () => {
+  stopVideoPlayback();
+});
+window.addEventListener('beforeunload', () => {
+  stopVideoPlayback();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (activePlayerInstance?.video && !activePlayerInstance.video.paused) {
+      try { activePlayerInstance.video.pause(); } catch (e) {}
+    }
+  }
 });

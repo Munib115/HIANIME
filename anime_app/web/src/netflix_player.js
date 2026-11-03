@@ -81,6 +81,7 @@ export class NetflixPlayer {
     this.hasNextEp = Boolean(options.hasNextEp);
     this.hasPrevEp = Boolean(options.hasPrevEp);
     this.poster = options.poster || '';
+    this.onBack = options.onBack || (() => {});
     this.onNextEpisode = options.onNextEpisode || (() => {});
     this.onPrevEpisode = options.onPrevEpisode || (() => {});
     this.onSwitchAudio = options.onSwitchAudio || (() => {});
@@ -148,6 +149,9 @@ export class NetflixPlayer {
         <!-- Top Glass Bar -->
         <div class="nf-top-bar" id="nf-top-bar">
           <div class="nf-top-left">
+            <button type="button" class="nf-glass-icon-btn nf-player-back-btn" id="nf-player-back-btn" title="Back">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
             <span class="nf-badge-adfree">
               <span class="nf-live-dot"></span> AD-FREE
             </span>
@@ -646,10 +650,31 @@ export class NetflixPlayer {
       }
     });
 
-    // Next Episode Buttons
+    // In-Player Back Button
+    this.root.querySelector('#nf-player-back-btn')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+      if (isFs) {
+        try {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+          if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock();
+        } catch (err) {}
+      }
+      this.onBack();
+    });
+
+    // Next Episode Buttons (Preserve landscape & fullscreen during user interaction)
     [this.root.querySelector('#nf-btn-next'), this.root.querySelector('#nf-next-ep-prompt')].forEach(btn => {
       btn?.addEventListener('click', (e) => {
         e.stopPropagation();
+        try {
+          const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+          const isLandscape = window.matchMedia('(orientation: landscape)').matches || (window.innerWidth > window.innerHeight);
+          if ((isFs || isLandscape) && screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('landscape').catch(() => {});
+          }
+        } catch (err) {}
         this.onNextEpisode();
       });
     });
@@ -846,6 +871,119 @@ export class NetflixPlayer {
       this.switchToIframeFallback();
     }
   }
+
+  async updateEpisode(options) {
+    if (this.isDestroyed) return;
+
+    // Detect if the player is currently in fullscreen or landscape
+    const wasFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement || this.video?.webkitDisplayingFullscreen);
+    const wasLandscape = window.matchMedia('(orientation: landscape)').matches || 
+                         (screen.orientation && screen.orientation.type && screen.orientation.type.includes('landscape')) ||
+                         (window.innerWidth > window.innerHeight);
+
+    // Actively maintain landscape orientation lock
+    if (wasFs || wasLandscape) {
+      try {
+        if (screen.orientation && screen.orientation.lock) {
+          screen.orientation.lock('landscape').catch(() => {});
+        }
+      } catch (e) {}
+    }
+
+    this.embedUrl = options.embedUrl;
+    this.episodeNumber = options.episodeNumber || this.episodeNumber;
+    this.episodeTitle = options.episodeTitle || '';
+    this.episodeId = options.episodeId || '';
+    this.hasNextEp = Boolean(options.hasNextEp);
+    this.hasPrevEp = Boolean(options.hasPrevEp);
+    this.audioType = options.audioType || this.audioType;
+    this.hasSub = options.hasSub !== false;
+    this.hasDub = Boolean(options.hasDub);
+    this.resumeKey = `kuro_pos_${this.animeId}_${this.episodeId}`;
+
+    // If previously switched to iframe fallback, restore Netflix player shell
+    if (!this.root || !this.video) {
+      this.renderShell();
+      this.bindEvents();
+    }
+
+    // Update Top bar UI
+    const epLabel = `E${this.episodeNumber}${this.episodeTitle ? ` • ${this.episodeTitle}` : ''}`;
+    const topEp = this.root?.querySelector('.nf-top-ep');
+    if (topEp) topEp.textContent = epLabel;
+
+    // Update Next Episode buttons in player UI
+    const nextBtn = this.root?.querySelector('#nf-btn-next');
+    if (nextBtn) {
+      nextBtn.style.display = this.hasNextEp ? 'inline-flex' : 'none';
+    }
+    const nextPrompt = this.root?.querySelector('#nf-next-ep-prompt');
+    if (nextPrompt) {
+      nextPrompt.style.display = 'none';
+    }
+    const skipBtn = this.root?.querySelector('#nf-skip-btn');
+    if (skipBtn) {
+      skipBtn.style.display = 'none';
+    }
+
+    // Reset Subtitles
+    this.cues = [];
+    const subLayer = this.root?.querySelector('#nf-subtitle-layer');
+    if (subLayer) subLayer.innerHTML = '';
+
+    // Reset scrubber timeline
+    const progress = this.root?.querySelector('#nf-timeline-progress');
+    if (progress) progress.style.width = '0%';
+    const buffered = this.root?.querySelector('#nf-timeline-buffered');
+    if (buffered) buffered.style.width = '0%';
+    const timeCur = this.root?.querySelector('#nf-time-current');
+    if (timeCur) timeCur.textContent = '00:00';
+    const timeRem = this.root?.querySelector('#nf-time-remaining');
+    if (timeRem) timeRem.textContent = '00:00';
+
+    // Show smooth loading state in-place (without touching DOM structure or exiting fullscreen)
+    this.setLoader(true, `Playing Episode ${this.episodeNumber}...`);
+
+    // Reset video time & pause old playback
+    if (this.video) {
+      try {
+        this.video.pause();
+        this.video.currentTime = 0;
+      } catch (e) {}
+    }
+
+    this.closeAllPopovers();
+
+    // Re-resolve and play the new stream
+    await this.resolveAndPlay();
+
+    // Re-verify fullscreen & landscape state
+    if (wasFs) {
+      const currentFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement || this.video?.webkitDisplayingFullscreen);
+      if (!currentFs && this.root) {
+        try {
+          if (this.root.requestFullscreen) {
+            await this.root.requestFullscreen();
+          } else if (this.root.webkitRequestFullscreen) {
+            this.root.webkitRequestFullscreen();
+          } else if (this.video?.webkitEnterFullscreen) {
+            this.video.webkitEnterFullscreen();
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (wasFs || wasLandscape) {
+      try {
+        if (screen.orientation && screen.orientation.lock) {
+          screen.orientation.lock('landscape').catch(() => {});
+        }
+      } catch (e) {}
+    }
+
+    this.updateFullscreenUI();
+  }
+
 
   populateQualityMenu(qualities) {
     const qList = this.root?.querySelector('#nf-quality-list');
