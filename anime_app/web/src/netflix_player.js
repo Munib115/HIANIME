@@ -104,6 +104,10 @@ export class NetflixPlayer {
     this.lastTapSide = null;
     this.resumeKey = `kuro_pos_${this.animeId}_${this.episodeId}`;
 
+    // Live sync with the global Settings modal
+    this.settingsHandler = (e) => this.applyExternalSetting(e.detail || {});
+    window.addEventListener('kuro:settings-changed', this.settingsHandler);
+
     this.mount();
   }
 
@@ -536,7 +540,8 @@ export class NetflixPlayer {
       this.updateBufferedUI();
     });
     this.video.addEventListener('ended', () => {
-      if (this.hasNextEp) {
+      const autoplayOn = localStorage.getItem('kuro_setting_autoplay') !== 'false';
+      if (this.hasNextEp && autoplayOn) {
         this.onToast('Playing Next Episode...');
         this.onNextEpisode();
       }
@@ -636,6 +641,7 @@ export class NetflixPlayer {
     autoSkipCb?.addEventListener('change', (e) => {
       this.autoSkip = e.target.checked;
       localStorage.setItem('kuro_auto_skip', String(this.autoSkip));
+      window.dispatchEvent(new CustomEvent('kuro:settings-changed', { detail: { key: 'autoSkip', value: this.autoSkip, source: 'player' } }));
       this.onToast(this.autoSkip ? 'Auto-Skip Intro enabled' : 'Auto-Skip Intro disabled');
     });
 
@@ -683,8 +689,12 @@ export class NetflixPlayer {
     this.root.querySelectorAll('.nf-audio-pill').forEach(pill => {
       pill.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (pill.disabled) return;
         const targetAudio = pill.dataset.audio;
-        if (targetAudio && targetAudio !== this.audioType) {
+        if (!targetAudio) return;
+        this.audioType = targetAudio;
+        this.updateAudioUI();
+        if (typeof this.onSwitchAudio === 'function') {
           this.onSwitchAudio(targetAudio);
         }
       });
@@ -803,11 +813,8 @@ export class NetflixPlayer {
       this.populateSubtitlesMenu(data.subtitles || []);
       this.populateDownloadOptions(data.qualities || []);
 
-      const masterSrc = data.master_url.startsWith('http')
-        ? data.master_url
-        : `${this.apiBase}${data.master_url.replace(/^\/api/, '')}`;
-
-      this.attachHlsSource(masterSrc);
+      // Honour the "Preferred Quality" setting from the Settings modal
+      this.applyQuality(this.getPreferredQualityIdx(), { seekTime: null, silent: true });
     } catch (err) {
       console.warn('[NetflixPlayer] Direct stream resolve failed, switching to Clean Embed fallback:', err);
       this.switchToIframeFallback();
@@ -912,6 +919,9 @@ export class NetflixPlayer {
     const topEp = this.root?.querySelector('.nf-top-ep');
     if (topEp) topEp.textContent = epLabel;
 
+    // Update Audio Pills in player UI
+    this.updateAudioUI();
+
     // Update Next Episode buttons in player UI
     const nextBtn = this.root?.querySelector('#nf-btn-next');
     if (nextBtn) {
@@ -984,17 +994,34 @@ export class NetflixPlayer {
     this.updateFullscreenUI();
   }
 
+  updateAudioUI() {
+    if (!this.root) return;
+    const subPill = this.root.querySelector('.nf-audio-pill[data-audio="sub"]');
+    const dubPill = this.root.querySelector('.nf-audio-pill[data-audio="dub"]');
+    if (subPill) {
+      subPill.classList.toggle('active', this.audioType === 'sub');
+      subPill.disabled = !this.hasSub;
+      subPill.style.opacity = this.hasSub ? '1' : '0.4';
+      subPill.style.cursor = this.hasSub ? 'pointer' : 'not-allowed';
+    }
+    if (dubPill) {
+      dubPill.classList.toggle('active', this.audioType === 'dub');
+      dubPill.disabled = !this.hasDub;
+      dubPill.style.opacity = this.hasDub ? '1' : '0.4';
+      dubPill.style.cursor = this.hasDub ? 'pointer' : 'not-allowed';
+    }
+  }
 
   populateQualityMenu(qualities) {
+    this.qualities = qualities || [];
     const qList = this.root?.querySelector('#nf-quality-list');
-    const qTag = this.root?.querySelector('#nf-quality-tag');
     if (!qList) return;
 
-    const topLabel = qualities.length ? `${qualities[0].height}p` : 'HD';
-    if (qTag) qTag.textContent = topLabel;
+    const topLabel = this.qualities.length ? `${this.qualities[0].height}p` : 'HD';
+    this.topQualityLabel = topLabel;
 
     let html = `<button type="button" class="nf-popover-item active" data-q-idx="auto">Auto (${topLabel})</button>`;
-    qualities.forEach((q, idx) => {
+    this.qualities.forEach((q, idx) => {
       html += `<button type="button" class="nf-popover-item" data-q-idx="${idx}">${q.label}</button>`;
     });
     qList.innerHTML = html;
@@ -1002,33 +1029,77 @@ export class NetflixPlayer {
     qList.querySelectorAll('.nf-popover-item').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        qList.querySelectorAll('.nf-popover-item').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-
-        const qIdx = btn.dataset.qIdx;
-        const curTime = this.video?.currentTime || 0;
-
-        if (qIdx === 'auto') {
-          if (qTag) qTag.textContent = topLabel;
-          const masterSrc = this.streamData.master_url.startsWith('http')
-            ? this.streamData.master_url
-            : `${this.apiBase}${this.streamData.master_url.replace(/^\/api/, '')}`;
-          this.attachHlsSource(masterSrc, curTime);
-          this.onToast(`Quality: Auto (${topLabel})`);
-        } else {
-          const chosen = qualities[Number(qIdx)];
-          if (chosen) {
-            if (qTag) qTag.textContent = `${chosen.height}p`;
-            const qUrl = chosen.url.startsWith('http')
-              ? chosen.url
-              : `${this.apiBase}${chosen.url.replace(/^\/api/, '')}`;
-            this.attachHlsSource(qUrl, curTime);
-            this.onToast(`Quality: ${chosen.label}`);
-          }
-        }
+        this.applyQuality(btn.dataset.qIdx, { seekTime: this.video?.currentTime || 0 });
         this.closeAllPopovers();
       });
     });
+  }
+
+  /** Map the saved "Preferred Quality" (auto | 1080p | 720p) to a quality index. */
+  getPreferredQualityIdx() {
+    const pref = localStorage.getItem('kuro_setting_quality') || 'auto';
+    const list = this.qualities || [];
+    if (pref === 'auto' || !list.length) return 'auto';
+    const target = parseInt(pref, 10);
+    let idx = list.findIndex(q => Number(q.height) === target);
+    if (idx === -1) {
+      // Closest quality at or below the target, otherwise fall back to Auto
+      list.forEach((q, i) => {
+        const h = Number(q.height);
+        if (h <= target && (idx === -1 || h > Number(list[idx].height))) idx = i;
+      });
+    }
+    return idx === -1 ? 'auto' : String(idx);
+  }
+
+  applyQuality(qIdx, { seekTime = null, silent = false } = {}) {
+    if (!this.streamData || this.isDestroyed) return;
+    const qList = this.root?.querySelector('#nf-quality-list');
+    const qTag = this.root?.querySelector('#nf-quality-tag');
+    const topLabel = this.topQualityLabel || 'HD';
+    const key = String(qIdx);
+
+    qList?.querySelectorAll('.nf-popover-item').forEach(b => {
+      b.classList.toggle('active', b.dataset.qIdx === key);
+    });
+
+    const toAbs = (u) => (u.startsWith('http') ? u : `${this.apiBase}${u.replace(/^\/api/, '')}`);
+
+    if (key === 'auto') {
+      if (qTag) qTag.textContent = topLabel;
+      this.activeQuality = 'auto';
+      this.attachHlsSource(toAbs(this.streamData.master_url), seekTime);
+      if (!silent) this.onToast(`Quality: Auto (${topLabel})`);
+      return;
+    }
+
+    const chosen = (this.qualities || [])[Number(key)];
+    if (!chosen) return;
+    if (qTag) qTag.textContent = `${chosen.height}p`;
+    this.activeQuality = Number(chosen.height);
+    this.attachHlsSource(toAbs(chosen.url), seekTime);
+    if (!silent) this.onToast(`Quality: ${chosen.label}`);
+  }
+
+  /** Apply a change coming from the global Settings modal while playing. */
+  applyExternalSetting({ key, value, source }) {
+    if (this.isDestroyed || source === 'player') return;
+    if (key === 'autoSkip') {
+      this.autoSkip = Boolean(value);
+      const cb = this.root?.querySelector('#nf-autoskip-cb');
+      if (cb) cb.checked = this.autoSkip;
+    } else if (key === 'quality') {
+      const idx = this.getPreferredQualityIdx();
+      if (this.streamData && String(idx) !== String(this.activeQualityKey())) {
+        this.applyQuality(idx, { seekTime: this.video?.currentTime || 0, silent: true });
+      }
+    }
+  }
+
+  activeQualityKey() {
+    if (this.activeQuality === 'auto') return 'auto';
+    const i = (this.qualities || []).findIndex(q => Number(q.height) === Number(this.activeQuality));
+    return i === -1 ? 'auto' : String(i);
   }
 
   populateSubtitlesMenu(subtitles) {
@@ -1489,6 +1560,10 @@ export class NetflixPlayer {
   }
 
   destroy() {
+    if (this.settingsHandler) {
+      window.removeEventListener('kuro:settings-changed', this.settingsHandler);
+      this.settingsHandler = null;
+    }
     this.isDestroyed = true;
     clearTimeout(this.controlsTimeout);
     if (this.downloadAbortController) {

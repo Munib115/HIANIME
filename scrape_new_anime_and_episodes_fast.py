@@ -314,8 +314,10 @@ def main():
     seen_target_ids = set()
 
     scan_sources = [
-        (f"{BASE_URL}/recently-updated?page={{}}", 15),
-        (f"{BASE_URL}/top-airing?page={{}}", 6),
+        (f"{BASE_URL}/recently-updated?page={{}}", 20),
+        (f"{BASE_URL}/top-airing?page={{}}", 8),
+        (f"{BASE_URL}/movie?page={{}}", 8),
+        (f"{BASE_URL}/tv?page={{}}", 8),
     ]
 
     for url_pattern, max_pages in scan_sources:
@@ -394,7 +396,7 @@ def main():
     new_anime_targets = []
     seen_new_ids = set()
 
-    for p in range(1, 15):
+    for p in range(1, 25):
         html = fetch(f"{BASE_URL}/new-anime?page={p}")
         if not html: break
         soup = BeautifulSoup(html, "html.parser")
@@ -428,6 +430,9 @@ def main():
 
             al = enrich_anilist(meta["title"])
             eps = get_episodes(aid)
+            if not eps:
+                print(f"  [{idx}/{len(new_anime_targets)}] [SKIPPING 0-EP] {meta['title']} (no episodes uploaded on HiAnime yet)")
+                continue
             streams = get_all_episode_streams(eps)
 
             ts = time.strftime("%Y-%m-%d %H:%M:%S")

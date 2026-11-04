@@ -31,7 +31,11 @@ import {
   Bell,
   ExternalLink,
   Download,
-  Plus
+  Plus,
+  User,
+  Settings,
+  LogOut,
+  Trash2
 } from 'lucide';
 
 // ─── Global State & Storage ─────────────────────────────────────────
@@ -41,7 +45,7 @@ const state = {
   activeAnimeData: null,
   activeEpisodes: [],
   activeEpisodeIndex: 0,
-  activeAudioType: 'sub', // 'sub' | 'dub'
+  activeAudioType: localStorage.getItem('kuro_preferred_audio') === 'dub' ? 'dub' : 'sub', // 'sub' | 'dub'
   activeServerIndex: 0,
   currentStreams: { sub: [], dub: [] },
   browsePage: 1,
@@ -67,7 +71,8 @@ function refreshIcons() {
     icons: {
       Home, Compass, Search, Bookmark, Play, Star, ArrowLeft,
       Layers, Volume2, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
-      ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download, Plus
+      ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download, Plus,
+      User, Settings, LogOut, Trash2
     }
   });
 }
@@ -655,6 +660,9 @@ async function initHome() {
           if (statusSelect) statusSelect.value = '';
           if (sortSelect) sortSelect.value = 'popular';
         }
+        syncCustomSelectDisplay('browse-status-select');
+        syncCustomSelectDisplay('browse-type-select');
+        syncCustomSelectDisplay('browse-sort-select');
         state.browsePage = 1;
         switchTab('browse');
       });
@@ -664,8 +672,91 @@ async function initHome() {
   refreshIcons();
 }
 
+// ─── Custom Select Synchronization ──────────────────────────────────
+function syncCustomSelectDisplay(selectId) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const wrap = select.closest('.custom-select-wrapper');
+  if (!wrap) return;
+  const val = select.value;
+  const opt = wrap.querySelector(`.custom-select-option[data-value="${val}"]`);
+  if (opt) {
+    wrap.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('active'));
+    opt.classList.add('active');
+    const label = wrap.querySelector('.custom-select-label');
+    if (label) label.textContent = opt.textContent.replace('✓', '').trim();
+  }
+}
+
+function initCustomSelects() {
+  document.querySelectorAll('.custom-select-wrapper').forEach(wrap => {
+    const trigger = wrap.querySelector('.custom-select-trigger');
+    const label = wrap.querySelector('.custom-select-label');
+    const nativeSelect = wrap.querySelector('.filter-select');
+    const options = wrap.querySelectorAll('.custom-select-option');
+
+    trigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wasOpen = wrap.classList.contains('open');
+      // Close other open custom selects
+      document.querySelectorAll('.custom-select-wrapper.open').forEach(w => {
+        if (w !== wrap) {
+          w.classList.remove('open');
+          w.querySelector('.custom-select-trigger')?.setAttribute('aria-expanded', 'false');
+        }
+      });
+      wrap.classList.toggle('open', !wasOpen);
+      trigger.setAttribute('aria-expanded', String(!wasOpen));
+    });
+
+    options.forEach(opt => {
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = opt.dataset.value;
+        const text = opt.textContent.replace('✓', '').trim();
+        if (label) label.textContent = text;
+        
+        options.forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+
+        wrap.classList.remove('open');
+        trigger?.setAttribute('aria-expanded', 'false');
+
+        if (nativeSelect && nativeSelect.value !== val) {
+          nativeSelect.value = val;
+          nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+    });
+  });
+
+  // Global click outside to close dropdowns
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.custom-select-wrapper')) {
+      document.querySelectorAll('.custom-select-wrapper.open').forEach(w => {
+        w.classList.remove('open');
+        w.querySelector('.custom-select-trigger')?.setAttribute('aria-expanded', 'false');
+      });
+    }
+  });
+
+  // Close on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.custom-select-wrapper.open').forEach(w => {
+        w.classList.remove('open');
+        w.querySelector('.custom-select-trigger')?.setAttribute('aria-expanded', 'false');
+      });
+    }
+  });
+}
+
 // ─── Browse View ────────────────────────────────────────────────────
 async function loadBrowse() {
+  syncCustomSelectDisplay('browse-status-select');
+  syncCustomSelectDisplay('browse-type-select');
+  syncCustomSelectDisplay('browse-sort-select');
+
   // Load genres once
   const genreContainer = document.getElementById('browse-genres-list');
   if (genreContainer && genreContainer.children.length <= 1) {
@@ -707,6 +798,8 @@ async function fetchBrowseResults() {
   const res = await fetchApi(`/browse?${params.toString()}`);
   if (!res || !res.results?.length) {
     grid.innerHTML = '<div class="empty-state">No anime found matching filters.</div>';
+    const pagination = document.getElementById('browse-pagination');
+    if (pagination) pagination.style.display = 'none';
     return;
   }
 
@@ -718,7 +811,16 @@ async function fetchBrowseResults() {
   const pagination = document.getElementById('browse-pagination');
   if (pagination) {
     pagination.style.display = 'flex';
-    document.getElementById('browse-page-indicator').textContent = `Page ${state.browsePage}`;
+    const pageInd = document.getElementById('browse-page-indicator');
+    if (pageInd) pageInd.textContent = `Page ${state.browsePage}`;
+    const prevBtn = document.getElementById('browse-prev-page');
+    if (prevBtn) {
+      prevBtn.disabled = state.browsePage <= 1;
+    }
+    const nextBtn = document.getElementById('browse-next-page');
+    if (nextBtn) {
+      nextBtn.disabled = (res.results || []).length < 24;
+    }
   }
 
   refreshIcons();
@@ -1003,11 +1105,10 @@ async function openWatchPlayer(episodeIndex) {
       if ((state.currentStreams[fallbackType] || []).length > 0) {
         state.activeAudioType = fallbackType;
         list = state.currentStreams[fallbackType];
-        document.getElementById('btn-audio-sub')?.classList.toggle('active', fallbackType === 'sub');
-        document.getElementById('btn-audio-dub')?.classList.toggle('active', fallbackType === 'dub');
-        renderServerChips();
       }
     }
+    syncAudioLanguageUI(state.activeAudioType);
+    renderServerChips();
 
     const server = list[state.activeServerIndex];
     if (server && server.embed_url) {
@@ -1154,19 +1255,25 @@ async function openWatchPlayer(episodeIndex) {
   });
 
   document.getElementById('btn-audio-sub')?.addEventListener('click', () => {
+    if ((state.currentStreams?.sub || []).length === 0) {
+      showToast('No SUB stream available for this episode');
+      return;
+    }
     state.activeAudioType = 'sub';
     state.activeServerIndex = 0;
-    document.getElementById('btn-audio-sub')?.classList.add('active');
-    document.getElementById('btn-audio-dub')?.classList.remove('active');
+    syncAudioLanguageUI('sub');
     renderServerChips();
     loadStreamIntoPlayer();
   });
 
   document.getElementById('btn-audio-dub')?.addEventListener('click', () => {
+    if ((state.currentStreams?.dub || []).length === 0) {
+      showToast('No DUB stream available for this episode');
+      return;
+    }
     state.activeAudioType = 'dub';
     state.activeServerIndex = 0;
-    document.getElementById('btn-audio-dub')?.classList.add('active');
-    document.getElementById('btn-audio-sub')?.classList.remove('active');
+    syncAudioLanguageUI('dub');
     renderServerChips();
     loadStreamIntoPlayer();
   });
@@ -1191,9 +1298,44 @@ async function openWatchPlayer(episodeIndex) {
   state.currentStreams = streamsData || { sub: [], dub: [] };
   state.activeServerIndex = 0;
 
+  syncAudioLanguageUI(state.activeAudioType);
   renderServerChips();
   loadStreamIntoPlayer();
   refreshIcons();
+}
+
+function syncAudioLanguageUI(type) {
+  const current = type || state.activeAudioType || 'sub';
+  state.activeAudioType = current;
+
+  const hasSub = (state.currentStreams?.sub || []).length > 0;
+  const hasDub = (state.currentStreams?.dub || []).length > 0;
+
+  // 1. Sync Frontend Page Buttons under "Audio Language"
+  const subBtn = document.getElementById('btn-audio-sub');
+  const dubBtn = document.getElementById('btn-audio-dub');
+  if (subBtn) {
+    subBtn.classList.toggle('active', current === 'sub');
+    subBtn.disabled = !hasSub;
+    subBtn.style.opacity = hasSub ? '1' : '0.45';
+    subBtn.style.cursor = hasSub ? 'pointer' : 'not-allowed';
+  }
+  if (dubBtn) {
+    dubBtn.classList.toggle('active', current === 'dub');
+    dubBtn.disabled = !hasDub;
+    dubBtn.style.opacity = hasDub ? '1' : '0.45';
+    dubBtn.style.cursor = hasDub ? 'pointer' : 'not-allowed';
+  }
+
+  // 2. Sync Video Player Internal Pills
+  if (activePlayerInstance && !activePlayerInstance.isDestroyed) {
+    activePlayerInstance.audioType = current;
+    activePlayerInstance.hasSub = hasSub;
+    activePlayerInstance.hasDub = hasDub;
+    if (typeof activePlayerInstance.updateAudioUI === 'function') {
+      activePlayerInstance.updateAudioUI();
+    }
+  }
 }
 
 function renderServerChips() {
@@ -1240,11 +1382,9 @@ function loadStreamIntoPlayer() {
     if ((state.currentStreams[fallbackType] || []).length > 0) {
       state.activeAudioType = fallbackType;
       list = state.currentStreams[fallbackType];
-      document.getElementById('btn-audio-sub')?.classList.toggle('active', fallbackType === 'sub');
-      document.getElementById('btn-audio-dub')?.classList.toggle('active', fallbackType === 'dub');
-      renderServerChips();
     }
   }
+  syncAudioLanguageUI(state.activeAudioType);
 
   const server = list[state.activeServerIndex];
 
@@ -1312,15 +1452,15 @@ function loadStreamIntoPlayer() {
       }
     },
     onSwitchAudio: (targetAudio) => {
-      if ((state.currentStreams[targetAudio] || []).length > 0) {
+      if ((state.currentStreams?.[targetAudio] || []).length > 0) {
         state.activeAudioType = targetAudio;
         state.activeServerIndex = 0;
-        document.getElementById('btn-audio-sub')?.classList.toggle('active', targetAudio === 'sub');
-        document.getElementById('btn-audio-dub')?.classList.toggle('active', targetAudio === 'dub');
+        syncAudioLanguageUI(targetAudio);
         renderServerChips();
         loadStreamIntoPlayer();
         showToast(`Switched to ${targetAudio.toUpperCase()} audio`);
       } else {
+        syncAudioLanguageUI(state.activeAudioType);
         showToast(`No ${targetAudio.toUpperCase()} stream available for this episode`);
       }
     },
@@ -1431,12 +1571,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.browsePage > 1) {
       state.browsePage--;
       fetchBrowseResults();
+      document.getElementById('view-browse')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   });
 
   document.getElementById('browse-next-page')?.addEventListener('click', () => {
     state.browsePage++;
     fetchBrowseResults();
+    document.getElementById('view-browse')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   // Header Scroll Spy (Transparent at top, Frosted glass on scroll)
@@ -1489,26 +1631,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!inboxModal || isClosingModal || !inboxModal.classList.contains('active')) return;
     isClosingModal = true;
 
-    // Calculate dynamic flight path to the Notification Bell icon
-    const bellBtn = document.getElementById('header-inbox-btn');
-    const card = inboxModal.querySelector('.inbox-modal-card');
-    if (bellBtn && card) {
-      const bellRect = bellBtn.getBoundingClientRect();
-      const cardRect = card.getBoundingClientRect();
-
-      const bellCenterX = bellRect.left + bellRect.width / 2;
-      const bellCenterY = bellRect.top + bellRect.height / 2;
-
-      const cardCenterX = cardRect.left + cardRect.width / 2;
-      const cardCenterY = cardRect.top + cardRect.height / 2;
-
-      const deltaX = Math.round(bellCenterX - cardCenterX);
-      const deltaY = Math.round(bellCenterY - cardCenterY);
-
-      card.style.setProperty('--fly-x', `${deltaX}px`);
-      card.style.setProperty('--fly-y', `${deltaY}px`);
-    }
-
+    // Instant lag-free GPU closing animation
     inboxModal.classList.add('closing');
     inboxModal.setAttribute('aria-hidden', 'true');
 
@@ -1517,14 +1640,16 @@ document.addEventListener('DOMContentLoaded', () => {
       document.body.style.overflow = '';
       isClosingModal = false;
 
-      // Pulse the notification bell icon to signify it is stored in the inbox panel
+      // Gentle pulse on notification bell without layout thrashing
+      const bellBtn = document.getElementById('header-inbox-btn');
       if (bellBtn) {
         bellBtn.classList.remove('bell-ring-pulse');
-        void bellBtn.offsetWidth; // Force layout recalculation
-        bellBtn.classList.add('bell-ring-pulse');
-        setTimeout(() => bellBtn.classList.remove('bell-ring-pulse'), 500);
+        requestAnimationFrame(() => {
+          bellBtn.classList.add('bell-ring-pulse');
+          setTimeout(() => bellBtn.classList.remove('bell-ring-pulse'), 450);
+        });
       }
-    }, 260);
+    }, 180);
   }
 
   async function copyBnbWalletAddress() {
@@ -1547,7 +1672,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('#btn-copy-wallet, #wallet-card-box').forEach(el => el.classList.add('copied'));
       document.querySelectorAll('.icon-copy-default').forEach(el => el.style.display = 'none');
       document.querySelectorAll('.icon-copy-check').forEach(el => el.style.display = 'block');
-      if (copyWalletText) copyWalletText.textContent = 'Address Copied to Clipboard!';
+      if (copyWalletText) copyWalletText.textContent = 'Copied';
 
       showToast('BNB Smart Chain address copied!');
 
@@ -1555,7 +1680,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('#btn-copy-wallet, #wallet-card-box').forEach(el => el.classList.remove('copied'));
         document.querySelectorAll('.icon-copy-default').forEach(el => el.style.display = 'block');
         document.querySelectorAll('.icon-copy-check').forEach(el => el.style.display = 'none');
-        if (copyWalletText) copyWalletText.textContent = 'Copy BNB Wallet Address';
+        if (copyWalletText) copyWalletText.textContent = 'Copy address';
       }, 2600);
     } catch (err) {
       showToast('Press and hold address to copy');
@@ -1772,7 +1897,319 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+
+// ─── Visual Settings (Ambient Glow / Motion) ─────────────────────────
+function applyVisualSettings() {
+  const ambientOn = localStorage.getItem('kuro_setting_ambient') !== 'false';
+  const physicsOn = localStorage.getItem('kuro_setting_physics') !== 'false';
+  document.body.classList.toggle('kuro-ambient-off', !ambientOn);
+  document.body.classList.toggle('kuro-reduced-motion', !physicsOn);
+}
+
+// ─── User Profile, Google Sign-In & Settings Modal Controller ───────
+function initUserMenuAndSettings() {
+  const userBtn = document.getElementById('header-user-btn');
+  const userMenuWrap = document.getElementById('user-menu-wrapper');
+  const userPopover = document.getElementById('user-dropdown-popover');
+  const userStatusDot = document.getElementById('user-status-dot');
+  const userDisplayName = document.getElementById('user-display-name');
+  const userDisplayStatus = document.getElementById('user-display-status');
+  const userAvatarBadge = document.getElementById('user-avatar-badge');
+  const googleLoginBtn = document.getElementById('btn-user-google-login');
+  const googleLoginLabel = document.getElementById('google-login-label');
+  const googleLoginSub = document.getElementById('google-login-sub');
+
+  // Modals
+  const settingsModal = document.getElementById('kuro-settings-modal');
+  const btnCloseSettings = document.getElementById('btn-close-settings-modal');
+  const btnDoneSettings = document.getElementById('btn-done-settings');
+  const btnUserSettings = document.getElementById('btn-user-settings');
+  const btnClearHistory = document.getElementById('btn-clear-watch-history');
+
+  const googleModal = document.getElementById('kuro-google-auth-modal');
+  const btnCloseGoogle = document.getElementById('btn-close-google-auth');
+  const btnConfirmGoogle = document.getElementById('btn-google-confirm-signin');
+  const btnGoogleAccountSelect = document.getElementById('btn-google-account-select');
+
+  // Load User Auth State
+  function renderAuthState() {
+    const savedUser = JSON.parse(localStorage.getItem('kuro_user_profile') || 'null');
+    if (savedUser && savedUser.email) {
+      if (userDisplayName) userDisplayName.textContent = savedUser.name || 'Kuro Member';
+      if (userDisplayStatus) userDisplayStatus.textContent = savedUser.email;
+      if (userStatusDot) {
+        userStatusDot.classList.remove('guest');
+      }
+      if (userAvatarBadge) {
+        userAvatarBadge.innerHTML = `<span class="user-avatar-initial">${(savedUser.name || 'K')[0].toUpperCase()}</span>`;
+      }
+      if (googleLoginLabel) googleLoginLabel.textContent = 'Sign Out';
+      if (googleLoginSub) googleLoginSub.textContent = `Logged in as ${savedUser.name || 'Otaku'}`;
+      if (googleLoginBtn) {
+        googleLoginBtn.classList.add('logged-in');
+      }
+    } else {
+      if (userDisplayName) userDisplayName.textContent = 'Guest Otaku';
+      if (userDisplayStatus) userDisplayStatus.textContent = 'Free Member • Ad-Free';
+      if (userStatusDot) {
+        userStatusDot.classList.add('guest');
+      }
+      if (userAvatarBadge) {
+        userAvatarBadge.innerHTML = '<i data-lucide="user"></i>';
+      }
+      if (googleLoginLabel) googleLoginLabel.textContent = 'Login with Google';
+      if (googleLoginSub) googleLoginSub.textContent = 'Sync watchlist & history';
+      if (googleLoginBtn) {
+        googleLoginBtn.classList.remove('logged-in');
+      }
+    }
+    refreshIcons();
+  }
+
+  // Toggle Dropdown
+  userBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = userPopover?.classList.contains('open');
+    if (isOpen) {
+      userPopover?.classList.remove('open');
+      userBtn.setAttribute('aria-expanded', 'false');
+      userBtn.classList.remove('active');
+    } else {
+      userPopover?.classList.add('open');
+      userBtn.setAttribute('aria-expanded', 'true');
+      userBtn.classList.add('active');
+    }
+  });
+
+  // Global Click Outside to close Popover
+  document.addEventListener('click', (e) => {
+    if (userMenuWrap && !userMenuWrap.contains(e.target)) {
+      userPopover?.classList.remove('open');
+      userBtn?.setAttribute('aria-expanded', 'false');
+      userBtn?.classList.remove('active');
+    }
+  });
+
+  // Google Login / Logout Flow
+  googleLoginBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    userPopover?.classList.remove('open');
+    userBtn?.setAttribute('aria-expanded', 'false');
+    userBtn?.classList.remove('active');
+
+    const currentUser = JSON.parse(localStorage.getItem('kuro_user_profile') || 'null');
+    if (currentUser) {
+      // User is already signed in -> Handle Sign Out
+      localStorage.removeItem('kuro_user_profile');
+      renderAuthState();
+      showToast('Signed out successfully. You are now browsing as Guest Otaku.');
+    } else {
+      // Open Google Sign-In Modal
+      if (googleModal) {
+        googleModal.classList.add('active');
+        googleModal.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+      }
+    }
+  });
+
+  function completeGoogleSignIn() {
+    const mockGoogleUser = {
+      name: 'Kuro Otaku',
+      email: 'otaku.member@gmail.com',
+      avatar: null,
+      provider: 'google',
+      signedInAt: Date.now()
+    };
+    localStorage.setItem('kuro_user_profile', JSON.stringify(mockGoogleUser));
+    if (googleModal) {
+      googleModal.classList.remove('active');
+      googleModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+    renderAuthState();
+    showToast('🎉 Signed in with Google as Kuro Otaku!');
+  }
+
+  btnConfirmGoogle?.addEventListener('click', completeGoogleSignIn);
+  btnGoogleAccountSelect?.addEventListener('click', completeGoogleSignIn);
+
+  btnCloseGoogle?.addEventListener('click', () => {
+    if (googleModal) {
+      googleModal.classList.remove('active');
+      googleModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+  });
+
+  googleModal?.addEventListener('click', (e) => {
+    if (e.target === googleModal) {
+      googleModal.classList.remove('active');
+      googleModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+  });
+
+  // Settings Modal Controls
+  btnUserSettings?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    userPopover?.classList.remove('open');
+    userBtn?.setAttribute('aria-expanded', 'false');
+    userBtn?.classList.remove('active');
+
+    if (settingsModal) {
+      syncSettingsUI();
+      settingsModal.classList.add('active');
+      settingsModal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+  });
+
+  function closeSettings() {
+    if (settingsModal) {
+      settingsModal.classList.remove('active');
+      settingsModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+  }
+
+  btnCloseSettings?.addEventListener('click', closeSettings);
+  btnDoneSettings?.addEventListener('click', () => {
+    closeSettings();
+    showToast('Preferences saved successfully');
+  });
+
+  settingsModal?.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+      closeSettings();
+    }
+  });
+
+  // Synchronize Settings Values & Event Handlers
+  const emitSetting = (key, value) => {
+    window.dispatchEvent(new CustomEvent('kuro:settings-changed', { detail: { key, value, source: 'settings' } }));
+  };
+
+  function syncSettingsUI() {
+    const autoplayToggle = document.getElementById('setting-toggle-autoplay');
+    const skipToggle = document.getElementById('setting-toggle-skip');
+    const ambientToggle = document.getElementById('setting-toggle-ambient');
+    const physicsToggle = document.getElementById('setting-toggle-physics');
+
+    if (autoplayToggle) autoplayToggle.checked = localStorage.getItem('kuro_setting_autoplay') !== 'false';
+    // Shared key with the in-player "Auto-Skip Intro" checkbox
+    if (skipToggle) skipToggle.checked = localStorage.getItem('kuro_auto_skip') === 'true';
+    if (ambientToggle) ambientToggle.checked = localStorage.getItem('kuro_setting_ambient') !== 'false';
+    if (physicsToggle) physicsToggle.checked = localStorage.getItem('kuro_setting_physics') !== 'false';
+
+    const currentAudio = localStorage.getItem('kuro_preferred_audio') || 'sub';
+    document.querySelectorAll('#setting-audio-control .segment-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.audio === currentAudio);
+    });
+
+    const currentQuality = localStorage.getItem('kuro_setting_quality') || 'auto';
+    document.querySelectorAll('#setting-quality-control .segment-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.quality === currentQuality);
+    });
+  }
+
+  // Keep the modal in sync when the player itself changes a setting
+  window.addEventListener('kuro:settings-changed', (e) => {
+    if (e.detail?.source === 'player' && settingsModal?.classList.contains('active')) syncSettingsUI();
+  });
+
+  document.getElementById('setting-toggle-autoplay')?.addEventListener('change', (e) => {
+    localStorage.setItem('kuro_setting_autoplay', String(e.target.checked));
+    emitSetting('autoplay', e.target.checked);
+  });
+
+  document.getElementById('setting-toggle-skip')?.addEventListener('change', (e) => {
+    localStorage.setItem('kuro_auto_skip', String(e.target.checked));
+    emitSetting('autoSkip', e.target.checked);
+  });
+
+  document.getElementById('setting-toggle-ambient')?.addEventListener('change', (e) => {
+    localStorage.setItem('kuro_setting_ambient', String(e.target.checked));
+    applyVisualSettings();
+  });
+
+  document.getElementById('setting-toggle-physics')?.addEventListener('change', (e) => {
+    localStorage.setItem('kuro_setting_physics', String(e.target.checked));
+    applyVisualSettings();
+  });
+
+  document.querySelectorAll('#setting-audio-control .segment-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#setting-audio-control .segment-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const audioVal = btn.dataset.audio;
+      localStorage.setItem('kuro_preferred_audio', audioVal);
+
+      // If an episode is playing, switch its audio track right away
+      const watching = document.getElementById('view-watch')?.classList.contains('active');
+      if (watching && state.activeAudioType !== audioVal) {
+        document.getElementById(`btn-audio-${audioVal}`)?.click();
+      } else {
+        state.activeAudioType = audioVal;
+        showToast(`Default audio set to ${audioVal.toUpperCase()}`);
+      }
+    });
+  });
+
+  document.querySelectorAll('#setting-quality-control .segment-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#setting-quality-control .segment-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const qVal = btn.dataset.quality;
+      localStorage.setItem('kuro_setting_quality', qVal);
+      emitSetting('quality', qVal);
+      showToast(`Preferred quality set to ${qVal === 'auto' ? 'Auto' : qVal}`);
+    });
+  });
+
+  btnClearHistory?.addEventListener('click', () => {
+    // 1. Continue-watching list
+    state.history = [];
+    localStorage.removeItem('kuro_history');
+
+    // 2. Saved playback positions for every episode (kuro_pos_<anime>_<episode>)
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('kuro_pos_'))
+      .forEach(k => localStorage.removeItem(k));
+
+    // 3. Refresh any visible UI that shows history
+    document.querySelectorAll('.continue-card').forEach(card => {
+      card.closest('.rail-section')?.remove();
+    });
+    if (state.currentTab === 'watchlist') renderWatchlist();
+
+    showToast('Watch history cleared');
+  });
+
+  // Global Escape Key Listener for Modals & Dropdown
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (googleModal?.classList.contains('active')) {
+        googleModal.classList.remove('active');
+        document.body.style.overflow = '';
+      } else if (settingsModal?.classList.contains('active')) {
+        closeSettings();
+      } else if (userPopover?.classList.contains('open')) {
+        userPopover.classList.remove('open');
+        userBtn?.setAttribute('aria-expanded', 'false');
+        userBtn?.classList.remove('active');
+      }
+    }
+  });
+
+  // Initialize display
+  renderAuthState();
+}
+
   // Init App
+  initCustomSelects();
+  applyVisualSettings();
+  initUserMenuAndSettings();
   updateWatchlistBadge();
   initHome();
   refreshIcons();

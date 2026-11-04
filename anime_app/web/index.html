@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700,800,900&display=swap" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@600;700;800;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@600;700;800;900&family=Shippori+Mincho:wght@500;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
 
     <!-- Clean Handcrafted SVG Favicon -->
@@ -60,10 +60,58 @@
             <button class="header-icon-btn" id="header-search-btn" aria-label="Search anime">
               <i data-lucide="search"></i>
             </button>
-            <button class="header-icon-btn" id="header-watchlist-btn" aria-label="Open Watchlist">
-              <i data-lucide="bookmark"></i>
-              <span class="badge-dot" id="watchlist-badge" style="display:none"></span>
-            </button>
+            <!-- User Profile & Settings Menu Trigger -->
+            <div class="user-menu-wrapper" id="user-menu-wrapper">
+              <button class="header-icon-btn user-profile-btn" id="header-user-btn" aria-label="Account & Settings" aria-haspopup="true" aria-expanded="false" title="Account & Settings">
+                <i data-lucide="user"></i>
+                <span class="user-status-dot" id="user-status-dot"></span>
+              </button>
+
+              <!-- Luxury Animated User Popover Dropdown -->
+              <div class="user-dropdown-popover" id="user-dropdown-popover" role="menu" aria-hidden="true">
+                <!-- User Profile Summary Header -->
+                <div class="user-popover-header">
+                  <div class="user-avatar-badge" id="user-avatar-badge">
+                    <i data-lucide="user"></i>
+                  </div>
+                  <div class="user-info-text">
+                    <div class="user-display-name" id="user-display-name">Guest Otaku</div>
+                    <div class="user-display-status" id="user-display-status">Free Member • Ad-Free</div>
+                  </div>
+                </div>
+
+                <div class="user-popover-divider"></div>
+
+                <!-- Primary Option 1: Login with Google -->
+                <button type="button" class="user-popover-item google-login-item" id="btn-user-google-login">
+                  <span class="google-icon-box">
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                    </svg>
+                  </span>
+                  <div class="user-popover-text">
+                    <span class="item-primary-label" id="google-login-label">Login with Google</span>
+                    <span class="item-sub-label" id="google-login-sub">Sync watchlist & history</span>
+                  </div>
+                  <i data-lucide="chevron-right" class="item-arrow"></i>
+                </button>
+
+                <!-- Primary Option 2: Settings -->
+                <button type="button" class="user-popover-item settings-item" id="btn-user-settings">
+                  <span class="settings-icon-box">
+                    <i data-lucide="settings"></i>
+                  </span>
+                  <div class="user-popover-text">
+                    <span class="item-primary-label">Settings</span>
+                    <span class="item-sub-label">Player & stream preferences</span>
+                  </div>
+                  <i data-lucide="chevron-right" class="item-arrow"></i>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -117,26 +165,62 @@
             </div>
             
             <div class="filter-controls-row">
-              <select class="filter-select" id="browse-status-select">
-                <option value="">All Status</option>
-                <option value="airing">Currently Airing</option>
-                <option value="completed">Finished Airing</option>
-              </select>
+              <div class="custom-select-wrapper" id="wrap-status-select">
+                <button type="button" class="custom-select-trigger" id="trigger-status-select" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="custom-select-label">All Status</span>
+                  <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="custom-select-dropdown" role="listbox">
+                  <div class="custom-select-option active" data-value="">All Status</div>
+                  <div class="custom-select-option" data-value="airing">Currently Airing</div>
+                  <div class="custom-select-option" data-value="completed">Finished Airing</div>
+                </div>
+                <select class="filter-select sr-only" id="browse-status-select" tabindex="-1">
+                  <option value="">All Status</option>
+                  <option value="airing">Currently Airing</option>
+                  <option value="completed">Finished Airing</option>
+                </select>
+              </div>
 
-              <select class="filter-select" id="browse-type-select">
-                <option value="">All Formats</option>
-                <option value="TV">TV Series</option>
-                <option value="Movie">Movies</option>
-                <option value="OVA">OVAs</option>
-                <option value="Special">Specials</option>
-              </select>
+              <div class="custom-select-wrapper" id="wrap-type-select">
+                <button type="button" class="custom-select-trigger" id="trigger-type-select" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="custom-select-label">All Formats</span>
+                  <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="custom-select-dropdown" role="listbox">
+                  <div class="custom-select-option active" data-value="">All Formats</div>
+                  <div class="custom-select-option" data-value="TV">TV Series</div>
+                  <div class="custom-select-option" data-value="Movie">Movies</div>
+                  <div class="custom-select-option" data-value="OVA">OVAs</div>
+                  <div class="custom-select-option" data-value="Special">Specials</div>
+                </div>
+                <select class="filter-select sr-only" id="browse-type-select" tabindex="-1">
+                  <option value="">All Formats</option>
+                  <option value="TV">TV Series</option>
+                  <option value="Movie">Movies</option>
+                  <option value="OVA">OVAs</option>
+                  <option value="Special">Specials</option>
+                </select>
+              </div>
 
-              <select class="filter-select" id="browse-sort-select">
-                <option value="popular">Most Popular</option>
-                <option value="score">Highest Rated</option>
-                <option value="az">A to Z</option>
-                <option value="new">Newest Releases</option>
-              </select>
+              <div class="custom-select-wrapper" id="wrap-sort-select">
+                <button type="button" class="custom-select-trigger" id="trigger-sort-select" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="custom-select-label">Most Popular</span>
+                  <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="custom-select-dropdown" role="listbox">
+                  <div class="custom-select-option active" data-value="popular">Most Popular</div>
+                  <div class="custom-select-option" data-value="score">Highest Rated</div>
+                  <div class="custom-select-option" data-value="az">A to Z</div>
+                  <div class="custom-select-option" data-value="new">Newest Releases</div>
+                </div>
+                <select class="filter-select sr-only" id="browse-sort-select" tabindex="-1">
+                  <option value="popular">Most Popular</option>
+                  <option value="score">Highest Rated</option>
+                  <option value="az">A to Z</option>
+                  <option value="new">Newest Releases</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -144,9 +228,18 @@
           <div class="anime-grid" id="browse-grid"></div>
           
           <div class="pagination-row" id="browse-pagination" style="display:none">
-            <button class="btn-secondary" id="browse-prev-page">Previous</button>
-            <span class="page-indicator" id="browse-page-indicator">Page 1</span>
-            <button class="btn-secondary" id="browse-next-page">Next</button>
+            <button class="btn-pagination" id="browse-prev-page">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
+              <span>Previous</span>
+            </button>
+            <div class="page-indicator-pill">
+              <span class="page-indicator-dot"></span>
+              <span class="page-indicator" id="browse-page-indicator">Page 1</span>
+            </div>
+            <button class="btn-pagination" id="browse-next-page">
+              <span>Next</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
           </div>
         </section>
 
@@ -228,85 +321,221 @@
         </button>
       </nav>
 
-      <!-- Centered Server Funding Announcement Modal -->
-      <div class="inbox-modal-backdrop" id="brave-inbox-modal" aria-hidden="true">
-        <div class="inbox-modal-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
-          <!-- Top Crimson Hairline Accent -->
-          <div class="inbox-modal-glow"></div>
+      <!-- Inbox Letter (Ghibli-inspired dialogue box) -->
+      <div class="inbox-modal-backdrop letter-backdrop" id="brave-inbox-modal" aria-hidden="true">
+        <div class="inbox-modal-card letter-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
+          <div class="letter-frame">
+            <div class="letter-head">
+              <span class="letter-from">Inbox &middot; 1 new letter</span>
+              <button type="button" class="letter-close" id="btn-close-inbox-modal" aria-label="Close letter">Close</button>
+            </div>
 
-          <!-- Close Button -->
-          <button class="inbox-modal-close" id="btn-close-inbox-modal" aria-label="Close announcement">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <h2 class="letter-title" id="inbox-modal-title">A small letter from KuroAnime</h2>
+
+            <p class="letter-text">Dear viewer,</p>
+            <p class="letter-text">
+              KuroAnime has always been free of ads, and we would like to keep it that way.
+              Our servers need <strong>$20</strong> this month to stay online. Even <strong>$1</strong>
+              helps keep every episode playing for everyone.
+            </p>
+
+            <div class="letter-fund">
+              <div class="letter-fund-row">
+                <span>Server fund</span>
+                <span>$20 goal</span>
+              </div>
+              <div class="letter-fund-track"><div class="letter-fund-fill"></div></div>
+            </div>
+
+            <div class="letter-wallet" id="wallet-card-box" role="button" tabindex="0" title="Click to copy address">
+              <span class="letter-wallet-label">BNB Smart Chain (BEP20) &middot; BNB, USDT, USDC</span>
+              <code class="letter-wallet-code" id="bnb-wallet-address">0x1Df63Bbf9fb1b9f1BfabD66C1c37450237454d93</code>
+            </div>
+
+            <p class="letter-sign">With gratitude,<br /><span>The KuroAnime Team</span></p>
+
+            <div class="letter-actions">
+              <button type="button" class="letter-btn letter-btn-ghost" id="btn-continue-site">Maybe later</button>
+              <button type="button" class="letter-btn letter-btn-primary" id="btn-copy-wallet"><span id="copy-wallet-text">Copy address</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings & Preferences Modal -->
+      <div class="settings-modal-backdrop" id="kuro-settings-modal" aria-hidden="true">
+        <div class="settings-modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+          <div class="settings-modal-glow"></div>
+          
+          <!-- Header -->
+          <div class="settings-modal-header">
+            <div class="settings-title-group">
+              <span class="settings-title-icon"><i data-lucide="settings"></i></span>
+              <div>
+                <h2 class="settings-modal-title" id="settings-modal-title">Settings & Preferences</h2>
+                <span class="settings-modal-subtitle">Customize playback, audio and app experience</span>
+              </div>
+            </div>
+            <button type="button" class="settings-modal-close" id="btn-close-settings-modal" aria-label="Close Settings">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Body -->
+          <div class="settings-modal-body">
+            <!-- Section 1: Playback Preferences -->
+            <div class="settings-group">
+              <div class="settings-group-title">
+                <span>Playback & Streaming</span>
+              </div>
+
+              <!-- Setting 1: Autoplay Next Episode -->
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-name">Autoplay Next Episode</div>
+                  <div class="setting-desc">Automatically transition to the next episode when current ends</div>
+                </div>
+                <label class="setting-switch" for="setting-toggle-autoplay">
+                  <input type="checkbox" id="setting-toggle-autoplay" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+
+              <!-- Setting 2: Preferred Audio -->
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-name">Default Audio Language</div>
+                  <div class="setting-desc">Preferred language track loaded by default in player</div>
+                </div>
+                <div class="setting-segmented-control" id="setting-audio-control">
+                  <button type="button" class="segment-btn active" data-audio="sub">SUB</button>
+                  <button type="button" class="segment-btn" data-audio="dub">DUB</button>
+                </div>
+              </div>
+
+              <!-- Setting 3: Auto Skip Intro -->
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-name">Auto Skip Intro / Outro</div>
+                  <div class="setting-desc">Jump straight to anime content and skip opening credits</div>
+                </div>
+                <label class="setting-switch" for="setting-toggle-skip">
+                  <input type="checkbox" id="setting-toggle-skip" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+
+              <!-- Setting 4: Default Streaming Quality -->
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-name">Preferred Quality</div>
+                  <div class="setting-desc">Target stream resolution for video playback</div>
+                </div>
+                <div class="setting-segmented-control" id="setting-quality-control">
+                  <button type="button" class="segment-btn active" data-quality="1080p">1080p</button>
+                  <button type="button" class="segment-btn" data-quality="720p">720p</button>
+                  <button type="button" class="segment-btn" data-quality="auto">Auto</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 2: Visual Experience -->
+            <div class="settings-group">
+              <div class="settings-group-title">
+                <span>Visual Experience</span>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-name">Cinematic Ambient Glow</div>
+                  <div class="setting-desc">Soft immersive edge glow around the video player</div>
+                </div>
+                <label class="setting-switch" for="setting-toggle-ambient">
+                  <input type="checkbox" id="setting-toggle-ambient" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-name">Fluid Spring Animations</div>
+                  <div class="setting-desc">High-framerate smooth UI physics and micro-interactions</div>
+                </div>
+                <label class="setting-switch" for="setting-toggle-physics">
+                  <input type="checkbox" id="setting-toggle-physics" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Section 3: Data & Storage -->
+            <div class="settings-group">
+              <div class="settings-group-title">
+                <span>Data & Storage</span>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-name">Watch History</div>
+                  <div class="setting-desc">Reset episode watch time and continue watching progress</div>
+                </div>
+                <button type="button" class="btn-setting-danger" id="btn-clear-watch-history">
+                  <i data-lucide="trash-2"></i>
+                  <span>Clear History</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="settings-modal-footer">
+            <span class="settings-version">KuroAnime <strong>v2.4</strong> • Ultra HD Pure Edition</span>
+            <button type="button" class="btn-settings-done" id="btn-done-settings">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Google Sign-In Interactive Modal -->
+      <div class="google-auth-backdrop" id="kuro-google-auth-modal" aria-hidden="true">
+        <div class="google-auth-card" role="dialog" aria-modal="true" aria-labelledby="google-auth-title">
+          <button type="button" class="google-auth-close" id="btn-close-google-auth" aria-label="Close">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
           </button>
-
-          <!-- Header Status Row -->
-          <div class="inbox-badge-row">
-            <div class="inbox-pill-tag">
-              <span class="live-status-dot"></span>
-              <span>COMMUNITY NOTICE</span>
-            </div>
-            <span class="inbox-date-tag">Target: $20 USD</span>
+          <div class="google-auth-header">
+            <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <h3 class="google-auth-title" id="google-auth-title">Sign in with Google</h3>
+            <p class="google-auth-subtitle">to continue to <strong class="text-crimson-accent">KuroAnime</strong></p>
           </div>
 
-          <!-- Modal Body -->
-          <div class="inbox-modal-body">
-            <h2 class="inbox-modal-title" id="inbox-modal-title">
-              Help Keep <span class="text-crimson-accent">KuroAnime</span> Online
-            </h2>
-            <p class="inbox-modal-desc">
-              KuroAnime is <strong>100% ad-free</strong>. We need <strong>$20</strong> to keep dedicated streaming servers live. Even a <strong>$1 donation</strong> keeps instant HD Sub &amp; Dub playback alive for everyone.
-            </p>
+          <div class="google-account-list">
+            <button type="button" class="google-account-card" id="btn-google-account-select">
+              <div class="google-account-avatar">
+                <span>K</span>
+              </div>
+              <div class="google-account-info">
+                <span class="google-account-name">Kuro Otaku</span>
+                <span class="google-account-email">otaku.member@gmail.com</span>
+              </div>
+              <i data-lucide="check" class="google-account-check"></i>
+            </button>
+          </div>
 
-            <!-- Compact Funding Progress Tracker -->
-            <div class="funding-meter-card">
-              <div class="funding-meter-header">
-                <span class="funding-meter-title">Server Uptime Fund</span>
-                <span class="funding-meter-goal">$20.00 Goal</span>
-              </div>
-              <div class="funding-progress-track">
-                <div class="funding-progress-fill"></div>
-              </div>
-            </div>
-
-            <!-- BNB Smart Chain Address Card with Quick-Copy -->
-            <div class="wallet-copy-strip" id="wallet-card-box" role="button" tabindex="0" title="Click to copy BNB Smart Chain address">
-              <div class="wallet-strip-info">
-                <div class="wallet-strip-tags">
-                  <span class="chain-pill">BNB Smart Chain (BEP20)</span>
-                  <span class="tokens-pill">BNB • USDT • USDC</span>
-                </div>
-                <code class="wallet-address-code" id="bnb-wallet-address">0x1Df63Bbf9fb1b9f1BfabD66C1c37450237454d93</code>
-              </div>
-              <div class="wallet-quick-copy" aria-label="Copy address">
-                <svg class="icon-copy-default" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <svg class="icon-copy-check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-              </div>
-            </div>
-
-            <!-- Action Buttons -->
-            <div class="inbox-modal-actions">
-              <button type="button" class="btn-funding-primary" id="btn-copy-wallet">
-                <svg class="icon-copy-default" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <svg class="icon-copy-check" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-                <span id="copy-wallet-text">Copy BNB Wallet Address</span>
-              </button>
-              <button type="button" class="btn-funding-text" id="btn-continue-site">
-                Continue to KuroAnime
-              </button>
-            </div>
+          <div class="google-auth-footer">
+            <p class="google-terms-note">To continue, Google will share your name and email address with KuroAnime.</p>
+            <button type="button" class="btn-google-confirm" id="btn-google-confirm-signin">
+              Continue as Kuro Otaku
+            </button>
           </div>
         </div>
       </div>
