@@ -1,7 +1,14 @@
 import './style.css';
 import { inject } from '@vercel/analytics';
 import { NetflixPlayer } from './netflix_player.js';
-import { supabase } from './supabase.js';
+import { 
+  supabase, 
+  fetchWatchHistoryFromCloud, 
+  saveWatchHistoryToCloud, 
+  deleteWatchHistoryFromCloud, 
+  fetchLibraryFromCloud, 
+  saveLibraryItemToCloud 
+} from './supabase.js';
 
 // Initialize Vercel Web Analytics
 inject();
@@ -190,16 +197,19 @@ function toggleWatchlist(anime) {
   if (idx > -1) {
     state.watchlist.splice(idx, 1);
     showToast(`Removed from Watchlist`);
+    saveLibraryItemToCloud({ anime_id: animeId }, false);
   } else {
-    state.watchlist.unshift({
+    const item = {
       anime_id: animeId,
       title: anime.title,
       poster: anime.poster || anime.poster_large || anime.poster_url,
       type: anime.type,
       anilist_score: anime.anilist_score,
       added_at: Date.now()
-    });
+    };
+    state.watchlist.unshift(item);
     showToast(`Added to Watchlist!`);
+    saveLibraryItemToCloud(item, true);
   }
   localStorage.setItem('kuro_watchlist', JSON.stringify(state.watchlist));
   updateWatchlistBadge();
@@ -232,10 +242,76 @@ function updateWatchlistBadge() {
   }
 }
 
-function saveHistory(anime, episode) {
+function renderContinueWatchingRail() {
+  const railsContainer = document.getElementById('rails-container');
+  if (!railsContainer) return;
+
+  let continueSection = railsContainer.querySelector('.rail-section-continue');
+  if (!state.history || state.history.length === 0) {
+    if (continueSection) continueSection.remove();
+    return;
+  }
+
+  const html = `
+    <div class="rail-header">
+      <span class="rail-title"><span class="rail-title-line"></span> Continue Watching</span>
+    </div>
+    <div class="rail-scroll-track">
+      ${state.history.slice(0, 10).map(h => {
+        const pct = (h.duration_seconds && h.duration_seconds > 0)
+          ? Math.min(100, Math.round((h.progress_seconds / h.duration_seconds) * 100))
+          : 0;
+        return `
+        <div class="continue-card" data-anime-id="${h.anime_id}" data-ep-idx="${(h.episode_number || 1) - 1}">
+          <div class="continue-thumb-wrapper">
+            <img class="continue-thumb-img" src="${h.poster}" alt="${h.title}" loading="lazy" />
+            <div class="continue-play-overlay">
+              <div class="continue-play-icon"><i data-lucide="play"></i></div>
+            </div>
+            <span class="continue-ep-badge">EP ${h.episode_number || 1}</span>
+            <div class="continue-progress-bar"><div class="continue-progress-fill" style="width: ${pct > 0 ? pct + '%' : '15%'}"></div></div>
+          </div>
+          <div class="continue-title">${h.title}</div>
+          <div class="continue-subtitle">Resume Ep ${h.episode_number || 1}</div>
+        </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  if (continueSection) {
+    continueSection.innerHTML = html;
+  } else {
+    continueSection = document.createElement('div');
+    continueSection.className = 'rail-section rail-section-continue';
+    continueSection.innerHTML = html;
+    railsContainer.prepend(continueSection);
+  }
+
+  continueSection.querySelectorAll('.continue-card').forEach(cc => {
+    cc.addEventListener('click', () => {
+      const aId = Number(cc.dataset.animeId);
+      const epIdx = Math.max(0, Number(cc.dataset.epIdx) || 0);
+      openAnimeDetail(aId, true, epIdx);
+    });
+  });
+  refreshIcons();
+}
+
+function saveHistory(anime, episode, progressSeconds = 0, durationSeconds = 0, completed = false) {
   const animeId = Number(anime.anime_id);
   const existingIdx = state.history.findIndex(h => Number(h.anime_id) === animeId);
   const thumb = anime.banner_image || anime.poster || anime.poster_large || anime.poster_url;
+  
+  let prog = progressSeconds;
+  let dur = durationSeconds;
+  if (!prog && existingIdx > -1 && state.history[existingIdx].progress_seconds) {
+    prog = state.history[existingIdx].progress_seconds;
+  }
+  if (!dur && existingIdx > -1 && state.history[existingIdx].duration_seconds) {
+    dur = state.history[existingIdx].duration_seconds;
+  }
+
   const entry = {
     anime_id: animeId,
     title: anime.title,
@@ -243,6 +319,9 @@ function saveHistory(anime, episode) {
     episode_number: episode.episode_number,
     episode_title: episode.title,
     episode_id: episode.episode_id,
+    progress_seconds: prog,
+    duration_seconds: dur,
+    completed: completed,
     timestamp: Date.now()
   };
   if (existingIdx > -1) {
@@ -251,6 +330,78 @@ function saveHistory(anime, episode) {
   state.history.unshift(entry);
   if (state.history.length > 50) state.history.pop();
   localStorage.setItem('kuro_history', JSON.stringify(state.history));
+  saveWatchHistoryToCloud(entry);
+}
+
+async function syncCloudUserData() {
+  if (!supabase) return;
+  try {
+    const [cloudHistory, cloudLib] = await Promise.all([
+      fetchWatchHistoryFromCloud(),
+      fetchLibraryFromCloud()
+    ]);
+
+    if (cloudHistory && cloudHistory.length > 0) {
+      const mappedHistory = cloudHistory.map(row => ({
+        anime_id: Number(row.anime_id),
+        title: row.anime_title,
+        poster: row.anime_poster,
+        episode_number: row.episode_number,
+        episode_title: row.episode_title,
+        episode_id: row.episode_id,
+        progress_seconds: row.progress_seconds || 0,
+        duration_seconds: row.duration_seconds || 0,
+        completed: Boolean(row.completed),
+        timestamp: new Date(row.updated_at).getTime()
+      }));
+
+      // Upload any local items from guest session if any
+      for (const localItem of state.history) {
+        if (!mappedHistory.some(c => Number(c.anime_id) === Number(localItem.anime_id))) {
+          saveWatchHistoryToCloud(localItem);
+          mappedHistory.push(localItem);
+        }
+      }
+
+      state.history = mappedHistory.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      localStorage.setItem('kuro_history', JSON.stringify(state.history));
+      renderContinueWatchingRail();
+    } else if (state.history.length > 0) {
+      state.history.forEach(item => saveWatchHistoryToCloud(item));
+    }
+
+    if (cloudLib && cloudLib.length > 0) {
+      const mappedLib = cloudLib.map(row => ({
+        anime_id: Number(row.anime_id),
+        title: row.anime_title,
+        poster: row.anime_poster,
+        type: row.anime_type || 'TV',
+        anilist_score: row.anilist_score,
+        status: row.status,
+        is_favorite: row.is_favorite,
+        added_at: new Date(row.created_at).getTime()
+      }));
+
+      for (const localItem of state.watchlist) {
+        if (!mappedLib.some(c => Number(c.anime_id) === Number(localItem.anime_id))) {
+          saveLibraryItemToCloud(localItem, true);
+          mappedLib.push(localItem);
+        }
+      }
+
+      state.watchlist = mappedLib;
+      localStorage.setItem('kuro_watchlist', JSON.stringify(state.watchlist));
+      updateWatchlistBadge();
+    } else if (state.watchlist.length > 0) {
+      state.watchlist.forEach(item => saveLibraryItemToCloud(item, true));
+    }
+
+    if (state.currentTab === 'watchlist') {
+      renderWatchlist();
+    }
+  } catch (err) {
+    console.warn('[Supabase sync cloud data error]', err);
+  }
 }
 
 // ─── Card Renderer Component ────────────────────────────────────────
@@ -1442,6 +1593,9 @@ function loadStreamIntoPlayer() {
     hasNextEp: state.activeEpisodeIndex < state.activeEpisodes.length - 1,
     hasPrevEp: state.activeEpisodeIndex > 0,
     poster: anime.banner_image || anime.poster_large || anime.poster || '',
+    onProgress: (p) => {
+      saveHistory(anime, ep, p.currentTime, p.duration, p.completed);
+    },
     onNextEpisode: () => {
       if (state.activeEpisodeIndex < state.activeEpisodes.length - 1) {
         openWatchPlayer(state.activeEpisodeIndex + 1);
@@ -1996,7 +2150,7 @@ function initUserMenuAndSettings() {
   });
 
   // Helper to apply user state from Supabase Auth
-  function applySupabaseUser(user) {
+  async function applySupabaseUser(user) {
     if (user && user.email) {
       const profile = {
         name: user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0] || 'Kuro Member',
@@ -2006,6 +2160,9 @@ function initUserMenuAndSettings() {
         id: user.id
       };
       localStorage.setItem('kuro_user_profile', JSON.stringify(profile));
+      renderAuthState();
+      await syncCloudUserData();
+      return;
     } else {
       localStorage.removeItem('kuro_user_profile');
     }
@@ -2046,6 +2203,13 @@ function initUserMenuAndSettings() {
         try { await supabase.auth.signOut(); } catch (err) { console.warn(err); }
       }
       localStorage.removeItem('kuro_user_profile');
+      state.watchlist = [];
+      state.history = [];
+      localStorage.removeItem('kuro_watchlist');
+      localStorage.removeItem('kuro_history');
+      updateWatchlistBadge();
+      renderContinueWatchingRail();
+      if (state.currentTab === 'watchlist') renderWatchlist();
       renderAuthState();
       showToast('Signed out successfully. You are now browsing as Guest Otaku.');
     } else {
@@ -2247,6 +2411,7 @@ function initUserMenuAndSettings() {
     // 1. Continue-watching list
     state.history = [];
     localStorage.removeItem('kuro_history');
+    deleteWatchHistoryFromCloud();
 
     // 2. Saved playback positions for every episode (kuro_pos_<anime>_<episode>)
     Object.keys(localStorage)

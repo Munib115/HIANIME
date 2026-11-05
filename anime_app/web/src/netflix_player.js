@@ -86,6 +86,7 @@ export class NetflixPlayer {
     this.onPrevEpisode = options.onPrevEpisode || (() => {});
     this.onSwitchAudio = options.onSwitchAudio || (() => {});
     this.onToast = options.onToast || (() => {});
+    this.onProgress = options.onProgress || null;
 
     this.hls = null;
     this.video = null;
@@ -1411,6 +1412,13 @@ export class NetflixPlayer {
     try {
       if (this.video.currentTime > 5) {
         localStorage.setItem(this.resumeKey, String(Math.floor(this.video.currentTime)));
+        if (typeof this.onProgress === 'function') {
+          this.onProgress({
+            currentTime: this.video.currentTime,
+            duration: this.video.duration,
+            completed: this.video.currentTime >= (this.video.duration - 25)
+          });
+        }
       }
     } catch (e) {}
   }
