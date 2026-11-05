@@ -5688,212 +5688,300 @@ button, input, select, textarea, optgroup {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   INBOX LETTER — Ghibli-inspired parchment dialogue box
+   REFINED COMPACT GOKU ANNOUNCEMENT MODAL (120fps GPU-Accelerated)
    ═══════════════════════════════════════════════════════════════════════ */
-.letter-backdrop {
-  background: rgba(6, 7, 10, 0.62);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+.goku-promo-backdrop {
+  background: rgba(5, 6, 10, 0.78);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-.inbox-modal-card.letter-card {
-  max-width: 300px;
-  padding: 6px;
-  border-radius: 6px;
-  background: #F3E9D2;
-  background-image:
-    radial-gradient(ellipse at 20% 0%, rgba(255, 255, 255, 0.55), transparent 60%),
-    radial-gradient(ellipse at 100% 100%, rgba(170, 130, 80, 0.18), transparent 55%);
-  border: 1px solid #CDB98F;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55), 0 2px 0 rgba(255, 255, 255, 0.4) inset;
-  font-family: 'Shippori Mincho', 'Georgia', 'Times New Roman', serif;
-  color: #3B2F25;
+@media (min-width: 769px) {
+  .goku-promo-backdrop {
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+  }
 }
 
-.letter-frame {
-  border: 1px solid rgba(120, 90, 55, 0.35);
-  outline: 1px solid rgba(120, 90, 55, 0.18);
-  outline-offset: -4px;
-  border-radius: 3px;
-  padding: 12px 14px 12px;
+.inbox-modal-card.goku-promo-card {
+  max-width: 288px;
+  padding: 0;
+  border-radius: 12px;
+  background: #0B0D13;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.88),
+    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #F1F5F9;
+  overflow: hidden;
+  contain: layout paint style;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translate3d(0, 8px, 0) scale3d(0.95, 0.95, 1);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.15s ease;
 }
 
-.letter-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 7px;
-  margin-bottom: 9px;
-  border-bottom: 1px dashed rgba(120, 90, 55, 0.35);
+.inbox-modal-backdrop.active:not(.closing) .inbox-modal-card.goku-promo-card {
+  transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+  opacity: 1;
 }
 
-.letter-from {
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #8A6D4B;
+.inbox-modal-backdrop.closing .inbox-modal-card.goku-promo-card {
+  transform: translate3d(0, 6px, 0) scale3d(0.95, 0.95, 1);
+  opacity: 0;
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.13s ease;
 }
 
-.letter-close {
-  background: none;
-  border: none;
-  padding: 2px 0;
-  font-family: inherit;
-  font-size: 0.66rem;
-  font-weight: 700;
-  color: #8A6D4B;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  transition: color 0.15s ease;
+.inbox-modal-backdrop:not(.active) .goku-promo-card * {
+  animation-play-state: paused !important;
 }
 
-.letter-close:hover {
-  color: #E50914;
-}
-
-.letter-title {
-  font-size: 0.92rem;
-  font-weight: 800;
-  line-height: 1.3;
-  color: #2E241B;
-  margin: 0 0 7px;
-}
-
-.letter-text {
-  font-size: 0.7rem;
-  line-height: 1.6;
-  color: #4A3B2E;
-  margin: 0 0 6px;
-}
-
-.letter-text strong {
-  color: #B3121C;
-  font-weight: 800;
-}
-
-.letter-fund {
-  margin: 9px 0 8px;
-}
-
-.letter-fund-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #8A6D4B;
-  margin-bottom: 4px;
-}
-
-.letter-fund-track {
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(120, 90, 55, 0.18);
+/* ─── Unobstructed Goku Hero Stage ─── */
+.goku-hero-stage {
+  position: relative;
+  height: 136px;
+  width: 100%;
+  background: #07080D;
   overflow: hidden;
 }
 
-.letter-fund-fill {
-  width: 32%;
+.goku-aura-glow {
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  bottom: -35px;
+  left: 50%;
+  margin-left: -90px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 138, 36, 0.22) 0%, transparent 70%);
+  pointer-events: none;
+  will-change: transform, opacity;
+  animation: gokuSubtlePulse 3s ease-in-out infinite alternate;
+}
+
+@keyframes gokuSubtlePulse {
+  0% { transform: scale3d(0.95, 0.95, 1); opacity: 0.65; }
+  100% { transform: scale3d(1.06, 1.06, 1); opacity: 1; }
+}
+
+.goku-art-wrap {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  will-change: transform;
+  animation: gokuGentleFloat 3.6s ease-in-out infinite alternate;
+}
+
+@keyframes gokuGentleFloat {
+  0% { transform: translate3d(0, 1px, 0) scale3d(1.01, 1.01, 1); }
+  100% { transform: translate3d(0, -2px, 0) scale3d(1.03, 1.03, 1); }
+}
+
+.goku-hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 10%;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.goku-stage-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 52px;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(11, 13, 19, 0) 0%, #0B0D13 100%);
+  pointer-events: none;
+}
+
+/* ─── Compact Editorial Content ─── */
+.goku-promo-body {
+  position: relative;
+  z-index: 3;
+  padding: 2px 14px 13px;
+  margin-top: -4px;
+}
+
+.goku-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  margin-bottom: 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.goku-meta-label {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94A3B8;
+}
+
+.goku-close-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 0.64rem;
+  font-weight: 500;
+  color: #94A3B8;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.goku-close-link:hover {
+  color: #F8FAFC;
+}
+
+.goku-promo-title {
+  font-family: 'Outfit', 'Inter', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: -0.01em;
+  color: #F8FAFC;
+  margin: 0 0 5px;
+}
+
+.goku-promo-desc {
+  font-size: 0.68rem;
+  line-height: 1.54;
+  color: #94A3B8;
+  margin: 0 0 10px;
+}
+
+.goku-promo-desc strong {
+  color: #F8FAFC;
+  font-weight: 600;
+}
+
+/* ─── Minimal Server Fund Bar ─── */
+.goku-ki-gauge {
+  margin-bottom: 9px;
+}
+
+.goku-ki-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748B;
+  margin-bottom: 4px;
+}
+
+.goku-ki-goal {
+  color: #CBD5E1;
+}
+
+.goku-ki-track {
+  height: 3.5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.goku-ki-fill {
+  width: 35%;
   height: 100%;
   border-radius: 999px;
-  background: #C8252F;
+  background: linear-gradient(90deg, #EA580C 0%, #F59E0B 100%);
 }
 
-.letter-wallet {
-  display: block;
+/* ─── Clean Wallet Box ─── */
+.goku-wallet-box {
   padding: 7px 9px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.45);
-  border: 1px solid rgba(120, 90, 55, 0.28);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  margin-bottom: 10px;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.letter-wallet:hover,
-.letter-wallet.copied {
-  background: rgba(255, 255, 255, 0.7);
-  border-color: #C8252F;
+.goku-wallet-box:hover,
+.goku-wallet-box.copied {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(234, 88, 12, 0.45);
 }
 
-.letter-wallet-label {
+.goku-wallet-chain {
   display: block;
-  font-size: 0.58rem;
-  font-weight: 700;
-  color: #8A6D4B;
-  margin-bottom: 3px;
+  font-size: 0.56rem;
+  font-weight: 600;
+  color: #64748B;
+  margin-bottom: 2px;
 }
 
-.letter-wallet-code {
+.goku-wallet-code {
   display: block;
   font-family: 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.6rem;
-  color: #3B2F25;
+  font-size: 0.57rem;
+  color: #CBD5E1;
   word-break: break-all;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
-.letter-sign {
-  font-size: 0.66rem;
-  font-style: italic;
-  color: #6B5641;
-  margin: 10px 0 11px;
-  line-height: 1.5;
-}
-
-.letter-sign span {
-  font-style: normal;
-  font-weight: 800;
-  color: #2E241B;
-}
-
-.letter-actions {
+/* ─── Compact Action Buttons (No Icons) ─── */
+.goku-promo-actions {
   display: flex;
-  gap: 8px;
+  gap: 7px;
 }
 
-.letter-btn {
+.goku-btn {
   flex: 1;
-  height: 32px;
-  border-radius: 4px;
+  height: 30px;
+  border-radius: 6px;
   font-family: inherit;
-  font-size: 0.7rem;
-  font-weight: 800;
+  font-size: 0.68rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition: background 0.14s ease, color 0.14s ease, transform 0.12s ease;
 }
 
-.letter-btn:active {
-  transform: scale(0.97);
+.goku-btn:active {
+  transform: scale3d(0.97, 0.97, 1);
 }
 
-.letter-btn-ghost {
+.goku-btn-later {
   background: transparent;
-  border: 1px solid rgba(120, 90, 55, 0.4);
-  color: #6B5641;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94A3B8;
 }
 
-.letter-btn-ghost:hover {
-  background: rgba(120, 90, 55, 0.08);
-  color: #2E241B;
+.goku-btn-later:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #F1F5F9;
 }
 
-.letter-btn-primary {
-  background: #C8252F;
-  border: 1px solid #A91D26;
-  color: #FFF8EC;
+.goku-btn-energy {
+  background: #DC2626;
+  border: 1px solid #B91C1C;
+  color: #FFFFFF;
 }
 
-.letter-btn-primary:hover,
-.letter-btn-primary.copied {
-  background: #E50914;
+.goku-btn-energy:hover {
+  background: #EF4444;
+}
+
+.goku-btn-energy.copied {
+  background: #059669;
+  border-color: #047857;
 }
 
 @media (max-width: 480px) {
-  .inbox-modal-card.letter-card {
-    max-width: calc(100vw - 40px);
+  .inbox-modal-card.goku-promo-card {
+    max-width: min(284px, calc(100vw - 36px));
   }
 }
 

@@ -321,42 +321,54 @@
         </button>
       </nav>
 
-      <!-- Inbox Letter (Ghibli-inspired dialogue box) -->
-      <div class="inbox-modal-backdrop letter-backdrop" id="brave-inbox-modal" aria-hidden="true">
-        <div class="inbox-modal-card letter-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
-          <div class="letter-frame">
-            <div class="letter-head">
-              <span class="letter-from">Inbox &middot; 1 new letter</span>
-              <button type="button" class="letter-close" id="btn-close-inbox-modal" aria-label="Close letter">Close</button>
+      <!-- Anime Goku Announcement Modal (Refined, Compact, 120fps GPU-Accelerated) -->
+      <div class="inbox-modal-backdrop goku-promo-backdrop" id="brave-inbox-modal" aria-hidden="true">
+        <div class="inbox-modal-card goku-promo-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
+          <!-- Hero Visual: Unobstructed Goku Key Art with Seamless Fade -->
+          <div class="goku-hero-stage">
+            <div class="goku-aura-glow" aria-hidden="true"></div>
+            <div class="goku-art-wrap">
+              <img src="/goku-banner.jpg" alt="Son Goku" class="goku-hero-img" decoding="async" fetchpriority="high" />
+            </div>
+            <div class="goku-stage-fade" aria-hidden="true"></div>
+          </div>
+
+          <!-- Compact Editorial Body (Zero Icons / Zero Emojis) -->
+          <div class="goku-promo-body">
+            <div class="goku-meta-row">
+              <span class="goku-meta-label">Server Announcement</span>
+              <button type="button" class="goku-close-link" id="btn-close-inbox-modal" aria-label="Close announcement">Close</button>
             </div>
 
-            <h2 class="letter-title" id="inbox-modal-title">A small letter from KuroAnime</h2>
+            <h2 class="goku-promo-title" id="inbox-modal-title">Keep KuroAnime Ad-Free</h2>
 
-            <p class="letter-text">Dear viewer,</p>
-            <p class="letter-text">
-              KuroAnime has always been free of ads, and we would like to keep it that way.
-              Our servers need <strong>$20</strong> this month to stay online. Even <strong>$1</strong>
-              helps keep every episode playing for everyone.
+            <p class="goku-promo-desc">
+              KuroAnime is free of ads and popups. Our servers need <strong>$20</strong> this month to stay online &mdash; even <strong>$1</strong> helps keep every episode playing for everyone.
             </p>
 
-            <div class="letter-fund">
-              <div class="letter-fund-row">
-                <span>Server fund</span>
-                <span>$20 goal</span>
+            <!-- Minimal Progress Bar -->
+            <div class="goku-ki-gauge">
+              <div class="goku-ki-header">
+                <span class="goku-ki-label">Monthly Server Fund</span>
+                <span class="goku-ki-goal">$20 goal</span>
               </div>
-              <div class="letter-fund-track"><div class="letter-fund-fill"></div></div>
+              <div class="goku-ki-track">
+                <div class="goku-ki-fill"></div>
+              </div>
             </div>
 
-            <div class="letter-wallet" id="wallet-card-box" role="button" tabindex="0" title="Click to copy address">
-              <span class="letter-wallet-label">BNB Smart Chain (BEP20) &middot; BNB, USDT, USDC</span>
-              <code class="letter-wallet-code" id="bnb-wallet-address">0x1Df63Bbf9fb1b9f1BfabD66C1c37450237454d93</code>
+            <!-- Clean Wallet Address Box -->
+            <div class="goku-wallet-box" id="wallet-card-box" role="button" tabindex="0" title="Click to copy address">
+              <span class="goku-wallet-chain">BNB Smart Chain (BEP20) &middot; BNB, USDT, USDC</span>
+              <code class="goku-wallet-code" id="bnb-wallet-address">0x1Df63Bbf9fb1b9f1BfabD66C1c37450237454d93</code>
             </div>
 
-            <p class="letter-sign">With gratitude,<br /><span>The KuroAnime Team</span></p>
-
-            <div class="letter-actions">
-              <button type="button" class="letter-btn letter-btn-ghost" id="btn-continue-site">Maybe later</button>
-              <button type="button" class="letter-btn letter-btn-primary" id="btn-copy-wallet"><span id="copy-wallet-text">Copy address</span></button>
+            <!-- Clean Text-Only Action Buttons -->
+            <div class="goku-promo-actions">
+              <button type="button" class="goku-btn goku-btn-later" id="btn-continue-site">Maybe later</button>
+              <button type="button" class="goku-btn goku-btn-energy" id="btn-copy-wallet">
+                <span id="copy-wallet-text">Copy address</span>
+              </button>
             </div>
           </div>
         </div>
