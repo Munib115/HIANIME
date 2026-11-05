@@ -1,6 +1,7 @@
 import './style.css';
 import { inject } from '@vercel/analytics';
 import { NetflixPlayer } from './netflix_player.js';
+import { supabase } from './supabase.js';
 
 // Initialize Vercel Web Analytics
 inject();
@@ -1941,7 +1942,11 @@ function initUserMenuAndSettings() {
         userStatusDot.classList.remove('guest');
       }
       if (userAvatarBadge) {
-        userAvatarBadge.innerHTML = `<span class="user-avatar-initial">${(savedUser.name || 'K')[0].toUpperCase()}</span>`;
+        if (savedUser.avatar) {
+          userAvatarBadge.innerHTML = `<img src="${savedUser.avatar}" alt="${savedUser.name}" class="user-avatar-img" />`;
+        } else {
+          userAvatarBadge.innerHTML = `<span class="user-avatar-initial">${(savedUser.name || 'K')[0].toUpperCase()}</span>`;
+        }
       }
       if (googleLoginLabel) googleLoginLabel.textContent = 'Sign Out';
       if (googleLoginSub) googleLoginSub.textContent = `Logged in as ${savedUser.name || 'Otaku'}`;
@@ -1990,8 +1995,45 @@ function initUserMenuAndSettings() {
     }
   });
 
-  // Google Login / Logout Flow
-  googleLoginBtn?.addEventListener('click', (e) => {
+  // Helper to apply user state from Supabase Auth
+  function applySupabaseUser(user) {
+    if (user && user.email) {
+      const profile = {
+        name: user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0] || 'Kuro Member',
+        email: user.email,
+        avatar: user.user_metadata?.avatar_url || null,
+        provider: 'google',
+        id: user.id
+      };
+      localStorage.setItem('kuro_user_profile', JSON.stringify(profile));
+    } else {
+      localStorage.removeItem('kuro_user_profile');
+    }
+    renderAuthState();
+  }
+
+  // Subscribe to live Supabase session and auth state changes
+  if (supabase) {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        applySupabaseUser(session.user);
+      }
+    }).catch(err => console.warn('[Supabase session check]', err));
+
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        applySupabaseUser(session.user);
+        if (event === 'SIGNED_IN') {
+          showToast(`Welcome! Signed in as ${session.user.user_metadata?.full_name || session.user.email}`);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        applySupabaseUser(null);
+      }
+    });
+  }
+
+  // Google Login / Logout Flow via Supabase
+  googleLoginBtn?.addEventListener('click', async (e) => {
     e.stopPropagation();
     userPopover?.classList.remove('open');
     userBtn?.setAttribute('aria-expanded', 'false');
@@ -2000,20 +2042,54 @@ function initUserMenuAndSettings() {
     const currentUser = JSON.parse(localStorage.getItem('kuro_user_profile') || 'null');
     if (currentUser) {
       // User is already signed in -> Handle Sign Out
+      if (supabase) {
+        try { await supabase.auth.signOut(); } catch (err) { console.warn(err); }
+      }
       localStorage.removeItem('kuro_user_profile');
       renderAuthState();
       showToast('Signed out successfully. You are now browsing as Guest Otaku.');
     } else {
-      // Open Google Sign-In Modal
+      // Trigger Supabase Google OAuth
+      triggerGoogleOAuth();
+    }
+  });
+
+  async function triggerGoogleOAuth() {
+    if (supabase) {
+      try {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: window.location.origin
+          }
+        });
+        if (error) {
+          console.warn('[Supabase OAuth]', error.message);
+          showToast(`Supabase Google Auth: ${error.message}`);
+          if (googleModal) {
+            googleModal.classList.add('active');
+            googleModal.setAttribute('aria-hidden', 'false');
+            document.body.style.overflow = 'hidden';
+          }
+        }
+      } catch (err) {
+        console.warn('[Supabase OAuth Exception]', err);
+        if (googleModal) {
+          googleModal.classList.add('active');
+          googleModal.setAttribute('aria-hidden', 'false');
+          document.body.style.overflow = 'hidden';
+        }
+      }
+    } else {
       if (googleModal) {
         googleModal.classList.add('active');
         googleModal.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden';
       }
     }
-  });
+  }
 
-  function completeGoogleSignIn() {
+  function completeDemoGoogleSignIn() {
     const mockGoogleUser = {
       name: 'Kuro Otaku',
       email: 'otaku.member@gmail.com',
@@ -2028,11 +2104,11 @@ function initUserMenuAndSettings() {
       document.body.style.overflow = '';
     }
     renderAuthState();
-    showToast('🎉 Signed in with Google as Kuro Otaku!');
+    showToast('Signed in as Kuro Otaku (Demo Mode)');
   }
 
-  btnConfirmGoogle?.addEventListener('click', completeGoogleSignIn);
-  btnGoogleAccountSelect?.addEventListener('click', completeGoogleSignIn);
+  btnConfirmGoogle?.addEventListener('click', triggerGoogleOAuth);
+  btnGoogleAccountSelect?.addEventListener('click', triggerGoogleOAuth);
 
   btnCloseGoogle?.addEventListener('click', () => {
     if (googleModal) {

@@ -26,3 +26,7 @@ npm-debug.log*
 # System
 .DS_Store
 Thumbs.db
+
+# Agent skills cache
+.agents/
+skills-lock.json
