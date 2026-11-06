@@ -798,6 +798,10 @@ export class NetflixPlayer {
   }
 
   async resolveAndPlay() {
+    if (this.embedUrl && this.embedUrl.includes('flixcloud.cc')) {
+      this.switchToIframeFallback();
+      return;
+    }
     this.setLoader(true, 'Extracting Ad-Free 1080p Stream...');
     try {
       const res = await fetch(`${this.apiBase}/player/resolve?url=${encodeURIComponent(this.embedUrl)}`);
@@ -1404,19 +1408,22 @@ export class NetflixPlayer {
     } catch (e) {}
   }
 
-  saveCurrentPosition() {
+  saveCurrentPosition(force = false) {
     if (!this.video || !this.video.duration) return;
     const now = Date.now();
-    if (this._lastSave && now - this._lastSave < 4000) return;
+    if (!force && this._lastSave && now - this._lastSave < 4000) return;
     this._lastSave = now;
     try {
-      if (this.video.currentTime > 5) {
+      if (this.video.currentTime > 2) {
         localStorage.setItem(this.resumeKey, String(Math.floor(this.video.currentTime)));
         if (typeof this.onProgress === 'function') {
           this.onProgress({
-            currentTime: this.video.currentTime,
-            duration: this.video.duration,
-            completed: this.video.currentTime >= (this.video.duration - 25)
+            currentTime: Math.floor(this.video.currentTime),
+            duration: Math.floor(this.video.duration),
+            completed: this.video.currentTime >= (this.video.duration - 25),
+            episodeNumber: this.episodeNumber,
+            episodeId: this.episodeId,
+            episodeTitle: this.episodeTitle
           });
         }
       }
@@ -1553,6 +1560,28 @@ export class NetflixPlayer {
       this.hls.destroy();
       this.hls = null;
     }
+    this.root = null;
+    this.video = null;
+
+    if (this.embedUrl && this.embedUrl.includes('flixcloud.cc')) {
+      const sep = this.embedUrl.includes('?') ? '&' : '?';
+      const flixSrc = this.embedUrl.includes('autoplay=')
+        ? this.embedUrl
+        : `${this.embedUrl}${sep}autoplay=1`;
+      this.container.innerHTML = `
+        <iframe
+          id="main-stream-iframe"
+          class="video-iframe"
+          src="${flixSrc}"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+          allowfullscreen
+          scrolling="no"
+        ></iframe>
+      `;
+      return;
+    }
+
     const cleanSrc = `${this.apiBase}/clean-stream?url=${encodeURIComponent(this.embedUrl)}`;
     this.container.innerHTML = `
       <iframe

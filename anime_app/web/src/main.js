@@ -135,11 +135,41 @@ function stopVideoPlayback() {
   } catch (e) {}
 }
 
-// ─── View Routing ───────────────────────────────────────────────────
-function showView(viewId) {
-  // If moving away from player, kill video playback immediately
-  if (viewId !== 'view-watch') {
+// ─── View Routing & Browser History ─────────────────────────────────
+let isHandlingPopState = false;
+
+function getActiveViewId() {
+  return document.querySelector('.view-screen.active')?.id || 'view-home';
+}
+
+function showView(viewId, { pushHistory = true } = {}) {
+  const prevViewId = getActiveViewId();
+
+  // If moving away from player, flush current episode history & kill video playback
+  if (prevViewId === 'view-watch' && viewId !== 'view-watch') {
+    if (state.activeAnimeData && state.activeEpisodes[state.activeEpisodeIndex]) {
+      const curEp = state.activeEpisodes[state.activeEpisodeIndex];
+      const curTime = activePlayerInstance?.video?.currentTime || 0;
+      const curDur = activePlayerInstance?.video?.duration || 0;
+      saveHistory(state.activeAnimeData, curEp, curTime, curDur, curDur > 0 && curTime >= curDur - 25);
+    }
     stopVideoPlayback();
+  }
+
+  // Ensure body scroll lock is cleared unless an overlay modal is open
+  const anyModalOpen = document.querySelector('.inbox-modal-backdrop.active, .kuro-modal-backdrop.active');
+  if (!anyModalOpen) {
+    document.body.style.overflow = '';
+  }
+
+  // Guard against showing an unrendered/stuck detail screen (prevents "Loading anime details..." black screen)
+  if (viewId === 'view-detail' && !state.isFetchingDetail) {
+    const detailContainer = document.getElementById('detail-container');
+    const hasRenderedDetail = detailContainer && detailContainer.querySelector('.detail-body');
+    if (!hasRenderedDetail) {
+      viewId = 'view-home';
+      state.currentTab = 'home';
+    }
   }
 
   document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('active'));
@@ -151,6 +181,16 @@ function showView(viewId) {
     document.body.scrollLeft = 0;
   }
 
+  // When returning to Home, ensure Continue Watching & Home rails are rendered and fresh
+  if (viewId === 'view-home') {
+    state.currentTab = 'home';
+    renderContinueWatchingRail();
+    const railsContainer = document.getElementById('rails-container');
+    if (railsContainer && railsContainer.children.length === 0) {
+      initHome();
+    }
+  }
+
   // Update tab active state (mobile & desktop)
   document.querySelectorAll('.tab-item').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === state.currentTab);
@@ -158,21 +198,64 @@ function showView(viewId) {
   document.querySelectorAll('.desktop-nav-menu .nav-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === state.currentTab);
   });
+
+  // Push browser history state so hardware/browser Back button never hits a black screen
+  if (pushHistory && !isHandlingPopState) {
+    try {
+      const currentState = window.history.state;
+      if (!currentState || currentState.viewId !== viewId || currentState.animeId !== state.activeAnimeId) {
+        window.history.pushState(
+          { viewId, tab: state.currentTab, animeId: state.activeAnimeId },
+          '',
+          window.location.pathname + window.location.search
+        );
+      }
+    } catch (e) {}
+  }
 }
 
+window.addEventListener('popstate', (e) => {
+  const currentView = getActiveViewId();
+  isHandlingPopState = true;
+  try {
+    if (currentView === 'view-watch') {
+      if (state.playerEnteredFrom === 'home') {
+        switchTab('home');
+      } else {
+        showView('view-detail', { pushHistory: false });
+      }
+    } else if (currentView === 'view-detail') {
+      switchTab(state.currentTab || 'home');
+    } else if (e.state && e.state.viewId) {
+      if (e.state.viewId === 'view-home') {
+        switchTab('home');
+      } else {
+        showView(e.state.viewId, { pushHistory: false });
+      }
+    } else if (currentView !== 'view-home') {
+      switchTab('home');
+    }
+  } finally {
+    isHandlingPopState = false;
+  }
+});
+
 function switchTab(tabName) {
-  state.currentTab = tabName;
-  if (tabName === 'home') {
+  state.currentTab = tabName || 'home';
+  if (state.currentTab === 'home') {
     showView('view-home');
-  } else if (tabName === 'browse') {
+  } else if (state.currentTab === 'browse') {
     showView('view-browse');
     loadBrowse();
-  } else if (tabName === 'search') {
+  } else if (state.currentTab === 'search') {
     showView('view-search');
     setTimeout(() => document.getElementById('search-input-field')?.focus(), 150);
-  } else if (tabName === 'watchlist') {
+  } else if (state.currentTab === 'watchlist') {
     showView('view-watchlist');
     renderWatchlist();
+  } else {
+    state.currentTab = 'home';
+    showView('view-home');
   }
 }
 
@@ -258,21 +341,22 @@ function renderContinueWatchingRail() {
     </div>
     <div class="rail-scroll-track">
       ${state.history.slice(0, 10).map(h => {
+        const epNum = Number(h.episode_number) || 1;
         const pct = (h.duration_seconds && h.duration_seconds > 0)
           ? Math.min(100, Math.round((h.progress_seconds / h.duration_seconds) * 100))
           : 0;
         return `
-        <div class="continue-card" data-anime-id="${h.anime_id}" data-ep-idx="${(h.episode_number || 1) - 1}">
+        <div class="continue-card" data-anime-id="${h.anime_id}" data-ep-idx="${Math.max(0, epNum - 1)}" data-ep-num="${epNum}">
           <div class="continue-thumb-wrapper">
             <img class="continue-thumb-img" src="${h.poster}" alt="${h.title}" loading="lazy" />
             <div class="continue-play-overlay">
               <div class="continue-play-icon"><i data-lucide="play"></i></div>
             </div>
-            <span class="continue-ep-badge">EP ${h.episode_number || 1}</span>
+            <span class="continue-ep-badge">EP ${epNum}</span>
             <div class="continue-progress-bar"><div class="continue-progress-fill" style="width: ${pct > 0 ? pct + '%' : '15%'}"></div></div>
           </div>
           <div class="continue-title">${h.title}</div>
-          <div class="continue-subtitle">Resume Ep ${h.episode_number || 1}</div>
+          <div class="continue-subtitle">Resume Ep ${epNum}</div>
         </div>
         `;
       }).join('')}
@@ -292,36 +376,47 @@ function renderContinueWatchingRail() {
     cc.addEventListener('click', () => {
       const aId = Number(cc.dataset.animeId);
       const epIdx = Math.max(0, Number(cc.dataset.epIdx) || 0);
-      openAnimeDetail(aId, true, epIdx);
+      const epNum = Number(cc.dataset.epNum) || (epIdx + 1);
+      state.playerEnteredFrom = 'home';
+      openAnimeDetail(aId, true, epIdx, epNum);
     });
   });
   refreshIcons();
 }
 
 function saveHistory(anime, episode, progressSeconds = 0, durationSeconds = 0, completed = false) {
+  if (!anime || !episode) return;
   const animeId = Number(anime.anime_id);
+  const epNum = Math.max(1, Math.floor(Number(episode.episode_number) || 1));
   const existingIdx = state.history.findIndex(h => Number(h.anime_id) === animeId);
-  const thumb = anime.banner_image || anime.poster || anime.poster_large || anime.poster_url;
-  
-  let prog = progressSeconds;
-  let dur = durationSeconds;
-  if (!prog && existingIdx > -1 && state.history[existingIdx].progress_seconds) {
-    prog = state.history[existingIdx].progress_seconds;
+  const existingEntry = existingIdx > -1 ? state.history[existingIdx] : null;
+  const sameEpisode = existingEntry && Number(existingEntry.episode_number) === epNum;
+  const thumb = anime.banner_image || anime.poster || anime.poster_large || anime.poster_url || existingEntry?.poster || '';
+
+  let prog = Math.max(0, Math.floor(Number(progressSeconds) || 0));
+  let dur = Math.max(0, Math.floor(Number(durationSeconds) || 0));
+
+  // Only preserve previous progress if saving the exact same episode
+  if (!prog && sameEpisode && existingEntry.progress_seconds) {
+    prog = Math.max(0, Math.floor(Number(existingEntry.progress_seconds) || 0));
+  } else if (!prog && episode.episode_id) {
+    const savedPos = parseInt(localStorage.getItem(`kuro_pos_${animeId}_${episode.episode_id}`) || '0', 10);
+    if (savedPos > 0) prog = savedPos;
   }
-  if (!dur && existingIdx > -1 && state.history[existingIdx].duration_seconds) {
-    dur = state.history[existingIdx].duration_seconds;
+  if (!dur && sameEpisode && existingEntry.duration_seconds) {
+    dur = Math.max(0, Math.floor(Number(existingEntry.duration_seconds) || 0));
   }
 
   const entry = {
     anime_id: animeId,
-    title: anime.title,
+    title: anime.title || existingEntry?.title || 'Anime',
     poster: thumb,
-    episode_number: episode.episode_number,
-    episode_title: episode.title,
-    episode_id: episode.episode_id,
+    episode_number: epNum,
+    episode_title: episode.title || '',
+    episode_id: String(episode.episode_id || ''),
     progress_seconds: prog,
     duration_seconds: dur,
-    completed: completed,
+    completed: Boolean(completed),
     timestamp: Date.now()
   };
   if (existingIdx > -1) {
@@ -330,6 +425,7 @@ function saveHistory(anime, episode, progressSeconds = 0, durationSeconds = 0, c
   state.history.unshift(entry);
   if (state.history.length > 50) state.history.pop();
   localStorage.setItem('kuro_history', JSON.stringify(state.history));
+  renderContinueWatchingRail();
   saveWatchHistoryToCloud(entry);
 }
 
@@ -346,20 +442,29 @@ async function syncCloudUserData() {
         anime_id: Number(row.anime_id),
         title: row.anime_title,
         poster: row.anime_poster,
-        episode_number: row.episode_number,
+        episode_number: Math.max(1, Math.floor(Number(row.episode_number) || 1)),
         episode_title: row.episode_title,
         episode_id: row.episode_id,
-        progress_seconds: row.progress_seconds || 0,
-        duration_seconds: row.duration_seconds || 0,
+        progress_seconds: Math.max(0, Math.floor(Number(row.progress_seconds) || 0)),
+        duration_seconds: Math.max(0, Math.floor(Number(row.duration_seconds) || 0)),
         completed: Boolean(row.completed),
-        timestamp: new Date(row.updated_at).getTime()
+        timestamp: new Date(row.updated_at).getTime() || 0
       }));
 
-      // Upload any local items from guest session if any
+      // Merge local history with cloud history — never let an older cloud entry overwrite a newer local episode!
       for (const localItem of state.history) {
-        if (!mappedHistory.some(c => Number(c.anime_id) === Number(localItem.anime_id))) {
+        const cloudIdx = mappedHistory.findIndex(c => Number(c.anime_id) === Number(localItem.anime_id));
+        if (cloudIdx === -1) {
           saveWatchHistoryToCloud(localItem);
           mappedHistory.push(localItem);
+        } else {
+          const cloudItem = mappedHistory[cloudIdx];
+          const localTime = Number(localItem.timestamp) || 0;
+          const cloudTime = Number(cloudItem.timestamp) || 0;
+          if (localTime >= cloudTime || (Number(localItem.episode_number) !== Number(cloudItem.episode_number) && localTime > 0)) {
+            mappedHistory[cloudIdx] = localItem;
+            saveWatchHistoryToCloud(localItem);
+          }
         }
       }
 
@@ -665,7 +770,10 @@ function renderHeroContent(index) {
 
   // Button actions
   document.getElementById('hero-btn-play')?.addEventListener('click', () => {
-    openAnimeDetail(item.anime_id, true);
+    state.playerEnteredFrom = 'home';
+    const saved = state.history.find(h => Number(h.anime_id) === Number(item.anime_id));
+    const savedEpNum = saved ? Number(saved.episode_number) || 1 : 1;
+    openAnimeDetail(item.anime_id, true, Math.max(0, savedEpNum - 1), savedEpNum);
   });
 
   document.getElementById('hero-btn-list')?.addEventListener('click', () => {
@@ -716,31 +824,6 @@ async function initHome() {
   // Render Rails
   const railsContainer = document.getElementById('rails-container');
   if (railsContainer && homeData.rails) {
-    // 1. Continue Watching (if history available)
-    const historyHtml = (state.history && state.history.length > 0) ? `
-      <div class="rail-section">
-        <div class="rail-header">
-          <span class="rail-title"><span class="rail-title-line"></span> Continue Watching</span>
-        </div>
-        <div class="rail-scroll-track">
-          ${state.history.slice(0, 10).map(h => `
-            <div class="continue-card" data-anime-id="${h.anime_id}" data-ep-idx="${(h.episode_number || 1) - 1}">
-              <div class="continue-thumb-wrapper">
-                <img class="continue-thumb-img" src="${h.poster}" alt="${h.title}" loading="lazy" />
-                <div class="continue-play-overlay">
-                  <div class="continue-play-icon"><i data-lucide="play"></i></div>
-                </div>
-                <span class="continue-ep-badge">EP ${h.episode_number || 1}</span>
-                <div class="continue-progress-bar"><div class="continue-progress-fill"></div></div>
-              </div>
-              <div class="continue-title">${h.title}</div>
-              <div class="continue-subtitle">Resume Ep ${h.episode_number || 1}</div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    ` : '';
-
     const railConfigs = [
       { key: 'trending', title: 'Trending Now' },
       { key: 'top_rated', title: 'Top Rated Masterpieces' },
@@ -765,19 +848,12 @@ async function initHome() {
       `;
     }).join('');
 
-    railsContainer.innerHTML = historyHtml + catalogRailsHtml;
+    railsContainer.innerHTML = catalogRailsHtml;
+    renderContinueWatchingRail();
 
     // Attach card clicks
     railsContainer.querySelectorAll('.anime-card').forEach(card => {
       card.addEventListener('click', () => openAnimeDetail(Number(card.dataset.id)));
-    });
-
-    railsContainer.querySelectorAll('.continue-card').forEach(cc => {
-      cc.addEventListener('click', () => {
-        const aId = Number(cc.dataset.animeId);
-        const epIdx = Math.max(0, Number(cc.dataset.epIdx) || 0);
-        openAnimeDetail(aId, true, epIdx);
-      });
     });
 
     railsContainer.querySelectorAll('.rail-see-all').forEach(btn => {
@@ -1010,38 +1086,77 @@ async function performSearch(query) {
 }
 
 // ─── Anime Detail View ──────────────────────────────────────────────
-async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0) {
+async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0, targetEpisodeNumber = null) {
   state.activeAnimeId = animeId;
-  showView('view-detail');
+  state.isFetchingDetail = true;
 
   const container = document.getElementById('detail-container');
-  if (!container) return;
-  container.innerHTML = '<div class="empty-state">Loading anime details...</div>';
+  if (!autoPlayFirst) {
+    state.playerEnteredFrom = 'detail';
+    if (container && (!container.querySelector('.detail-body') || Number(container.dataset.renderedAnimeId) !== Number(animeId))) {
+      container.innerHTML = `
+        <div class="empty-state" style="padding: 80px 20px;">
+          <div style="margin-bottom: 14px;">Loading anime details...</div>
+          <button type="button" class="ep-nav-btn" id="detail-loading-back-btn" style="max-width: 160px; margin: 0 auto;">Back to Home</button>
+        </div>
+      `;
+      document.getElementById('detail-loading-back-btn')?.addEventListener('click', () => {
+        state.isFetchingDetail = false;
+        switchTab('home');
+      });
+    }
+    showView('view-detail');
+  }
 
-  const [anime, epsData] = await Promise.all([
-    fetchApi(`/anime/${animeId}`),
-    fetchApi(`/anime/${animeId}/episodes`)
-  ]);
+  let anime = null;
+  let epsData = null;
+  try {
+    [anime, epsData] = await Promise.all([
+      fetchApi(`/anime/${animeId}`),
+      fetchApi(`/anime/${animeId}/episodes`)
+    ]);
+  } finally {
+    state.isFetchingDetail = false;
+  }
 
   if (!anime) {
-    container.innerHTML = '<div class="empty-state">Failed to load anime.</div>';
+    switchTab('home');
+    showToast('Could not load anime details');
     return;
+  }
+
+  if (container) {
+    container.dataset.renderedAnimeId = String(animeId);
   }
 
   state.activeAnimeData = anime;
   state.activeEpisodes = epsData?.episodes || [];
 
-  if (autoPlayFirst && state.activeEpisodes.length > 0) {
-    const validIdx = Math.min(Math.max(0, startEpIndex), state.activeEpisodes.length - 1);
-    openWatchPlayer(validIdx);
-    return;
+  // Resolve user's saved watch history for this anime so resume works accurately
+  const savedHist = state.history.find(h => Number(h.anime_id) === Number(animeId));
+  const desiredEpNum = targetEpisodeNumber || (savedHist ? Number(savedHist.episode_number) : null);
+
+  let resolvedEpIdx = Math.min(Math.max(0, startEpIndex || 0), Math.max(0, state.activeEpisodes.length - 1));
+  if (desiredEpNum && state.activeEpisodes.length > 0) {
+    const matchByNum = state.activeEpisodes.findIndex(e => Number(e.episode_number) === Number(desiredEpNum));
+    if (matchByNum !== -1) {
+      resolvedEpIdx = matchByNum;
+    } else if (savedHist?.episode_id) {
+      const matchById = state.activeEpisodes.findIndex(e => String(e.episode_id) === String(savedHist.episode_id));
+      if (matchById !== -1) resolvedEpIdx = matchById;
+    }
   }
+
+  const resumeEpObj = state.activeEpisodes[resolvedEpIdx] || state.activeEpisodes[0];
+  const resumeEpLabel = savedHist && resumeEpObj
+    ? `Continue Ep ${resumeEpObj.episode_number}`
+    : 'Start Ep 1';
 
   const banner = anime.banner_image || anime.poster;
   const score = anime.anilist_score ? (anime.anilist_score / 10).toFixed(1) : (anime.mal_score || 'N/A');
   const watchlisted = isWatchlisted(animeId);
 
-  // Group episodes into chunks of 50 for big anime (e.g. One Piece)
+  // Group episodes into chunks of 50 for big anime (e.g. Black Clover, One Piece)
   const totalEps = state.activeEpisodes.length;
   const chunks = [];
   const chunkSize = 50;
@@ -1049,126 +1164,148 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0)
     chunks.push({ start: i, end: Math.min(i + chunkSize, totalEps) });
   }
 
-  container.innerHTML = `
-    <div class="detail-banner" style="background-image: url('${banner}')">
-      <div class="detail-banner-overlay"></div>
-      <button class="detail-back-btn" id="detail-back-home-btn">
-        <i data-lucide="arrow-left"></i> Back
-      </button>
-    </div>
+  // Select the chunk containing the user's current/last-watched episode (e.g., 101-150 for Ep 105)
+  const activeChunkIdx = chunks.length > 0
+    ? Math.max(0, chunks.findIndex(c => resolvedEpIdx >= c.start && resolvedEpIdx < c.end))
+    : 0;
 
-    <div class="detail-body">
-      <div class="detail-header-card">
-        <img class="detail-poster" src="${anime.poster}" alt="${anime.title}" />
-        <div class="detail-info">
-          <h1 class="detail-title">${anime.title}</h1>
-          ${anime.title_english && anime.title_english !== anime.title ? `<div class="detail-japanese-title">${anime.title_english}</div>` : ''}
-          <div class="detail-meta-row">
-            <span class="badge-gold"><i data-lucide="star"></i> ${score}</span>
-            ${anime.sub !== false ? '<span class="pill-sub">SUB</span>' : ''}
-            ${anime.dub === true ? '<span class="pill-dub">DUB</span>' : ''}
-            <span class="badge-eps">${totalEps} Episodes</span>
-            <span class="badge-eps">${anime.type || 'TV'}</span>
-            <span class="badge-eps">${anime.season_year || anime.premiered || ''}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="detail-actions-bar">
-        <button class="btn-primary" style="flex: 1;" id="detail-start-watch-btn">
-          <i data-lucide="play"></i> Start Ep 1
-        </button>
-        <button class="btn-secondary ${watchlisted ? 'active' : ''}" id="detail-bookmark-btn">
-          <i data-lucide="${watchlisted ? 'check' : 'bookmark'}"></i>
-          <span>${watchlisted ? 'Saved' : 'Watchlist'}</span>
+  if (container) {
+    container.innerHTML = `
+      <div class="detail-banner" style="background-image: url('${banner}')">
+        <div class="detail-banner-overlay"></div>
+        <button class="detail-back-btn" id="detail-back-home-btn">
+          <i data-lucide="arrow-left"></i> Back
         </button>
       </div>
 
-      <!-- Synopsis -->
-      <div class="detail-synopsis-box">
-        <strong>Synopsis:</strong><br />
-        ${anime.synopsis || anime.al_description || 'No synopsis available.'}
-      </div>
-
-      <!-- Connected Seasons & Sequels -->
-      ${anime.seasons?.length ? `
-        <div class="seasons-block">
-          <div class="section-label-row">
-            <span class="section-label"><i data-lucide="layers"></i> Seasons & Sequels (${anime.seasons.length})</span>
-          </div>
-          <div class="seasons-track">
-            ${anime.seasons.map(s => `
-              <div class="season-card ${s.is_current ? 'active' : ''}" data-season-id="${s.season_anime_id}">
-                <img class="season-card-img" src="${s.season_poster || anime.poster}" alt="${s.season_name}" />
-                <div class="season-card-title">${s.season_name}</div>
-              </div>
-            `).join('')}
+      <div class="detail-body">
+        <div class="detail-header-card">
+          <img class="detail-poster" src="${anime.poster}" alt="${anime.title}" />
+          <div class="detail-info">
+            <h1 class="detail-title">${anime.title}</h1>
+            ${anime.title_english && anime.title_english !== anime.title ? `<div class="detail-japanese-title">${anime.title_english}</div>` : ''}
+            <div class="detail-meta-row">
+              <span class="badge-gold"><i data-lucide="star"></i> ${score}</span>
+              ${anime.sub !== false ? '<span class="pill-sub">SUB</span>' : ''}
+              ${anime.dub === true ? '<span class="pill-dub">DUB</span>' : ''}
+              <span class="badge-eps">${totalEps} Episodes</span>
+              <span class="badge-eps">${anime.type || 'TV'}</span>
+              <span class="badge-eps">${anime.season_year || anime.premiered || ''}</span>
+            </div>
           </div>
         </div>
-      ` : ''}
 
-      <!-- Episodes Grid -->
-      <div class="episodes-section">
-        <div class="section-label-row" style="display: flex; justify-content: space-between; align-items: center;">
-          <span class="section-label"><i data-lucide="play"></i> Episodes (${totalEps})</span>
+        <div class="detail-actions-bar">
+          <button class="btn-primary" style="flex: 1;" id="detail-start-watch-btn">
+            <i data-lucide="play"></i> ${resumeEpLabel}
+          </button>
+          <button class="btn-secondary ${watchlisted ? 'active' : ''}" id="detail-bookmark-btn">
+            <i data-lucide="${watchlisted ? 'check' : 'bookmark'}"></i>
+            <span>${watchlisted ? 'Saved' : 'Watchlist'}</span>
+          </button>
         </div>
 
-        ${chunks.length > 1 ? `
-          <div class="episodes-range-tabs" id="ep-range-tabs">
-            ${chunks.map((c, idx) => `
-              <button class="range-tab-btn ${idx === 0 ? 'active' : ''}" data-start="${c.start}" data-end="${c.end}">
-                ${c.start + 1} - ${c.end}
-              </button>
-            `).join('')}
+        <!-- Synopsis -->
+        <div class="detail-synopsis-box">
+          <strong>Synopsis:</strong><br />
+          ${anime.synopsis || anime.al_description || 'No synopsis available.'}
+        </div>
+
+        <!-- Connected Seasons & Sequels -->
+        ${anime.seasons?.length ? `
+          <div class="seasons-block">
+            <div class="section-label-row">
+              <span class="section-label"><i data-lucide="layers"></i> Seasons & Sequels (${anime.seasons.length})</span>
+            </div>
+            <div class="seasons-track">
+              ${anime.seasons.map(s => `
+                <div class="season-card ${s.is_current ? 'active' : ''}" data-season-id="${s.season_anime_id}">
+                  <img class="season-card-img" src="${s.season_poster || anime.poster}" alt="${s.season_name}" />
+                  <div class="season-card-title">${s.season_name}</div>
+                </div>
+              `).join('')}
+            </div>
           </div>
         ` : ''}
 
-        <div class="episodes-list-grid" id="episodes-grid-list">
-          <!-- Injected below -->
+        <!-- Episodes Grid -->
+        <div class="episodes-section">
+          <div class="section-label-row" style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="section-label"><i data-lucide="play"></i> Episodes (${totalEps})</span>
+          </div>
+
+          ${chunks.length > 1 ? `
+            <div class="episodes-range-tabs" id="ep-range-tabs">
+              ${chunks.map((c, idx) => `
+                <button class="range-tab-btn ${idx === activeChunkIdx ? 'active' : ''}" data-start="${c.start}" data-end="${c.end}">
+                  ${c.start + 1} - ${c.end}
+                </button>
+              `).join('')}
+            </div>
+          ` : ''}
+
+          <div class="episodes-list-grid" id="episodes-grid-list">
+            <!-- Injected below -->
+          </div>
         </div>
       </div>
-    </div>
-  `;
+    `;
 
-  // Render first episode chunk
-  renderEpisodeChunk(0, chunks.length > 0 ? chunks[0].end : totalEps);
+    // Render the episode chunk containing the user's current/last-watched episode
+    const initialChunk = chunks[activeChunkIdx] || { start: 0, end: totalEps };
+    renderEpisodeChunk(initialChunk.start, initialChunk.end);
 
-  // Events
-  document.getElementById('detail-back-home-btn')?.addEventListener('click', () => {
-    switchTab(state.currentTab);
-  });
+    // Events
+    document.getElementById('detail-back-home-btn')?.addEventListener('click', () => {
+      switchTab(state.currentTab || 'home');
+    });
 
-  document.getElementById('detail-start-watch-btn')?.addEventListener('click', () => {
-    if (state.activeEpisodes.length > 0) openWatchPlayer(0);
-  });
-
-  const bookmarkBtn = document.getElementById('detail-bookmark-btn');
-  bookmarkBtn?.addEventListener('click', () => {
-    toggleWatchlist(anime);
-    const nowSaved = isWatchlisted(animeId);
-    bookmarkBtn.classList.toggle('active', nowSaved);
-    bookmarkBtn.innerHTML = `<i data-lucide="${nowSaved ? 'check' : 'bookmark'}"></i><span>${nowSaved ? 'Saved' : 'Watchlist'}</span>`;
-    refreshIcons();
-  });
-
-  // Season switcher cards
-  container.querySelectorAll('.season-card').forEach(sc => {
-    sc.addEventListener('click', () => {
-      const targetId = Number(sc.dataset.seasonId);
-      if (targetId && targetId !== animeId) {
-        openAnimeDetail(targetId);
+    document.getElementById('detail-start-watch-btn')?.addEventListener('click', () => {
+      if (state.activeEpisodes.length > 0) {
+        const latestHist = state.history.find(h => Number(h.anime_id) === Number(animeId));
+        let targetIdx = resolvedEpIdx;
+        if (latestHist) {
+          const foundIdx = state.activeEpisodes.findIndex(e => Number(e.episode_number) === Number(latestHist.episode_number));
+          if (foundIdx !== -1) targetIdx = foundIdx;
+        }
+        state.playerEnteredFrom = 'detail';
+        openWatchPlayer(targetIdx);
       }
     });
-  });
 
-  // Chunk tab switcher
-  container.querySelectorAll('.range-tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      container.querySelectorAll('.range-tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      renderEpisodeChunk(Number(btn.dataset.start), Number(btn.dataset.end));
+    const bookmarkBtn = document.getElementById('detail-bookmark-btn');
+    bookmarkBtn?.addEventListener('click', () => {
+      toggleWatchlist(anime);
+      const nowSaved = isWatchlisted(animeId);
+      bookmarkBtn.classList.toggle('active', nowSaved);
+      bookmarkBtn.innerHTML = `<i data-lucide="${nowSaved ? 'check' : 'bookmark'}"></i><span>${nowSaved ? 'Saved' : 'Watchlist'}</span>`;
+      refreshIcons();
     });
-  });
+
+    // Season switcher cards
+    container.querySelectorAll('.season-card').forEach(sc => {
+      sc.addEventListener('click', () => {
+        const targetId = Number(sc.dataset.seasonId);
+        if (targetId && targetId !== animeId) {
+          openAnimeDetail(targetId);
+        }
+      });
+    });
+
+    // Chunk tab switcher
+    container.querySelectorAll('.range-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        container.querySelectorAll('.range-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderEpisodeChunk(Number(btn.dataset.start), Number(btn.dataset.end));
+      });
+    });
+  }
+
+  if (autoPlayFirst && state.activeEpisodes.length > 0) {
+    openWatchPlayer(resolvedEpIdx);
+    return;
+  }
 
   refreshIcons();
 }
@@ -1177,11 +1314,14 @@ function renderEpisodeChunk(start, end) {
   const grid = document.getElementById('episodes-grid-list');
   if (!grid) return;
   const slice = state.activeEpisodes.slice(start, end);
+  const savedHist = state.history.find(h => Number(h.anime_id) === Number(state.activeAnimeId));
+  const watchedEpNum = savedHist ? Number(savedHist.episode_number) : null;
 
   grid.innerHTML = slice.map((ep, idx) => {
     const globalIdx = start + idx;
+    const isCurrentWatched = watchedEpNum !== null && Number(ep.episode_number) === watchedEpNum;
     return `
-      <button class="episode-btn" data-idx="${globalIdx}">
+      <button class="episode-btn ${isCurrentWatched ? 'active' : ''}" data-idx="${globalIdx}">
         <span class="ep-num">${ep.episode_number}</span>
         <div class="ep-flags">
           ${ep.sub ? '<span class="ep-flag-sub">S</span>' : ''}
@@ -1193,6 +1333,7 @@ function renderEpisodeChunk(start, end) {
 
   grid.querySelectorAll('.episode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+      state.playerEnteredFrom = 'detail';
       openWatchPlayer(Number(btn.dataset.idx));
     });
   });
@@ -1307,36 +1448,44 @@ async function openWatchPlayer(episodeIndex) {
 
     <!-- Controls Panel -->
     <div class="player-controls-panel">
-      <!-- Audio Selection -->
-      <div class="server-section-label">Audio Language</div>
-      <div class="audio-toggle-bar">
-        <button class="audio-toggle-btn ${state.activeAudioType === 'sub' ? 'active' : ''}" id="btn-audio-sub">
-          <i data-lucide="volume-2"></i> SUB (Japanese)
-        </button>
-        <button class="audio-toggle-btn ${state.activeAudioType === 'dub' ? 'active' : ''}" id="btn-audio-dub">
-          <i data-lucide="volume-2"></i> DUB (English)
-        </button>
-      </div>
+      <div class="player-settings-grid">
+        <!-- Audio Selection -->
+        <div class="player-control-group">
+          <div class="server-section-label">Audio Language</div>
+          <div class="audio-toggle-bar">
+            <button class="audio-toggle-btn ${state.activeAudioType === 'sub' ? 'active' : ''}" id="btn-audio-sub">
+              <span class="ctrl-main-label">SUB</span>
+              <span class="ctrl-sub-label">Japanese</span>
+            </button>
+            <button class="audio-toggle-btn ${state.activeAudioType === 'dub' ? 'active' : ''}" id="btn-audio-dub">
+              <span class="ctrl-main-label">DUB</span>
+              <span class="ctrl-sub-label">English</span>
+            </button>
+          </div>
+        </div>
 
-      <!-- Server Chips -->
-      <div class="server-section-label">Stream Server (Default: Zoko HD)</div>
-      <div class="server-chips-row" id="player-server-chips">
-        <!-- Injected below -->
+        <!-- Server Chips -->
+        <div class="player-control-group">
+          <div class="server-section-label">Stream Server</div>
+          <div class="server-chips-row" id="player-server-chips">
+            <!-- Injected below -->
+          </div>
+        </div>
       </div>
 
       <!-- Previous / Next / Download Controls -->
       <div class="ep-nav-buttons-row">
         <button class="ep-nav-btn" id="player-prev-ep-btn" ${episodeIndex <= 0 ? 'disabled style="opacity:0.4"' : ''}>
-          <i data-lucide="chevron-left"></i><span>Prev</span>
+          <span>Prev</span>
         </button>
         <button class="ep-nav-btn ep-nav-btn-download" id="player-download-ep-btn">
-          <i data-lucide="download"></i><span>Download</span>
+          <span>Download</span>
         </button>
         <button class="ep-nav-btn" id="player-reload-btn">
-          <i data-lucide="rotate-ccw"></i><span>Reload</span>
+          <span>Reload</span>
         </button>
         <button class="ep-nav-btn" id="player-next-ep-btn" ${episodeIndex >= state.activeEpisodes.length - 1 ? 'disabled style="opacity:0.4"' : ''}>
-          <span>Next</span><i data-lucide="chevron-right"></i>
+          <span>Next</span>
         </button>
       </div>
     </div>
@@ -1373,7 +1522,12 @@ async function openWatchPlayer(episodeIndex) {
 
   // Attach Player Events
   document.getElementById('player-back-detail-btn')?.addEventListener('click', () => {
-    showView('view-detail');
+    const detailReady = document.querySelector('#detail-container .detail-body');
+    if (state.playerEnteredFrom === 'home' || !detailReady) {
+      switchTab('home');
+    } else {
+      showView('view-detail');
+    }
   });
 
   const playerBookmarkBtn = document.getElementById('player-bookmark-btn');
@@ -1500,21 +1654,30 @@ function renderServerChips() {
     return;
   }
 
+  if (state.preferredServerName) {
+    const prefIdx = list.findIndex(s => s.server_name === state.preferredServerName);
+    if (prefIdx !== -1) {
+      state.activeServerIndex = prefIdx;
+    }
+  }
+
   if (state.activeServerIndex >= list.length) {
     state.activeServerIndex = 0;
   }
 
   chipsContainer.innerHTML = list.map((s, idx) => `
     <button class="server-chip ${idx === state.activeServerIndex ? 'active' : ''}" data-sidx="${idx}">
-      <span class="server-status-dot"></span>
-      <span>${s.server_name || 'Server ' + (idx + 1)}</span>
-      <span class="server-badge-hd">HD</span>
+      <span class="server-chip-name">${s.server_name || 'Server ' + (idx + 1)}</span>
     </button>
   `).join('');
 
   chipsContainer.querySelectorAll('.server-chip').forEach(btn => {
     btn.addEventListener('click', () => {
-      state.activeServerIndex = Number(btn.dataset.sidx);
+      const idx = Number(btn.dataset.sidx);
+      state.activeServerIndex = idx;
+      if (list[idx]?.server_name) {
+        state.preferredServerName = list[idx].server_name;
+      }
       chipsContainer.querySelectorAll('.server-chip').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       loadStreamIntoPlayer();
@@ -1594,7 +1757,13 @@ function loadStreamIntoPlayer() {
     hasPrevEp: state.activeEpisodeIndex > 0,
     poster: anime.banner_image || anime.poster_large || anime.poster || '',
     onProgress: (p) => {
-      saveHistory(anime, ep, p.currentTime, p.duration, p.completed);
+      const curAnime = state.activeAnimeData || anime;
+      const curEp = state.activeEpisodes[state.activeEpisodeIndex] || {
+        episode_number: p.episodeNumber || ep.episode_number || (state.activeEpisodeIndex + 1),
+        episode_id: p.episodeId || ep.episode_id || '',
+        title: p.episodeTitle || ep.title || ''
+      };
+      saveHistory(curAnime, curEp, p.currentTime, p.duration, p.completed);
     },
     onNextEpisode: () => {
       if (state.activeEpisodeIndex < state.activeEpisodes.length - 1) {
@@ -1619,7 +1788,14 @@ function loadStreamIntoPlayer() {
         showToast(`No ${targetAudio.toUpperCase()} stream available for this episode`);
       }
     },
-    onBack: () => showView('view-detail'),
+    onBack: () => {
+      const detailReady = document.querySelector('#detail-container .detail-body');
+      if (state.playerEnteredFrom === 'home' || !detailReady) {
+        switchTab('home');
+      } else {
+        showView('view-detail');
+      }
+    },
     onToast: (msg) => showToast(msg),
   });
 
@@ -2456,15 +2632,27 @@ function initUserMenuAndSettings() {
   refreshIcons();
 });
 
-// ─── Lifecycle Background Audio / Video Cutoff ───────────────────────
+// ─── Lifecycle Background Audio / Video Cutoff & History Flush ───────
+function flushActiveWatchHistory() {
+  if (getActiveViewId() === 'view-watch' && state.activeAnimeData && state.activeEpisodes[state.activeEpisodeIndex]) {
+    const curEp = state.activeEpisodes[state.activeEpisodeIndex];
+    const curTime = activePlayerInstance?.video?.currentTime || 0;
+    const curDur = activePlayerInstance?.video?.duration || 0;
+    saveHistory(state.activeAnimeData, curEp, curTime, curDur, curDur > 0 && curTime >= curDur - 25);
+  }
+}
+
 window.addEventListener('pagehide', () => {
+  flushActiveWatchHistory();
   stopVideoPlayback();
 });
 window.addEventListener('beforeunload', () => {
+  flushActiveWatchHistory();
   stopVideoPlayback();
 });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
+    flushActiveWatchHistory();
     if (activePlayerInstance?.video && !activePlayerInstance.video.paused) {
       try { activePlayerInstance.video.pause(); } catch (e) {}
     }

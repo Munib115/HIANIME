@@ -62,12 +62,12 @@ export async function saveWatchHistoryToCloud(entry) {
       anime_title: entry.title || entry.anime_title || 'Anime',
       anime_poster: entry.poster || entry.anime_poster || '',
       episode_id: String(entry.episode_id || ''),
-      episode_number: Number(entry.episode_number) || 1,
+      episode_number: Math.max(1, Math.floor(Number(entry.episode_number) || 1)),
       episode_title: entry.episode_title || '',
-      progress_seconds: Number(entry.progress_seconds) || 0,
-      duration_seconds: Number(entry.duration_seconds) || 0,
+      progress_seconds: Math.max(0, Math.floor(Number(entry.progress_seconds) || 0)),
+      duration_seconds: Math.max(0, Math.floor(Number(entry.duration_seconds) || 0)),
       completed: Boolean(entry.completed),
-      updated_at: new Date().toISOString()
+      updated_at: new Date(entry.timestamp || Date.now()).toISOString()
     };
     const { error } = await supabase
       .from('watch_history')

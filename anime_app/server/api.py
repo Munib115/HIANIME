@@ -64,6 +64,44 @@ def find_db():
             return os.path.abspath(c)
     return os.path.join(CURRENT_DIR, "hianime.db")
 
+
+def find_munib_db():
+    """Locate the independent Server 2 database (munib_server.db)."""
+    root_dir = os.path.dirname(PARENT_DIR)
+    candidates = [
+        os.environ.get("MUNIB_DB"),
+        os.path.join(root_dir, "munib_server.db"),
+        os.path.join(PARENT_DIR, "munib_server.db"),
+        os.path.join(CURRENT_DIR, "munib_server.db"),
+        os.path.join(os.getcwd(), "munib_server.db"),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return os.path.abspath(c)
+    return None
+
+
+def munib_rows(sql, params=()):
+    """Query the independent munib_server.db without mixing into hianime.db."""
+    mpath = find_munib_db()
+    if not mpath or not os.path.exists(mpath):
+        return []
+    conn = None
+    try:
+        conn = sqlite3.connect(mpath, timeout=10, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
+    except Exception:
+        return []
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 app = FastAPI(title="KuroAnime API")
 app.add_middleware(
     CORSMiddleware,
@@ -189,6 +227,9 @@ def audio_flags(anime_ids):
     for r in rows(f"SELECT DISTINCT anime_id, type FROM streams WHERE anime_id IN ({q})", anime_ids):
         if r["type"] in ("sub", "dub"):
             out[r["anime_id"]][r["type"]] = True
+    for r in munib_rows(f"SELECT DISTINCT anime_id, type FROM streams WHERE anime_id IN ({q})", anime_ids):
+        if r["type"] in ("sub", "dub") and r["anime_id"] in out:
+            out[r["anime_id"]][r["type"]] = True
     return out
 
 
@@ -240,10 +281,13 @@ def debug_db():
 
 @router.get("/stats")
 def stats():
+    m_streams = munib_rows("SELECT COUNT(*) AS n FROM streams")
+    munib_stream_count = m_streams[0]["n"] if m_streams else 0
     return {
         "anime": one("SELECT COUNT(*) n FROM anime")["n"],
         "episodes": one("SELECT COUNT(*) n FROM episodes")["n"],
-        "streams": one("SELECT COUNT(*) n FROM streams")["n"],
+        "streams": one("SELECT COUNT(*) n FROM streams")["n"] + munib_stream_count,
+        "munib_streams": munib_stream_count,
     }
 
 
@@ -279,11 +323,23 @@ def home():
     return {"spotlight": spotlight, "rails": rails}
 
 
+MUNIB_CARD_COLS = """anime_id, title, title_english, type, status, episode_count,
+                     anilist_score, NULL AS mal_score, season_year,
+                     COALESCE(NULLIF(poster_large,''), poster_url) AS poster"""
+
+
 @router.get("/anime/{anime_id}")
 def anime_detail(anime_id: int):
     a = one("SELECT * FROM anime WHERE anime_id = ?", (anime_id,))
     if not a:
-        raise HTTPException(404, "Anime not found")
+        m_list = munib_rows("SELECT * FROM anime WHERE anime_id = ?", (anime_id,))
+        if not m_list:
+            raise HTTPException(404, "Anime not found")
+        a = m_list[0]
+        a["poster"] = a.get("poster_large") or a.get("poster_url")
+        a["seasons"] = []
+        a.update(audio_flags([anime_id]).get(anime_id, {"sub": True, "dub": False}))
+        return a
     a["poster"] = a.get("poster_large") or a.get("poster_url")
     a["seasons"] = rows("""
         SELECT season_name, season_anime_id, season_poster, is_current
@@ -309,6 +365,35 @@ def anime_episodes(anime_id: int):
         GROUP BY e.id
         ORDER BY e.episode_number
     """, (anime_id,))
+    # Merge sub/dub availability from independent Munib Server DB (munib_server.db)
+    munib_ep_flags = {}
+    for mr in munib_rows("SELECT episode_number, type FROM streams WHERE anime_id = ?", (anime_id,)):
+        ep_no = mr.get("episode_number")
+        st = mr.get("type")
+        if ep_no is not None and st in ("sub", "dub"):
+            munib_ep_flags.setdefault(ep_no, {"sub": 0, "dub": 0})[st] = 1
+    if not eps:
+        # Fallback to episodes stored directly in munib_server.db (e.g. Hentai & Munib-exclusive titles)
+        m_eps = munib_rows(
+            "SELECT episode_id, episode_number, title FROM episodes WHERE anime_id = ? ORDER BY episode_number",
+            (anime_id,),
+        )
+        for me in m_eps:
+            mf = munib_ep_flags.get(me["episode_number"], {"sub": 1, "dub": 0})
+            eps.append({
+                "episode_id": me["episode_id"],
+                "episode_number": me["episode_number"],
+                "title": me.get("title") or f"Episode {me['episode_number']}",
+                "japanese_title": "",
+                "sub": mf["sub"],
+                "dub": mf["dub"],
+            })
+        return {"anime_id": anime_id, "episodes": eps}
+    for ep in eps:
+        mf = munib_ep_flags.get(ep["episode_number"])
+        if mf:
+            ep["sub"] = max(ep.get("sub") or 0, mf["sub"])
+            ep["dub"] = max(ep.get("dub") or 0, mf["dub"])
     return {"anime_id": anime_id, "episodes": eps}
 
 
@@ -320,9 +405,37 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
         sql += " AND anime_id = ?"
         params.append(anime_id)
     data = rows(sql + " ORDER BY type, CASE WHEN server_name = 'ZokoAnime' THEN 0 ELSE 1 END, server_name", params)
+
+    # Query Server 2 ("Munib Server") from its independent munib_server.db
+    munib_data = munib_rows(
+        "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ?",
+        (episode_id,),
+    )
+    if not munib_data:
+        # Fallback match by (anime_id, episode_number) or (anilist_id, episode_number)
+        ep_row = one(
+            "SELECT anime_id, episode_number FROM episodes WHERE episode_id = ?" + (" AND anime_id = ?" if anime_id is not None else ""),
+            (episode_id, anime_id) if anime_id is not None else (episode_id,),
+        )
+        if ep_row:
+            a_id = ep_row["anime_id"]
+            ep_no = ep_row["episode_number"]
+            munib_data = munib_rows(
+                "SELECT type, server_name, provider, embed_url FROM streams WHERE anime_id = ? AND episode_number = ?",
+                (a_id, ep_no),
+            )
+            if not munib_data:
+                al_row = one("SELECT anilist_id FROM anime WHERE anime_id = ?", (a_id,))
+                if al_row and al_row.get("anilist_id"):
+                    munib_data = munib_rows(
+                        "SELECT type, server_name, provider, embed_url FROM streams WHERE anilist_id = ? AND episode_number = ?",
+                        (al_row["anilist_id"], ep_no),
+                    )
+
+    combined = data + munib_data
     return {
-        "sub": [s for s in data if s["type"] == "sub"],
-        "dub": [s for s in data if s["type"] == "dub"],
+        "sub": [s for s in combined if s["type"] == "sub"],
+        "dub": [s for s in combined if s["type"] == "dub"],
     }
 
 
@@ -361,6 +474,19 @@ def search(q: str = Query(..., min_length=1), limit: int = 30):
                 res.append(r)
                 seen.add(r["anime_id"])
                 
+    # 3. Also search Munib Server DB for exclusive titles (e.g. Hentai & extra catalog)
+    seen = {r["anime_id"] for r in res}
+    m_res = munib_rows(f"""
+        SELECT {MUNIB_CARD_COLS} FROM anime
+        WHERE title LIKE ? OR title_english LIKE ? OR title_romaji LIKE ? OR japanese_name LIKE ?
+        ORDER BY anilist_popularity DESC NULLS LAST
+        LIMIT ?
+    """, (like, like, like, like, min(limit, 60)))
+    for mr in m_res:
+        if mr["anime_id"] not in seen:
+            res.append(mr)
+            seen.add(mr["anime_id"])
+
     return {"results": with_flags(res[:min(limit, 60)])}
 
 
@@ -374,18 +500,25 @@ def browse(
     per_page: int = 30,
 ):
     where, params = [], []
+    m_where, m_params = [], []
     if genre:
         where.append("(genres LIKE ? OR al_genres LIKE ?)")
         params += [f"%{genre}%", f"%{genre}%"]
+        m_where.append("genres LIKE ?")
+        m_params.append(f"%{genre}%")
     if type:
         where.append("type LIKE ?")
         params.append(f"%{type}%")
+        m_where.append("type LIKE ?")
+        m_params.append(f"%{type}%")
     if status:
         st = status.lower()
         if "air" in st or "releas" in st:
             where.append("(status LIKE '%Currently Airing%' OR anilist_status='RELEASING' OR category='airing') AND status NOT LIKE '%Finished%' AND (anilist_status IS NULL OR anilist_status != 'FINISHED')")
+            m_where.append("(status LIKE '%Releasing%' OR status LIKE '%Airing%')")
         elif "comp" in st or "finish" in st:
             where.append("(status LIKE '%Finished%' OR anilist_status='FINISHED')")
+            m_where.append("status LIKE '%Finished%'")
     order = {
         "popular": "anilist_popularity DESC NULLS LAST",
         "score": "anilist_score DESC NULLS LAST",
@@ -393,11 +526,34 @@ def browse(
         "new": "season_year DESC NULLS LAST, anilist_popularity DESC NULLS LAST",
     }.get(sort, "anilist_popularity DESC NULLS LAST")
     per_page = max(1, min(per_page, 60))
+    offset = (max(page, 1) - 1) * per_page
+
+    # If filtering by Hentai (or if main DB has no matches), query Munib Server DB directly
+    if genre and genre.strip().lower() == "hentai":
+        m_sql = f"SELECT {MUNIB_CARD_COLS} FROM anime"
+        if m_where:
+            m_sql += " WHERE " + " AND ".join(m_where)
+        m_sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
+        m_res = munib_rows(m_sql, m_params + [per_page, offset])
+        return {"page": page, "results": with_flags(m_res)}
+
     sql = f"SELECT {CARD_COLS} FROM anime"
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
-    res = rows(sql, params + [per_page, (max(page, 1) - 1) * per_page])
+    res = rows(sql, params + [per_page, offset])
+
+    if len(res) < per_page:
+        seen = {r["anime_id"] for r in res}
+        m_sql = f"SELECT {MUNIB_CARD_COLS} FROM anime"
+        m_conds = list(m_where) + ["anime_id >= 1000000"]
+        m_sql += " WHERE " + " AND ".join(m_conds)
+        m_sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
+        for mr in munib_rows(m_sql, m_params + [per_page - len(res), offset]):
+            if mr["anime_id"] not in seen:
+                res.append(mr)
+                seen.add(mr["anime_id"])
+
     return {"page": page, "results": with_flags(res)}
 
 
@@ -405,6 +561,11 @@ def browse(
 def genres():
     counts = {}
     for r in rows("SELECT genres FROM anime WHERE genres IS NOT NULL AND genres != ''"):
+        for g in r["genres"].split(","):
+            g = g.strip()
+            if g:
+                counts[g] = counts.get(g, 0) + 1
+    for r in munib_rows("SELECT genres FROM anime WHERE genres IS NOT NULL AND genres != '' AND anime_id >= 1000000"):
         for g in r["genres"].split(","):
             g = g.strip()
             if g:
