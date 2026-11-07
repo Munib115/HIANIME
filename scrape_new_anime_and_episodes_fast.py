@@ -276,15 +276,18 @@ def get_all_episode_streams(episodes):
     return all_streams
 
 def sync_db_copies():
+    import gzip
     targets = [
-        os.path.join(BASE_DIR, "api", "hianime.db"),
-        os.path.join(BASE_DIR, "anime_app", "web", "api", "hianime.db"),
-        os.path.join(BASE_DIR, "anime_app", "web", "hianime.db"),
+        os.path.join(BASE_DIR, "api", "hianime.db.gz"),
+        os.path.join(BASE_DIR, "anime_app", "web", "api", "hianime.db.gz"),
     ]
+    raw_bytes = open(DB_PATH, "rb").read()
+    comp_bytes = gzip.compress(raw_bytes, compresslevel=6)
     for t in targets:
         try:
             os.makedirs(os.path.dirname(t), exist_ok=True)
-            shutil.copy2(DB_PATH, t)
+            with open(t, "wb") as f:
+                f.write(comp_bytes)
         except Exception:
             pass
 

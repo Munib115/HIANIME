@@ -127,15 +127,18 @@ def load_hianime_reference():
 
 
 def sync_munib_copies():
-    targets = [
-        os.path.join(BASE_DIR, "api", "munib_server.db"),
-        os.path.join(BASE_DIR, "anime_app", "web", "api", "munib_server.db"),
-        os.path.join(BASE_DIR, "anime_app", "web", "munib_server.db"),
+    import gzip
+    gz_targets = [
+        os.path.join(BASE_DIR, "api", "munib_server.db.gz"),
+        os.path.join(BASE_DIR, "anime_app", "web", "api", "munib_server.db.gz"),
     ]
-    for t in targets:
+    raw_bytes = open(MUNIB_DB_PATH, "rb").read()
+    comp_bytes = gzip.compress(raw_bytes, compresslevel=6)
+    for t in gz_targets:
         try:
             os.makedirs(os.path.dirname(t), exist_ok=True)
-            shutil.copy2(MUNIB_DB_PATH, t)
+            with open(t, "wb") as f:
+                f.write(comp_bytes)
         except Exception as e:
             print(f"  Warning syncing {t}: {e}")
 

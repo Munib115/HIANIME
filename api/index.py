@@ -51,13 +51,19 @@ CANDIDATES = [
 def find_db():
     candidates = [
         os.environ.get("ANIME_DB"),
-        os.path.join(PARENT_DIR, "hianime.db"),
         os.path.join(CURRENT_DIR, "hianime.db"),
+        os.path.join(PARENT_DIR, "hianime.db"),
         os.path.join(os.getcwd(), "hianime.db"),
+        os.path.join(CURRENT_DIR, "hianime.db.gz"),
+        os.path.join(PARENT_DIR, "hianime.db.gz"),
+        os.path.join(CURRENT_DIR, "api", "hianime.db.gz"),
+        os.path.join(PARENT_DIR, "api", "hianime.db.gz"),
+        os.path.join(os.getcwd(), "api", "hianime.db.gz"),
+        os.path.join(os.getcwd(), "anime_app", "web", "api", "hianime.db.gz"),
+        os.path.join(CURRENT_DIR, "api", "hianime.db"),
         os.path.join(PARENT_DIR, "api", "hianime.db"),
         os.path.join(os.getcwd(), "api", "hianime.db"),
         os.path.join(os.getcwd(), "anime_app", "web", "api", "hianime.db"),
-        os.path.join(os.getcwd(), "anime_app", "web", "hianime.db"),
     ]
     for c in candidates:
         if c and os.path.exists(c):
@@ -66,7 +72,7 @@ def find_db():
 
 
 def find_munib_db():
-    """Locate the independent Server 2 database (munib_server.db) across local and Vercel serverless paths."""
+    """Locate the independent Server 2 database (munib_server.db or compressed munib_server.db.gz)."""
     root_dir = os.path.dirname(PARENT_DIR)
     candidates = [
         os.environ.get("MUNIB_DB"),
@@ -74,10 +80,12 @@ def find_munib_db():
         os.path.join(PARENT_DIR, "munib_server.db"),
         os.path.join(root_dir, "munib_server.db"),
         os.path.join(os.getcwd(), "munib_server.db"),
-        os.path.join(PARENT_DIR, "api", "munib_server.db"),
-        os.path.join(os.getcwd(), "api", "munib_server.db"),
-        os.path.join(os.getcwd(), "anime_app", "web", "api", "munib_server.db"),
-        os.path.join(os.getcwd(), "anime_app", "web", "munib_server.db"),
+        os.path.join(CURRENT_DIR, "munib_server.db.gz"),
+        os.path.join(PARENT_DIR, "munib_server.db.gz"),
+        os.path.join(CURRENT_DIR, "api", "munib_server.db.gz"),
+        os.path.join(PARENT_DIR, "api", "munib_server.db.gz"),
+        os.path.join(os.getcwd(), "api", "munib_server.db.gz"),
+        os.path.join(os.getcwd(), "anime_app", "web", "api", "munib_server.db.gz"),
     ]
     for c in candidates:
         if c and os.path.exists(c):
@@ -95,6 +103,22 @@ def get_munib_db_path():
     source = find_munib_db()
     if not source or not os.path.exists(source):
         return None
+
+    if source.endswith(".gz"):
+        import gzip
+        import shutil
+        import tempfile
+        tmp_dir = "/tmp" if (os.environ.get("VERCEL") or os.path.exists("/tmp")) else tempfile.gettempdir()
+        tmp_db = os.path.join(tmp_dir, "munib_server.db")
+        try:
+            if not os.path.exists(tmp_db) or os.path.getsize(tmp_db) == 0:
+                with gzip.open(source, "rb") as f_in, open(tmp_db, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            if os.path.exists(tmp_db) and os.path.getsize(tmp_db) > 0:
+                _INITIALIZED_MUNIB_DB = tmp_db
+                return _INITIALIZED_MUNIB_DB
+        except Exception:
+            return None
 
     if os.environ.get("VERCEL") or os.path.exists("/tmp"):
         tmp_db = "/tmp/munib_server.db"
@@ -205,6 +229,22 @@ def get_db_path():
     source = find_db()
     if not source or not os.path.exists(source):
         raise HTTPException(status_code=500, detail="Database file not found on server")
+
+    if source.endswith(".gz"):
+        import gzip
+        import shutil
+        import tempfile
+        tmp_dir = "/tmp" if (os.environ.get("VERCEL") or os.path.exists("/tmp")) else tempfile.gettempdir()
+        tmp_db = os.path.join(tmp_dir, "hianime.db")
+        try:
+            if not os.path.exists(tmp_db) or os.path.getsize(tmp_db) == 0:
+                with gzip.open(source, "rb") as f_in, open(tmp_db, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            if os.path.exists(tmp_db) and os.path.getsize(tmp_db) > 0:
+                _INITIALIZED_DB = tmp_db
+                return _INITIALIZED_DB
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to decompress DB: {e}")
 
     # In serverless read-only environments (e.g. Vercel / AWS Lambda), copy DB to /tmp
     # to guarantee fully concurrent read/write locks, -shm/-wal handling, and zero disk errors

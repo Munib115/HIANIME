@@ -2,15 +2,15 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/index.py": {
-      "includeFiles": "api/*.db",
+      "includeFiles": "api/*.db*",
       "maxDuration": 60
     },
     "api/*.py": {
-      "includeFiles": "api/*.db",
+      "includeFiles": "api/*.db*",
       "maxDuration": 60
     },
     "api/**/*.py": {
-      "includeFiles": "api/*.db",
+      "includeFiles": "api/*.db*",
       "maxDuration": 60
     }
   },
