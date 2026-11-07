@@ -491,6 +491,7 @@ def main():
     # Step 3: Checkpoint and sync
     print("\nCheckpointing WAL and syncing database files across project...")
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+    conn.execute("PRAGMA journal_mode = DELETE;")
     conn.close()
 
     sync_db_copies()

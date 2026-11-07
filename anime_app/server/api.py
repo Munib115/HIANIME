@@ -66,14 +66,18 @@ def find_db():
 
 
 def find_munib_db():
-    """Locate the independent Server 2 database (munib_server.db)."""
+    """Locate the independent Server 2 database (munib_server.db) across local and Vercel serverless paths."""
     root_dir = os.path.dirname(PARENT_DIR)
     candidates = [
         os.environ.get("MUNIB_DB"),
-        os.path.join(root_dir, "munib_server.db"),
-        os.path.join(PARENT_DIR, "munib_server.db"),
         os.path.join(CURRENT_DIR, "munib_server.db"),
+        os.path.join(PARENT_DIR, "munib_server.db"),
+        os.path.join(root_dir, "munib_server.db"),
         os.path.join(os.getcwd(), "munib_server.db"),
+        os.path.join(PARENT_DIR, "api", "munib_server.db"),
+        os.path.join(os.getcwd(), "api", "munib_server.db"),
+        os.path.join(os.getcwd(), "anime_app", "web", "api", "munib_server.db"),
+        os.path.join(os.getcwd(), "anime_app", "web", "munib_server.db"),
     ]
     for c in candidates:
         if c and os.path.exists(c):
@@ -81,26 +85,85 @@ def find_munib_db():
     return None
 
 
+_INITIALIZED_MUNIB_DB = None
+
+def get_munib_db_path():
+    global _INITIALIZED_MUNIB_DB
+    if _INITIALIZED_MUNIB_DB and os.path.exists(_INITIALIZED_MUNIB_DB):
+        return _INITIALIZED_MUNIB_DB
+
+    source = find_munib_db()
+    if not source or not os.path.exists(source):
+        return None
+
+    if os.environ.get("VERCEL") or os.path.exists("/tmp"):
+        tmp_db = "/tmp/munib_server.db"
+        try:
+            if not os.path.exists(tmp_db) or os.path.getsize(tmp_db) != os.path.getsize(source):
+                import shutil
+                shutil.copyfile(source, tmp_db)
+            if os.path.exists(tmp_db) and os.path.getsize(tmp_db) > 0:
+                _INITIALIZED_MUNIB_DB = tmp_db
+                return _INITIALIZED_MUNIB_DB
+        except Exception:
+            pass
+
+    _INITIALIZED_MUNIB_DB = source
+    return source
+
+
+def munib_db():
+    path = get_munib_db_path()
+    if not path or not os.path.exists(path):
+        return None
+
+    if path.startswith("/tmp"):
+        try:
+            conn = sqlite3.connect(path, timeout=10, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except Exception:
+            pass
+
+    norm_path = os.path.abspath(path).replace("\\", "/")
+    if not norm_path.startswith("/"):
+        norm_path = "/" + norm_path
+
+    try:
+        conn = sqlite3.connect(f"file://{norm_path}?mode=ro&immutable=1", uri=True, timeout=10, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception:
+        pass
+
+    try:
+        conn = sqlite3.connect(f"file://{norm_path}?mode=ro", uri=True, timeout=10, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception:
+        pass
+
+    conn = sqlite3.connect(path, timeout=10, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def munib_rows(sql, params=()):
     """Query the independent munib_server.db without mixing into hianime.db."""
-    mpath = find_munib_db()
-    if not mpath or not os.path.exists(mpath):
+    conn = munib_db()
+    if not conn:
         return []
-    conn = None
     try:
-        conn = sqlite3.connect(mpath, timeout=10, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
     except Exception:
         return []
     finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 app = FastAPI(title="KuroAnime API")
 app.add_middleware(
@@ -243,11 +306,15 @@ def with_flags(cards):
 @router.get("/health")
 def health():
     db_file = find_db()
+    munib_file = find_munib_db()
     return {
         "status": "ok",
         "db_path": db_file,
         "db_exists": os.path.exists(db_file),
         "db_size": os.path.getsize(db_file) if os.path.exists(db_file) else 0,
+        "munib_db_path": munib_file,
+        "munib_db_exists": bool(munib_file and os.path.exists(munib_file)),
+        "munib_db_size": os.path.getsize(munib_file) if munib_file and os.path.exists(munib_file) else 0,
         "files_here": os.listdir(CURRENT_DIR) if os.path.exists(CURRENT_DIR) else [],
     }
 
@@ -262,6 +329,11 @@ def debug_db():
         "db_size": 0,
         "tmp_exists": os.path.exists("/tmp/hianime.db") if os.path.exists("/tmp") else False,
         "count_anime": None,
+        "munib_db_path": None,
+        "munib_db_exists": False,
+        "munib_db_size": 0,
+        "count_munib_anime": 0,
+        "count_munib_streams": 0,
         "error": None,
         "traceback": None,
     }
@@ -272,6 +344,14 @@ def debug_db():
         result["db_size"] = os.path.getsize(path) if os.path.exists(path) else 0
         res = rows("SELECT COUNT(*) AS n FROM anime")
         result["count_anime"] = res[0]["n"]
+        mpath = get_munib_db_path()
+        result["munib_db_path"] = mpath
+        result["munib_db_exists"] = bool(mpath and os.path.exists(mpath))
+        result["munib_db_size"] = os.path.getsize(mpath) if mpath and os.path.exists(mpath) else 0
+        m_anime = munib_rows("SELECT COUNT(*) AS n FROM anime")
+        m_streams = munib_rows("SELECT COUNT(*) AS n FROM streams")
+        result["count_munib_anime"] = m_anime[0]["n"] if m_anime else 0
+        result["count_munib_streams"] = m_streams[0]["n"] if m_streams else 0
         result["ok"] = True
     except Exception as e:
         result["error"] = str(e)
@@ -426,11 +506,50 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
             )
             if not munib_data:
                 al_row = one("SELECT anilist_id FROM anime WHERE anime_id = ?", (a_id,))
-                if al_row and al_row.get("anilist_id"):
+                al_id = al_row.get("anilist_id") if al_row else None
+                if al_id:
                     munib_data = munib_rows(
                         "SELECT type, server_name, provider, embed_url FROM streams WHERE anilist_id = ? AND episode_number = ?",
-                        (al_row["anilist_id"], ep_no),
+                        (al_id, ep_no),
                     )
+                    # Live fallback to reanime.to flix API if not yet cached in munib_server.db
+                    if not munib_data and ep_no is not None:
+                        try:
+                            fr = _STREAM_SESSION.get(
+                                f"https://reanime.to/api/flix/{al_id}/{ep_no}",
+                                headers={"User-Agent": _STREAM_HEADERS["User-Agent"], "Referer": "https://reanime.to/home"},
+                                timeout=3,
+                            )
+                            if fr.status_code == 200:
+                                fjson = fr.json()
+                                if fjson.get("success") and fjson.get("servers"):
+                                    sub_link, dub_link = None, None
+                                    for srv in fjson["servers"]:
+                                        dtype = (srv.get("dataType") or "").lower()
+                                        dlink = (srv.get("dataLink") or "").strip()
+                                        if not dlink:
+                                            continue
+                                        if dtype == "sub" and not sub_link:
+                                            sub_link = dlink
+                                        elif dtype in ("dub", "s-dub") and not dub_link:
+                                            sep = "&" if "?" in dlink else "?"
+                                            dub_link = f"{dlink}{sep}a=1" if "a=1" not in dlink else dlink
+                                    if sub_link:
+                                        munib_data.append({
+                                            "type": "sub",
+                                            "server_name": "Munib Server",
+                                            "provider": "reanime.to",
+                                            "embed_url": sub_link,
+                                        })
+                                    if dub_link:
+                                        munib_data.append({
+                                            "type": "dub",
+                                            "server_name": "Munib Server",
+                                            "provider": "reanime.to",
+                                            "embed_url": dub_link,
+                                        })
+                        except Exception:
+                            pass
 
     combined = data + munib_data
     return {
