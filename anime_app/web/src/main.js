@@ -2091,6 +2091,9 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
+    // Strip stray backticks wrapped around watch links: `[Watch on KuroAnime](#anime/123)`
+    text = text.replace(/`(\[[^\]]+\]\(#anime\/\d+\))`/g, '$1');
+
     // Headings: ## 1. Anime Title
     text = text.replace(/^##\s*(.*?)$/gm, '<div class="vegeta-rec-header"><span class="rec-hash">##</span> $1</div>');
 
@@ -2157,6 +2160,8 @@ document.addEventListener('DOMContentLoaded', () => {
     vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
   }
 
+  const vegetaConversation = [];
+
   async function sendVegetaMessage(promptText) {
     const text = (promptText || vegetaChatInput?.value || '').trim();
     if (!text) return;
@@ -2171,7 +2176,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     localStorage.removeItem('kuro_gemini_api_key');
-    const payload = { message: text };
+    // Send the last 12 turns so Vegeta remembers the conversation like a real person
+    const payload = { message: text, history: vegetaConversation.slice(-12) };
+    vegetaConversation.push({ role: 'user', text });
 
     try {
       let res;
@@ -2197,6 +2204,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (vegetaTypingIndicator) vegetaTypingIndicator.style.display = 'none';
 
       if (data && data.reply) {
+        vegetaConversation.push({ role: 'model', text: data.reply });
+        if (vegetaConversation.length > 24) vegetaConversation.splice(0, vegetaConversation.length - 24);
         appendVegetaMessage('bot', data.reply);
       } else {
         appendVegetaMessage('bot', 'Hmph! Even the Prince of Saiyans got no answer from this archive. Try another genre, warrior!');

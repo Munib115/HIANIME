@@ -393,30 +393,40 @@ def main():
             print(f"  Error updating episodes for {title}: {e}")
 
     # ─────────────────────────────────────────────────────────────
-    # STEP 2: Discover & Scrape Brand New Anime Titles from /new-anime
+    # STEP 2: Discover & Scrape Brand New Anime Titles from all sections
     # ─────────────────────────────────────────────────────────────
-    print("\nScanning /new-anime for brand-new anime titles...")
+    print("\nScanning /new-anime, /recently-updated, /movie, /ova, /ona, /special for brand-new anime titles...")
     new_anime_targets = []
     seen_new_ids = set()
 
-    for p in range(1, 25):
-        html = fetch(f"{BASE_URL}/new-anime?page={p}")
-        if not html: break
-        soup = BeautifulSoup(html, "html.parser")
-        for item in soup.select(".film_list-wrap .flw-item"):
-            a = item.select_one(".film-name a")
-            if not a or not a.get("href"): continue
-            m = re.search(r"-(\d+)$", a.get("href"))
-            if not m: continue
-            aid = int(m.group(1))
-            if (aid not in db_anime or db_anime.get(aid, 0) == 0) and aid not in seen_new_ids:
-                seen_new_ids.add(aid)
-                full_url = a.get("href") if a.get("href").startswith("http") else BASE_URL + a.get("href")
-                new_anime_targets.append({
-                    "anime_id": aid,
-                    "title": a.text.strip(),
-                    "url": full_url,
-                })
+    discovery_sources = [
+        (f"{BASE_URL}/new-anime?page={{}}", 50),
+        (f"{BASE_URL}/recently-updated?page={{}}", 25),
+        (f"{BASE_URL}/movie?page={{}}", 15),
+        (f"{BASE_URL}/ova?page={{}}", 15),
+        (f"{BASE_URL}/ona?page={{}}", 15),
+        (f"{BASE_URL}/special?page={{}}", 15),
+    ]
+
+    for url_pattern, max_pages in discovery_sources:
+        for p in range(1, max_pages + 1):
+            html = fetch(url_pattern.format(p))
+            if not html: break
+            soup = BeautifulSoup(html, "html.parser")
+            for item in soup.select(".film_list-wrap .flw-item"):
+                a = item.select_one(".film-name a")
+                if not a or not a.get("href"): continue
+                m = re.search(r"-(\d+)$", a.get("href"))
+                if not m: continue
+                aid = int(m.group(1))
+                if (aid not in db_anime or db_anime.get(aid, 0) == 0) and aid not in seen_new_ids:
+                    seen_new_ids.add(aid)
+                    full_url = a.get("href") if a.get("href").startswith("http") else BASE_URL + a.get("href")
+                    new_anime_targets.append({
+                        "anime_id": aid,
+                        "title": a.text.strip(),
+                        "url": full_url,
+                    })
 
     print(f"Discovered {len(new_anime_targets)} brand new anime titles to scrape.")
 
