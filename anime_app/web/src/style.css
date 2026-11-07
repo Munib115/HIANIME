@@ -6085,3 +6085,736 @@ body.kuro-reduced-motion *::after {
   transition-duration: 0.01ms !important;
   scroll-behavior: auto !important;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   WHATSAPP-STYLE EPISODE DISCUSSION CHAT (Satoshi • Zero Icons • Mobile-Safe)
+   ════════════════════════════════════════════════════════════════════ */
+.kuro-discussion-section {
+  padding: 6px 16px 32px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+}
+
+#detail-discussion-section.kuro-discussion-section {
+  padding: 16px 0 12px;
+}
+
+.kuro-disc-card.kuro-wa-container {
+  background: #0B0D14;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.38);
+}
+
+.kuro-disc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 16px;
+  background: #10131D;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.kuro-disc-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.kuro-disc-accent-bar {
+  width: 3px;
+  height: 22px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #FF2A4D 0%, #E11D48 100%);
+  flex-shrink: 0;
+}
+
+.kuro-wa-header-titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.kuro-disc-heading {
+  margin: 0;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.94rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #F8FAFC;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kuro-wa-header-sub {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.kuro-disc-scope-tabs {
+  display: inline-flex;
+  background: #080A0F;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.kuro-disc-scope-btn {
+  background: transparent;
+  border: none;
+  color: #94A3B8;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.kuro-disc-scope-btn.active {
+  background: rgba(255, 42, 77, 0.18);
+  color: #FF2A4D;
+}
+
+/* ─── Scrollable WhatsApp-Style Chat Feed ─── */
+.kuro-wa-chat-viewport {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 14px;
+  max-height: 410px;
+  min-height: 170px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 42, 77, 0.03) 0%, transparent 55%),
+    #080A10;
+  box-sizing: border-box;
+}
+
+.kuro-disc-loading,
+.kuro-disc-empty {
+  margin: auto 0;
+  text-align: center;
+  padding: 26px 14px;
+}
+
+.kuro-disc-empty-title {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #CBD5E1;
+  margin-bottom: 4px;
+}
+
+.kuro-disc-empty-sub,
+.kuro-disc-loading {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #64748B;
+}
+
+/* ─── WhatsApp Message Rows & Bubbles ─── */
+.kuro-wa-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kuro-wa-row.is-own {
+  justify-content: flex-end;
+}
+
+.kuro-wa-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #FF2A4D 0%, #9F1239 100%);
+  color: #FFFFFF;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.kuro-wa-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kuro-wa-bubble {
+  max-width: min(78%, 520px);
+  min-width: 120px;
+  background: #131722;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px 12px 12px 4px;
+  padding: 8px 11px 7px;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.kuro-wa-bubble.is-own {
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.24) 0%, rgba(159, 18, 57, 0.28) 100%);
+  border-color: rgba(255, 42, 77, 0.32);
+  border-radius: 12px 12px 4px 12px;
+}
+
+.kuro-wa-bubble-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.kuro-wa-author {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #FF2A4D;
+}
+
+.kuro-wa-bubble.is-own .kuro-wa-author {
+  color: #FDA4AF;
+}
+
+.kuro-wa-ep-badge {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 800;
+  color: #94A3B8;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.kuro-wa-msg-text {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.48;
+  color: #F1F5F9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kuro-wa-msg-text.is-blurred {
+  filter: blur(7px);
+  user-select: none;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.kuro-disc-spoiler-reveal-btn {
+  margin-top: 5px;
+  background: rgba(255, 42, 77, 0.15);
+  border: 1px solid rgba(255, 42, 77, 0.32);
+  color: #FF2A4D;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* ─── Inline Media (Images, Videos & Voice Note Player) ─── */
+.kuro-wa-media-box {
+  margin: 4px 0 6px;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 100%;
+  background: #06070B;
+}
+
+.kuro-wa-chat-img {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.kuro-wa-chat-video {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  border-radius: 8px;
+  background: #000000;
+}
+
+.kuro-wa-voice-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 5px 10px 5px 6px;
+  margin: 4px 0 6px;
+  min-width: 185px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.kuro-wa-voice-play-btn {
+  background: #FF2A4D;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.kuro-wa-voice-wave {
+  position: relative;
+  flex: 1;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  min-width: 60px;
+}
+
+.kuro-wa-voice-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: rgba(255, 42, 77, 0.25);
+  border-radius: 4px;
+  pointer-events: none;
+  transition: width 0.15s linear;
+}
+
+.kuro-wa-voice-bars {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  gap: 2px;
+}
+
+.kuro-wa-voice-bars span {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.45);
+  border-radius: 2px;
+  height: 45%;
+}
+
+.kuro-wa-voice-bars span:nth-child(3n) { height: 85%; }
+.kuro-wa-voice-bars span:nth-child(2n) { height: 65%; }
+.kuro-wa-voice-bars span:nth-child(5n) { height: 30%; }
+
+.kuro-wa-voice-time {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #CBD5E1;
+  flex-shrink: 0;
+}
+
+.kuro-wa-bubble-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 5px;
+}
+
+.kuro-wa-bubble-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kuro-wa-mini-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #94A3B8;
+  cursor: pointer;
+}
+
+.kuro-wa-mini-btn.liked {
+  color: #FF2A4D;
+}
+
+.kuro-wa-del-btn:hover {
+  color: #F87171;
+}
+
+.kuro-wa-time {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: #64748B;
+  white-space: nowrap;
+}
+
+/* ─── Bottom WhatsApp Input Bar & Media Preview ─── */
+.kuro-wa-composer-wrap {
+  background: #10131D;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kuro-wa-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #090B10;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+
+.kuro-wa-preview-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kuro-wa-preview-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 5px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.kuro-wa-preview-name {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #E2E8F0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kuro-wa-preview-remove {
+  background: rgba(248, 113, 113, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #F87171;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.kuro-wa-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kuro-wa-tool-btn,
+.kuro-wa-spoiler-pill,
+.kuro-wa-voice-btn {
+  background: #171B29;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #CBD5E1;
+  border-radius: 999px;
+  height: 36px;
+  padding: 0 11px;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.73rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.kuro-wa-spoiler-pill.active {
+  background: rgba(255, 42, 77, 0.16);
+  border-color: rgba(255, 42, 77, 0.4);
+  color: #FF2A4D;
+}
+
+.kuro-wa-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  background: #090B10;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 0 14px;
+  color: #F8FAFC;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 500;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.kuro-wa-input:focus {
+  border-color: rgba(255, 42, 77, 0.45);
+}
+
+.kuro-wa-send-btn {
+  background: linear-gradient(135deg, #FF2A4D 0%, #E11D48 100%);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 999px;
+  height: 36px;
+  padding: 0 15px;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ─── Live Voice Recording Bar ─── */
+.kuro-wa-recording-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(225, 29, 72, 0.12);
+  border: 1px solid rgba(255, 42, 77, 0.35);
+  border-radius: 999px;
+  padding: 5px 10px;
+}
+
+.kuro-wa-rec-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kuro-wa-rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #FF2A4D;
+  flex-shrink: 0;
+  animation: kuroRecPulse 1s infinite ease-in-out;
+}
+
+@keyframes kuroRecPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.82); }
+}
+
+.kuro-wa-rec-timer {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #F8FAFC;
+}
+
+.kuro-wa-rec-label {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #FDA4AF;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kuro-wa-rec-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.kuro-wa-rec-cancel {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #CBD5E1;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.kuro-wa-rec-send {
+  background: #FF2A4D;
+  border: none;
+  color: #FFFFFF;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* ─── Unauthenticated Google Sign-In Bar ─── */
+.kuro-wa-auth-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #10131D;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kuro-wa-auth-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kuro-wa-auth-badge {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #FF2A4D;
+  background: rgba(255, 42, 77, 0.12);
+  border: 1px solid rgba(255, 42, 77, 0.28);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.kuro-wa-auth-text {
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #94A3B8;
+}
+
+.kuro-disc-google-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #FFFFFF;
+  color: #0F172A;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 15px;
+  font-family: 'Satoshi', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+/* ─── Mobile Viewport Optimization (Never Cuts Off Screen) ─── */
+@media (max-width: 768px) {
+  .kuro-discussion-section {
+    padding: 6px 10px 24px;
+  }
+
+  .kuro-disc-header {
+    padding: 10px 12px;
+  }
+
+  .kuro-wa-chat-viewport {
+    max-height: 320px;
+    padding: 10px 10px;
+  }
+
+  .kuro-wa-bubble {
+    max-width: 85%;
+    padding: 7px 10px 6px;
+  }
+
+  .kuro-wa-composer-wrap {
+    padding: 7px 8px;
+  }
+
+  .kuro-wa-bar {
+    gap: 4px;
+  }
+
+  .kuro-wa-tool-btn,
+  .kuro-wa-spoiler-pill,
+  .kuro-wa-voice-btn {
+    height: 33px;
+    padding: 0 8px;
+    font-size: 0.67rem;
+  }
+
+  .kuro-wa-input {
+    height: 33px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+  }
+
+  .kuro-wa-send-btn {
+    height: 33px;
+    padding: 0 11px;
+    font-size: 0.72rem;
+  }
+
+  .kuro-wa-auth-bar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 11px 12px;
+    gap: 9px;
+  }
+
+  .kuro-disc-google-btn {
+    width: 100%;
+  }
+}

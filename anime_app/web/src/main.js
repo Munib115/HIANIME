@@ -7,7 +7,11 @@ import {
   saveWatchHistoryToCloud, 
   deleteWatchHistoryFromCloud, 
   fetchLibraryFromCloud, 
-  saveLibraryItemToCloud 
+  saveLibraryItemToCloud,
+  uploadDiscussionMediaToSupabase,
+  fetchDiscussionMessagesFromSupabase,
+  postDiscussionMessageToSupabase,
+  deleteDiscussionMessageFromSupabase
 } from './supabase.js';
 
 // Initialize Vercel Web Analytics
@@ -1257,12 +1261,16 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
             <!-- Injected below -->
           </div>
         </div>
+
+        <!-- Discussion Section (Below Episodes) -->
+        <section class="kuro-discussion-section" id="detail-discussion-section"></section>
       </div>
     `;
 
     // Render the episode chunk containing the user's current/last-watched episode
     const initialChunk = chunks[activeChunkIdx] || { start: 0, end: totalEps };
     renderEpisodeChunk(initialChunk.start, initialChunk.end);
+    mountDiscussionSection('detail-discussion-section', anime, resumeEpObj?.episode_number || 1, 'all');
 
     // Events
     document.getElementById('detail-back-home-btn')?.addEventListener('click', () => {
@@ -1389,6 +1397,9 @@ async function openWatchPlayer(episodeIndex) {
     container.querySelectorAll('#player-episodes-drawer .episode-btn').forEach((btn, idx) => {
       btn.classList.toggle('active', idx === episodeIndex);
     });
+
+    // 3b. Refresh Episode Discussion section for the newly selected episode
+    mountDiscussionSection('player-discussion-section', anime, ep.episode_number || (episodeIndex + 1), 'episode');
 
     // 4. Show smooth loading overlay inside player while fetching new streams
     activePlayerInstance.setLoader(true, `Loading Episode ${ep.episode_number}...`);
@@ -1527,7 +1538,12 @@ async function openWatchPlayer(episodeIndex) {
         `).join('')}
       </div>
     </div>
+
+    <!-- Episode Discussion Section (Below Episode Count) -->
+    <section class="kuro-discussion-section" id="player-discussion-section"></section>
   `;
+
+  mountDiscussionSection('player-discussion-section', anime, ep.episode_number || (episodeIndex + 1), 'episode');
 
   // Attach Player Events
   document.getElementById('player-back-detail-btn')?.addEventListener('click', () => {
@@ -1809,6 +1825,885 @@ function loadStreamIntoPlayer() {
   });
 
   refreshIcons();
+}
+
+// ─── Episode & Anime Discussion System (Google Auth Restricted) ─────
+const activeDiscussionInstances = {};
+
+function getGoogleAuthenticatedUser() {
+  try {
+    const u = JSON.parse(localStorage.getItem('kuro_user_profile') || 'null');
+    if (!u || !u.email || !String(u.email).includes('@')) return null;
+    if (u.provider && String(u.provider).toLowerCase() !== 'google') return null;
+    return {
+      id: String(u.id || u.email),
+      name: String(u.name || u.email.split('@')[0] || 'Kuro Member'),
+      email: String(u.email).toLowerCase(),
+      avatar: u.avatar ? String(u.avatar) : '',
+      provider: 'google',
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function escapeHtmlText(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatCommentRelativeTime(ts) {
+  const now = Date.now();
+  const timeMs = Number(ts) > 1e12 ? Number(ts) : Number(ts) * 1000;
+  const diffSec = Math.max(0, Math.floor((now - timeMs) / 1000));
+  if (diffSec < 45) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  const d = new Date(timeMs);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function getLocalCommentsCache(animeId) {
+  try {
+    return JSON.parse(localStorage.getItem(`kuro_comments_${animeId}`) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveLocalCommentsCache(animeId, comments) {
+  try {
+    localStorage.setItem(`kuro_comments_${animeId}`, JSON.stringify(comments.slice(0, 100)));
+  } catch (e) {}
+}
+
+function getLikedCommentSet() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('kuro_liked_comments') || '[]'));
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function saveLikedCommentSet(setObj) {
+  try {
+    localStorage.setItem('kuro_liked_comments', JSON.stringify(Array.from(setObj)));
+  } catch (e) {}
+}
+
+function formatVoiceDuration(sec) {
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${rem < 10 ? '0' : ''}${rem}`;
+}
+
+function readBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function compressImageFileToBlob(file, maxDim = 1280, quality = 0.82) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl);
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => resolve(blob || file),
+        'image/webp',
+        quality
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objUrl);
+      resolve(file);
+    };
+    img.src = objUrl;
+  });
+}
+
+async function mountDiscussionSection(containerId, anime, episodeNumber = 1, defaultScope = 'episode') {
+  const root = document.getElementById(containerId);
+  if (!root || !anime || !anime.anime_id) return;
+
+  const animeId = Number(anime.anime_id);
+  const epNum = Math.max(1, Number(episodeNumber) || 1);
+  const prevState = activeDiscussionInstances[containerId];
+  if (prevState?.recorderTimer) clearInterval(prevState.recorderTimer);
+  const scope = prevState && prevState.animeId === animeId ? prevState.scope : defaultScope;
+
+  activeDiscussionInstances[containerId] = {
+    containerId,
+    anime,
+    animeId,
+    episodeNumber: epNum,
+    scope,
+    comments: prevState && prevState.animeId === animeId ? prevState.comments : [],
+    pendingMedia: null, // { blob, dataUrl, type: 'image'|'video'|'voice', ext, mime, duration, name }
+    isSpoiler: false,
+    mediaRecorder: null,
+    recorderStream: null,
+    recorderChunks: [],
+    recorderStartTime: 0,
+    recorderTimer: null,
+  };
+
+  renderDiscussionShell(containerId);
+  await loadDiscussionComments(containerId);
+}
+
+function refreshActiveDiscussions() {
+  Object.keys(activeDiscussionInstances).forEach(cid => {
+    if (document.getElementById(cid)) {
+      renderDiscussionShell(cid);
+      renderDiscussionFeed(cid);
+    }
+  });
+}
+
+function stopVoiceRecording(containerId, cancel = true) {
+  const inst = activeDiscussionInstances[containerId];
+  if (!inst) return;
+  if (inst.recorderTimer) {
+    clearInterval(inst.recorderTimer);
+    inst.recorderTimer = null;
+  }
+  if (inst.mediaRecorder && inst.mediaRecorder.state !== 'inactive') {
+    inst.mediaRecorder._cancelled = cancel;
+    try { inst.mediaRecorder.stop(); } catch (e) {}
+  }
+  if (inst.recorderStream) {
+    try { inst.recorderStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    inst.recorderStream = null;
+  }
+}
+
+function renderDiscussionShell(containerId) {
+  const inst = activeDiscussionInstances[containerId];
+  const root = document.getElementById(containerId);
+  if (!inst || !root) return;
+
+  const user = getGoogleAuthenticatedUser();
+  const epNum = inst.episodeNumber;
+  const scope = inst.scope;
+  const count = (inst.comments || []).length;
+
+  const googleSvg = `
+    <svg class="kuro-disc-google-svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+    </svg>
+  `;
+
+  // WhatsApp-style bottom composer bar (or compact Google Auth bar when signed out)
+  const bottomBarHtml = user
+    ? `
+      <div class="kuro-wa-composer-wrap" id="${containerId}-composer-wrap">
+        <!-- Attachment Preview Strip (Image / Video / Recorded Voice) -->
+        <div class="kuro-wa-preview-bar" id="${containerId}-preview-bar" style="display:none"></div>
+
+        <!-- Active Voice Recording Bar (Hidden until recording starts) -->
+        <div class="kuro-wa-recording-bar" id="${containerId}-recording-bar" style="display:none">
+          <div class="kuro-wa-rec-status">
+            <span class="kuro-wa-rec-dot"></span>
+            <span class="kuro-wa-rec-timer" id="${containerId}-rec-timer">0:00</span>
+            <span class="kuro-wa-rec-label">Recording voice...</span>
+          </div>
+          <div class="kuro-wa-rec-actions">
+            <button type="button" class="kuro-wa-rec-cancel" id="${containerId}-rec-cancel">Cancel</button>
+            <button type="button" class="kuro-wa-rec-send" id="${containerId}-rec-send">Send Voice</button>
+          </div>
+        </div>
+
+        <!-- Main WhatsApp-Style Single-Row Input Bar -->
+        <form class="kuro-wa-bar" id="${containerId}-form" autocomplete="off">
+          <input
+            type="file"
+            id="${containerId}-file-input"
+            accept="image/*,video/*"
+            style="display:none"
+          />
+          <button
+            type="button"
+            class="kuro-wa-tool-btn"
+            id="${containerId}-attach-btn"
+            title="Attach Photo or Video"
+          >
+            + Media
+          </button>
+
+          <button
+            type="button"
+            class="kuro-wa-spoiler-pill ${inst.isSpoiler ? 'active' : ''}"
+            id="${containerId}-spoiler-btn"
+            title="Mark message as Spoiler"
+          >
+            Spoiler
+          </button>
+
+          <input
+            type="text"
+            class="kuro-wa-input"
+            id="${containerId}-input"
+            maxlength="1200"
+            placeholder="Message Episode ${epNum} as ${escapeHtmlText(user.name)}..."
+          />
+
+          <button
+            type="button"
+            class="kuro-wa-voice-btn"
+            id="${containerId}-voice-btn"
+            title="Record Voice Message"
+          >
+            Voice
+          </button>
+
+          <button
+            type="submit"
+            class="kuro-wa-send-btn"
+            id="${containerId}-submit-btn"
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    `
+    : `
+      <div class="kuro-wa-auth-bar">
+        <div class="kuro-wa-auth-info">
+          <span class="kuro-wa-auth-badge">Google Auth Only</span>
+          <span class="kuro-wa-auth-text">Sign in with Google to send messages, photos, videos &amp; voice notes.</span>
+        </div>
+        <button type="button" class="kuro-disc-google-btn" id="${containerId}-google-signin-btn">
+          ${googleSvg}
+          <span>Sign in with Google</span>
+        </button>
+      </div>
+    `;
+
+  root.innerHTML = `
+    <div class="kuro-disc-card kuro-wa-container">
+      <!-- Top WhatsApp-Style Chat Header -->
+      <div class="kuro-disc-header">
+        <div class="kuro-disc-title-group">
+          <span class="kuro-disc-accent-bar"></span>
+          <div class="kuro-wa-header-titles">
+            <h3 class="kuro-disc-heading">Episode Discussion</h3>
+            <span class="kuro-wa-header-sub" id="${containerId}-count-pill">${count} ${count === 1 ? 'Message' : 'Messages'} &middot; Ep ${epNum}</span>
+          </div>
+        </div>
+
+        <div class="kuro-disc-scope-tabs" role="tablist" aria-label="Discussion filter">
+          <button
+            type="button"
+            class="kuro-disc-scope-btn ${scope === 'episode' ? 'active' : ''}"
+            data-scope="episode"
+          >
+            Ep ${epNum}
+          </button>
+          <button
+            type="button"
+            class="kuro-disc-scope-btn ${scope === 'all' ? 'active' : ''}"
+            data-scope="all"
+          >
+            All Eps
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrollable WhatsApp-Style Chat Messages Window -->
+      <div class="kuro-wa-chat-viewport" id="${containerId}-feed">
+        <div class="kuro-disc-loading">Loading chat messages...</div>
+      </div>
+
+      <!-- Bottom Bar (WhatsApp Input or Google Sign-In Prompt) -->
+      ${bottomBarHtml}
+    </div>
+  `;
+
+  // Scope filter buttons
+  root.querySelectorAll('.kuro-disc-scope-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nextScope = btn.dataset.scope || 'episode';
+      if (inst.scope !== nextScope) {
+        inst.scope = nextScope;
+        renderDiscussionShell(containerId);
+        loadDiscussionComments(containerId);
+      }
+    });
+  });
+
+  // Google Sign-In button for unauthenticated users
+  document.getElementById(`${containerId}-google-signin-btn`)?.addEventListener('click', () => {
+    if (typeof window.kuroSignInWithGoogle === 'function') {
+      window.kuroSignInWithGoogle();
+    } else {
+      document.getElementById('btn-user-google-login')?.click();
+    }
+  });
+
+  if (!user) return;
+
+  // Authenticated WhatsApp Composer Controls
+  const formEl = document.getElementById(`${containerId}-form`);
+  const inputEl = document.getElementById(`${containerId}-input`);
+  const fileInputEl = document.getElementById(`${containerId}-file-input`);
+  const attachBtnEl = document.getElementById(`${containerId}-attach-btn`);
+  const spoilerBtnEl = document.getElementById(`${containerId}-spoiler-btn`);
+  const voiceBtnEl = document.getElementById(`${containerId}-voice-btn`);
+  const submitBtnEl = document.getElementById(`${containerId}-submit-btn`);
+  const previewBarEl = document.getElementById(`${containerId}-preview-bar`);
+  const recordingBarEl = document.getElementById(`${containerId}-recording-bar`);
+  const recTimerEl = document.getElementById(`${containerId}-rec-timer`);
+  const recCancelEl = document.getElementById(`${containerId}-rec-cancel`);
+  const recSendEl = document.getElementById(`${containerId}-rec-send`);
+
+  function updateMediaPreviewUI() {
+    if (!previewBarEl) return;
+    const pm = inst.pendingMedia;
+    if (!pm) {
+      previewBarEl.style.display = 'none';
+      previewBarEl.innerHTML = '';
+      return;
+    }
+    previewBarEl.style.display = 'flex';
+    let thumbHtml = '';
+    if (pm.type === 'image') {
+      thumbHtml = `<img src="${pm.dataUrl}" alt="Preview" class="kuro-wa-preview-thumb" />`;
+    } else if (pm.type === 'video') {
+      thumbHtml = `<video src="${pm.dataUrl}" class="kuro-wa-preview-thumb" muted playsinline></video>`;
+    } else if (pm.type === 'voice') {
+      thumbHtml = `<span class="kuro-wa-preview-voice-badge">VOICE ${formatVoiceDuration(pm.duration)}</span>`;
+    }
+    previewBarEl.innerHTML = `
+      <div class="kuro-wa-preview-info">
+        ${thumbHtml}
+        <span class="kuro-wa-preview-name">${escapeHtmlText(pm.name || pm.type.toUpperCase())}</span>
+      </div>
+      <button type="button" class="kuro-wa-preview-remove" id="${containerId}-preview-remove">Remove</button>
+    `;
+    document.getElementById(`${containerId}-preview-remove`)?.addEventListener('click', () => {
+      inst.pendingMedia = null;
+      if (fileInputEl) fileInputEl.value = '';
+      updateMediaPreviewUI();
+    });
+  }
+
+  spoilerBtnEl?.addEventListener('click', () => {
+    inst.isSpoiler = !inst.isSpoiler;
+    spoilerBtnEl.classList.toggle('active', inst.isSpoiler);
+  });
+
+  attachBtnEl?.addEventListener('click', () => {
+    fileInputEl?.click();
+  });
+
+  fileInputEl?.addEventListener('change', async () => {
+    const file = fileInputEl.files?.[0];
+    if (!file) return;
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo) {
+      showToast('Please select an image or video file');
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      showToast('File must be under 25 MB');
+      return;
+    }
+
+    let finalBlob = file;
+    let ext = (file.name.split('.').pop() || (isImage ? 'webp' : 'mp4')).toLowerCase();
+    let mime = file.type;
+    if (isImage && !file.type.includes('gif')) {
+      finalBlob = await compressImageFileToBlob(file, 1200, 0.82);
+      ext = 'webp';
+      mime = 'image/webp';
+    }
+    const dataUrl = await readBlobAsDataUrl(finalBlob);
+    inst.pendingMedia = {
+      blob: finalBlob,
+      dataUrl,
+      type: isImage ? 'image' : 'video',
+      ext,
+      mime,
+      duration: 0,
+      name: file.name,
+    };
+    updateMediaPreviewUI();
+  });
+
+  // Live Voice Note Recording (MediaRecorder API)
+  voiceBtnEl?.addEventListener('click', async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast('Microphone recording is not supported in this browser');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      inst.recorderStream = stream;
+      inst.recorderChunks = [];
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : '';
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      inst.mediaRecorder = recorder;
+      inst.recorderStartTime = Date.now();
+
+      if (formEl) formEl.style.display = 'none';
+      if (recordingBarEl) recordingBarEl.style.display = 'flex';
+      if (recTimerEl) recTimerEl.textContent = '0:00';
+
+      inst.recorderTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - inst.recorderStartTime) / 1000);
+        if (recTimerEl) recTimerEl.textContent = formatVoiceDuration(elapsed);
+        if (elapsed >= 60) {
+          stopVoiceRecording(containerId, false);
+        }
+      }, 300);
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) inst.recorderChunks.push(ev.data);
+      };
+
+      recorder.onstop = async () => {
+        if (recordingBarEl) recordingBarEl.style.display = 'none';
+        if (formEl) formEl.style.display = 'flex';
+        const durationSec = Math.max(1, Math.round((Date.now() - inst.recorderStartTime) / 1000));
+        if (recorder._cancelled || !inst.recorderChunks.length) {
+          inst.recorderChunks = [];
+          return;
+        }
+        const actualMime = recorder.mimeType || 'audio/webm';
+        const ext = actualMime.includes('mp4') ? 'm4a' : 'webm';
+        const voiceBlob = new Blob(inst.recorderChunks, { type: actualMime });
+        const dataUrl = await readBlobAsDataUrl(voiceBlob);
+        inst.pendingMedia = {
+          blob: voiceBlob,
+          dataUrl,
+          type: 'voice',
+          ext,
+          mime: actualMime,
+          duration: durationSec,
+          name: `Voice Message (${formatVoiceDuration(durationSec)})`,
+        };
+        await submitDiscussionMessage(containerId);
+      };
+
+      recorder.start();
+    } catch (err) {
+      showToast('Microphone permission denied or unavailable');
+    }
+  });
+
+  recCancelEl?.addEventListener('click', () => {
+    stopVoiceRecording(containerId, true);
+  });
+
+  recSendEl?.addEventListener('click', () => {
+    stopVoiceRecording(containerId, false);
+  });
+
+  async function submitDiscussionMessage() {
+    const currentUser = getGoogleAuthenticatedUser();
+    if (!currentUser) {
+      showToast('Please sign in with Google to post');
+      renderDiscussionShell(containerId);
+      return;
+    }
+
+    const content = (inputEl?.value || '').trim();
+    const pm = inst.pendingMedia;
+    if (!content && !pm) {
+      showToast('Write a message or attach media first');
+      return;
+    }
+
+    if (submitBtnEl) {
+      submitBtnEl.disabled = true;
+      submitBtnEl.textContent = 'Sending...';
+    }
+
+    // 1. Upload media to Supabase Storage (`discussion-media` bucket) if available, otherwise fallback to Data URL
+    let mediaUrl = '';
+    let mediaType = '';
+    let mediaDuration = 0;
+    if (pm) {
+      mediaType = pm.type;
+      mediaDuration = pm.duration || 0;
+      const cloudUrl = await uploadDiscussionMediaToSupabase(pm.blob, pm.ext, pm.mime);
+      mediaUrl = cloudUrl || pm.dataUrl || '';
+    }
+
+    const payload = {
+      anime_id: inst.animeId,
+      episode_number: inst.episodeNumber,
+      user_id: currentUser.id,
+      user_name: currentUser.name,
+      user_email: currentUser.email,
+      user_avatar: currentUser.avatar,
+      auth_provider: 'google',
+      content,
+      media_url: mediaUrl,
+      media_type: mediaType,
+      media_duration: mediaDuration,
+      is_spoiler: inst.isSpoiler,
+    };
+
+    // 2. Try posting to Supabase `anime_comments` AND backend API `/api/anime/{id}/comments`
+    let createdComment = await postDiscussionMessageToSupabase(payload);
+    try {
+      const res = await fetch(`${API_BASE}/anime/${inst.animeId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.comment && !createdComment) {
+          createdComment = data.comment;
+        }
+      }
+    } catch (err) {}
+
+    if (!createdComment) {
+      createdComment = {
+        comment_id: Date.now(),
+        anime_id: inst.animeId,
+        episode_number: inst.episodeNumber,
+        user_id: currentUser.id,
+        user_name: currentUser.name,
+        user_email: currentUser.email,
+        user_avatar: currentUser.avatar,
+        auth_provider: 'google',
+        content,
+        media_url: mediaUrl,
+        media_type: mediaType,
+        media_duration: mediaDuration,
+        is_spoiler: inst.isSpoiler ? 1 : 0,
+        likes: 0,
+        created_at: Date.now(),
+      };
+    }
+
+    const cached = getLocalCommentsCache(inst.animeId);
+    const mergedCache = [createdComment, ...cached.filter(c => Number(c.comment_id) !== Number(createdComment.comment_id))];
+    saveLocalCommentsCache(inst.animeId, mergedCache);
+
+    inst.comments = [createdComment, ...(inst.comments || [])];
+    inst.pendingMedia = null;
+    inst.isSpoiler = false;
+    if (inputEl) inputEl.value = '';
+    if (fileInputEl) fileInputEl.value = '';
+    spoilerBtnEl?.classList.remove('active');
+    updateMediaPreviewUI();
+    if (submitBtnEl) {
+      submitBtnEl.disabled = false;
+      submitBtnEl.textContent = 'Send';
+    }
+
+    renderDiscussionFeed(containerId, true);
+  }
+
+  formEl?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await submitDiscussionMessage();
+  });
+}
+
+async function loadDiscussionComments(containerId) {
+  const inst = activeDiscussionInstances[containerId];
+  if (!inst) return;
+
+  const [supaComments, apiRes] = await Promise.all([
+    fetchDiscussionMessagesFromSupabase(inst.animeId, inst.episodeNumber, inst.scope),
+    fetchApi(`/anime/${inst.animeId}/comments?episode_number=${inst.episodeNumber}&scope=${encodeURIComponent(inst.scope)}`)
+  ]);
+
+  const serverComments = (apiRes && Array.isArray(apiRes.comments)) ? apiRes.comments : [];
+  const localAll = getLocalCommentsCache(inst.animeId);
+  const localFiltered = inst.scope === 'episode'
+    ? localAll.filter(c => Number(c.episode_number) === Number(inst.episodeNumber))
+    : localAll;
+
+  const byKey = new Map();
+  [...supaComments, ...serverComments, ...localFiltered].forEach(c => {
+    if (c && (c.content || c.media_url)) {
+      const key = `${c.user_id || c.user_name}_${Math.floor(Number(c.created_at || 0) / 2000)}_${(c.content || '').slice(0, 20)}`;
+      if (!byKey.has(key)) byKey.set(key, c);
+    }
+  });
+
+  // Sort oldest-to-newest inside WhatsApp chat viewport so latest message sits right above input bar
+  inst.comments = Array.from(byKey.values()).sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
+  renderDiscussionFeed(containerId, true);
+}
+
+function renderDiscussionFeed(containerId, scrollToBottom = false) {
+  const inst = activeDiscussionInstances[containerId];
+  const feedEl = document.getElementById(`${containerId}-feed`);
+  const countPill = document.getElementById(`${containerId}-count-pill`);
+  if (!inst || !feedEl) return;
+
+  const list = inst.comments || [];
+  if (countPill) {
+    countPill.innerHTML = `${list.length} ${list.length === 1 ? 'Message' : 'Messages'} &middot; Ep ${inst.episodeNumber}`;
+  }
+
+  if (list.length === 0) {
+    const scopeLabel = inst.scope === 'episode' ? `Episode ${inst.episodeNumber}` : 'this anime';
+    feedEl.innerHTML = `
+      <div class="kuro-disc-empty">
+        <div class="kuro-disc-empty-title">No messages in ${escapeHtmlText(scopeLabel)} chat yet</div>
+        <div class="kuro-disc-empty-sub">Sign in with Google to send a message, photo, video, or voice note.</div>
+      </div>
+    `;
+    return;
+  }
+
+  const currentUser = getGoogleAuthenticatedUser();
+  const likedSet = getLikedCommentSet();
+
+  feedEl.innerHTML = list.map(c => {
+    const cid = Number(c.comment_id);
+    const isOwner = Boolean(
+      currentUser &&
+      (String(c.user_id) === String(currentUser.id) ||
+       (c.user_email && String(c.user_email).toLowerCase() === String(currentUser.email).toLowerCase()))
+    );
+    const isLiked = likedSet.has(cid);
+    const isSpoiler = Boolean(Number(c.is_spoiler));
+    const initial = (c.user_name || 'K')[0].toUpperCase();
+    const mUrl = c.media_url || '';
+    const mType = (c.media_type || '').toLowerCase();
+    const mDur = Number(c.media_duration) || 0;
+
+    let mediaHtml = '';
+    if (mUrl && mType === 'image') {
+      mediaHtml = `
+        <div class="kuro-wa-media-box">
+          <img src="${escapeHtmlText(mUrl)}" alt="Shared photo" class="kuro-wa-chat-img" loading="lazy" />
+        </div>
+      `;
+    } else if (mUrl && mType === 'video') {
+      mediaHtml = `
+        <div class="kuro-wa-media-box">
+          <video src="${escapeHtmlText(mUrl)}" class="kuro-wa-chat-video" controls playsinline preload="metadata"></video>
+        </div>
+      `;
+    } else if (mUrl && mType === 'voice') {
+      mediaHtml = `
+        <div class="kuro-wa-voice-player" data-voice-src="${escapeHtmlText(mUrl)}">
+          <button type="button" class="kuro-wa-voice-play-btn" data-voice-toggle="${cid}">Play</button>
+          <div class="kuro-wa-voice-wave">
+            <div class="kuro-wa-voice-progress" id="voice-prog-${cid}"></div>
+            <div class="kuro-wa-voice-bars">
+              <span></span><span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+          <span class="kuro-wa-voice-time" id="voice-time-${cid}">${formatVoiceDuration(mDur || 4)}</span>
+          <audio id="voice-audio-${cid}" src="${escapeHtmlText(mUrl)}" preload="metadata"></audio>
+        </div>
+      `;
+    }
+
+    const textHtml = c.content
+      ? (isSpoiler
+          ? `
+            <div class="kuro-disc-spoiler-wrap" data-spoiler-wrap="${cid}">
+              <div class="kuro-wa-msg-text is-blurred">${escapeHtmlText(c.content)}</div>
+              <button type="button" class="kuro-disc-spoiler-reveal-btn" data-reveal-id="${cid}">
+                Spoiler &mdash; Tap to Reveal
+              </button>
+            </div>
+          `
+          : `<div class="kuro-wa-msg-text">${escapeHtmlText(c.content)}</div>`)
+      : '';
+
+    return `
+      <article class="kuro-wa-row ${isOwner ? 'is-own' : ''}" data-comment-id="${cid}">
+        ${!isOwner ? `
+          <div class="kuro-wa-avatar">
+            ${c.user_avatar
+              ? `<img src="${escapeHtmlText(c.user_avatar)}" alt="${escapeHtmlText(c.user_name)}" referrerpolicy="no-referrer" />`
+              : `<span>${escapeHtmlText(initial)}</span>`}
+          </div>
+        ` : ''}
+
+        <div class="kuro-wa-bubble ${isOwner ? 'is-own' : ''}">
+          <div class="kuro-wa-bubble-top">
+            <span class="kuro-wa-author">${escapeHtmlText(isOwner ? 'You' : (c.user_name || 'Kuro Member'))}</span>
+            <span class="kuro-wa-ep-badge">EP ${Number(c.episode_number) || 1}</span>
+          </div>
+
+          ${mediaHtml}
+          ${textHtml}
+
+          <div class="kuro-wa-bubble-meta">
+            <div class="kuro-wa-bubble-actions">
+              <button type="button" class="kuro-wa-mini-btn ${isLiked ? 'liked' : ''}" data-like-id="${cid}">
+                Helpful ${Number(c.likes) > 0 ? `(${Number(c.likes)})` : ''}
+              </button>
+              ${isOwner ? `
+                <button type="button" class="kuro-wa-mini-btn kuro-wa-del-btn" data-delete-id="${cid}">
+                  Delete
+                </button>
+              ` : ''}
+            </div>
+            <time class="kuro-wa-time">${formatCommentRelativeTime(c.created_at)}</time>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join('');
+
+  if (scrollToBottom) {
+    feedEl.scrollTop = feedEl.scrollHeight;
+  }
+
+  // Spoiler reveal buttons
+  feedEl.querySelectorAll('[data-reveal-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const wrap = btn.closest('.kuro-disc-spoiler-wrap');
+      wrap?.querySelector('.kuro-wa-msg-text')?.classList.remove('is-blurred');
+      btn.remove();
+    });
+  });
+
+  // Voice Note Audio Players
+  feedEl.querySelectorAll('[data-voice-toggle]').forEach(btn => {
+    const cid = btn.getAttribute('data-voice-toggle');
+    const audio = document.getElementById(`voice-audio-${cid}`);
+    const prog = document.getElementById(`voice-prog-${cid}`);
+    const timeEl = document.getElementById(`voice-time-${cid}`);
+    if (!audio) return;
+
+    audio.addEventListener('loadedmetadata', () => {
+      if (audio.duration && isFinite(audio.duration) && timeEl) {
+        timeEl.textContent = formatVoiceDuration(audio.duration);
+      }
+    });
+
+    audio.addEventListener('timeupdate', () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        const pct = Math.min(100, (audio.currentTime / audio.duration) * 100);
+        if (prog) prog.style.width = `${pct}%`;
+        if (timeEl) timeEl.textContent = formatVoiceDuration(audio.currentTime);
+      }
+    });
+
+    audio.addEventListener('ended', () => {
+      btn.textContent = 'Play';
+      btn.classList.remove('playing');
+      if (prog) prog.style.width = '0%';
+      if (audio.duration && isFinite(audio.duration) && timeEl) {
+        timeEl.textContent = formatVoiceDuration(audio.duration);
+      }
+    });
+
+    btn.addEventListener('click', () => {
+      if (audio.paused) {
+        document.querySelectorAll('.kuro-wa-voice-player audio').forEach(a => {
+          if (a !== audio) a.pause();
+        });
+        audio.play().catch(() => {});
+        btn.textContent = 'Pause';
+        btn.classList.add('playing');
+      } else {
+        audio.pause();
+        btn.textContent = 'Play';
+        btn.classList.remove('playing');
+      }
+    });
+  });
+
+  // Like / Helpful buttons
+  feedEl.querySelectorAll('[data-like-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const user = getGoogleAuthenticatedUser();
+      if (!user) {
+        showToast('Sign in with Google to react to messages');
+        return;
+      }
+      const cid = Number(btn.getAttribute('data-like-id'));
+      const setObj = getLikedCommentSet();
+      const alreadyLiked = setObj.has(cid);
+      if (alreadyLiked) setObj.delete(cid);
+      else setObj.add(cid);
+      saveLikedCommentSet(setObj);
+
+      const target = inst.comments.find(x => Number(x.comment_id) === cid);
+      if (target) {
+        target.likes = Math.max(0, (Number(target.likes) || 0) + (alreadyLiked ? -1 : 1));
+        saveLocalCommentsCache(inst.animeId, inst.comments);
+      }
+      renderDiscussionFeed(containerId, false);
+
+      try {
+        await fetch(`${API_BASE}/anime/${inst.animeId}/comments/${cid}/like`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ unlike: alreadyLiked }),
+        });
+      } catch (e) {}
+    });
+  });
+
+  // Delete buttons (Author only)
+  feedEl.querySelectorAll('[data-delete-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const user = getGoogleAuthenticatedUser();
+      if (!user) return;
+      const cid = Number(btn.getAttribute('data-delete-id'));
+      inst.comments = (inst.comments || []).filter(x => Number(x.comment_id) !== cid);
+      const cached = getLocalCommentsCache(inst.animeId).filter(x => Number(x.comment_id) !== cid);
+      saveLocalCommentsCache(inst.animeId, cached);
+      renderDiscussionFeed(containerId, false);
+      showToast('Message deleted');
+
+      deleteDiscussionMessageFromSupabase(cid);
+      try {
+        await fetch(
+          `${API_BASE}/anime/${inst.animeId}/comments/${cid}?user_id=${encodeURIComponent(user.id)}&user_email=${encodeURIComponent(user.email)}`,
+          { method: 'DELETE' }
+        );
+      } catch (e) {}
+    });
+  });
 }
 
 // ─── Watchlist & History View ───────────────────────────────────────
@@ -2317,6 +3212,7 @@ function initUserMenuAndSettings() {
       }
     }
     refreshIcons();
+    refreshActiveDiscussions();
   }
 
   // Toggle Dropdown
@@ -2449,6 +3345,7 @@ function initUserMenuAndSettings() {
 
   function completeDemoGoogleSignIn() {
     const mockGoogleUser = {
+      id: 'google_kuro_otaku',
       name: 'Kuro Otaku',
       email: 'otaku.member@gmail.com',
       avatar: null,
@@ -2462,11 +3359,13 @@ function initUserMenuAndSettings() {
       document.body.style.overflow = '';
     }
     renderAuthState();
-    showToast('Signed in as Kuro Otaku (Demo Mode)');
+    showToast('Signed in with Google as Kuro Otaku');
   }
 
-  btnConfirmGoogle?.addEventListener('click', triggerGoogleOAuth);
-  btnGoogleAccountSelect?.addEventListener('click', triggerGoogleOAuth);
+  window.kuroSignInWithGoogle = triggerGoogleOAuth;
+
+  btnConfirmGoogle?.addEventListener('click', completeDemoGoogleSignIn);
+  btnGoogleAccountSelect?.addEventListener('click', completeDemoGoogleSignIn);
 
   btnCloseGoogle?.addEventListener('click', () => {
     if (googleModal) {

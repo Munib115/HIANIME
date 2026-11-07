@@ -150,3 +150,115 @@ export async function saveLibraryItemToCloud(item, isAdd = true) {
     console.warn('[Supabase library upsert]', e);
   }
 }
+
+/**
+ * Upload an image, video, or voice message blob to Supabase Storage (`discussion-media` bucket)
+ */
+export async function uploadDiscussionMediaToSupabase(fileOrBlob, ext = 'bin', contentType = 'application/octet-stream') {
+  if (!supabase || !fileOrBlob) return null;
+  const user = await getCurrentUser();
+  if (!user) return null;
+  try {
+    const filePath = `${user.id}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage
+      .from('discussion-media')
+      .upload(filePath, fileOrBlob, {
+        contentType,
+        cacheControl: '3600',
+        upsert: false,
+      });
+    if (error) {
+      console.warn('[Supabase storage upload warning]', error.message);
+      return null;
+    }
+    const { data: pub } = supabase.storage
+      .from('discussion-media')
+      .getPublicUrl(filePath);
+    return pub?.publicUrl || null;
+  } catch (e) {
+    console.warn('[Supabase storage upload exception]', e);
+    return null;
+  }
+}
+
+/**
+ * Fetch discussion messages from Supabase `anime_comments` table
+ */
+export async function fetchDiscussionMessagesFromSupabase(animeId, episodeNumber = 1, scope = 'episode') {
+  if (!supabase) return [];
+  try {
+    let query = supabase
+      .from('anime_comments')
+      .select('*')
+      .eq('anime_id', Number(animeId));
+    if (scope === 'episode' && episodeNumber > 0) {
+      query = query.eq('episode_number', Number(episodeNumber));
+    }
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error || !Array.isArray(data)) return [];
+    return data.map(row => ({
+      ...row,
+      created_at: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Insert a new discussion message (text, image, video, or voice) into Supabase `anime_comments`
+ */
+export async function postDiscussionMessageToSupabase(payload) {
+  if (!supabase) return null;
+  const user = await getCurrentUser();
+  if (!user) return null;
+  try {
+    const row = {
+      anime_id: Number(payload.anime_id),
+      episode_number: Math.max(1, Number(payload.episode_number) || 1),
+      user_id: user.id,
+      user_name: payload.user_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Kuro Member',
+      user_email: (payload.user_email || user.email || '').toLowerCase(),
+      user_avatar: payload.user_avatar || user.user_metadata?.avatar_url || '',
+      auth_provider: 'google',
+      content: payload.content || '',
+      media_url: payload.media_url || '',
+      media_type: payload.media_type || '',
+      media_duration: Math.max(0, Number(payload.media_duration) || 0),
+      is_spoiler: Boolean(payload.is_spoiler),
+    };
+    const { data, error } = await supabase
+      .from('anime_comments')
+      .insert(row)
+      .select()
+      .single();
+    if (error || !data) return null;
+    return {
+      ...data,
+      created_at: data.created_at ? new Date(data.created_at).getTime() : Date.now(),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Delete a user's own discussion message from Supabase `anime_comments`
+ */
+export async function deleteDiscussionMessageFromSupabase(commentId) {
+  if (!supabase) return false;
+  const user = await getCurrentUser();
+  if (!user) return false;
+  try {
+    const { error } = await supabase
+      .from('anime_comments')
+      .delete()
+      .eq('comment_id', Number(commentId))
+      .eq('user_id', user.id);
+    return !error;
+  } catch (e) {
+    return false;
+  }
+}

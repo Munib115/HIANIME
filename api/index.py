@@ -2205,5 +2205,219 @@ async def ai_chat(req: Request):
     return {"ok": True, "reply": reply_text, "used_gemini": False}
 
 
+# ─── Episode & Anime Discussion System (Google Auth Restricted) ─────
+import time as _time
+_COMMENTS_TABLE_READY = False
+
+
+def _ensure_comments_table():
+    global _COMMENTS_TABLE_READY
+    if _COMMENTS_TABLE_READY:
+        return
+    try:
+        conn = sqlite3.connect(get_db_path(), timeout=15)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS anime_comments (
+                comment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                anime_id INTEGER NOT NULL,
+                episode_number INTEGER DEFAULT 1,
+                user_id TEXT NOT NULL,
+                user_name TEXT NOT NULL,
+                user_email TEXT NOT NULL,
+                user_avatar TEXT DEFAULT '',
+                auth_provider TEXT NOT NULL DEFAULT 'google',
+                content TEXT NOT NULL DEFAULT '',
+                media_url TEXT DEFAULT '',
+                media_type TEXT DEFAULT '',
+                media_duration INTEGER DEFAULT 0,
+                is_spoiler INTEGER DEFAULT 0,
+                likes INTEGER DEFAULT 0,
+                created_at INTEGER NOT NULL
+            )
+        """)
+        for col_sql in [
+            "ALTER TABLE anime_comments ADD COLUMN media_url TEXT DEFAULT ''",
+            "ALTER TABLE anime_comments ADD COLUMN media_type TEXT DEFAULT ''",
+            "ALTER TABLE anime_comments ADD COLUMN media_duration INTEGER DEFAULT 0",
+        ]:
+            try:
+                conn.execute(col_sql)
+            except Exception:
+                pass
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_anime_comments_lookup
+            ON anime_comments(anime_id, episode_number, created_at DESC)
+        """)
+        conn.commit()
+        conn.close()
+        _COMMENTS_TABLE_READY = True
+    except Exception as e:
+        print(f"Comments table init warning: {e}")
+
+
+@router.get("/anime/{anime_id}/comments")
+def list_anime_comments(anime_id: int, episode_number: int = 0, scope: str = "episode"):
+    _ensure_comments_table()
+    try:
+        conn = sqlite3.connect(get_db_path(), timeout=10)
+        conn.row_factory = sqlite3.Row
+        if scope == "episode" and episode_number > 0:
+            cur = conn.execute("""
+                SELECT comment_id, anime_id, episode_number, user_id, user_name,
+                       user_avatar, auth_provider, content, media_url, media_type,
+                       media_duration, is_spoiler, likes, created_at
+                FROM anime_comments
+                WHERE anime_id = ? AND episode_number = ?
+                ORDER BY created_at DESC, comment_id DESC
+                LIMIT 100
+            """, (anime_id, episode_number))
+        else:
+            cur = conn.execute("""
+                SELECT comment_id, anime_id, episode_number, user_id, user_name,
+                       user_avatar, auth_provider, content, media_url, media_type,
+                       media_duration, is_spoiler, likes, created_at
+                FROM anime_comments
+                WHERE anime_id = ?
+                ORDER BY created_at DESC, comment_id DESC
+                LIMIT 100
+            """, (anime_id,))
+        items = [dict(r) for r in cur.fetchall()]
+        total_all = conn.execute(
+            "SELECT COUNT(*) FROM anime_comments WHERE anime_id = ?", (anime_id,)
+        ).fetchone()[0]
+        conn.close()
+        return {"ok": True, "comments": items, "total_anime_comments": total_all}
+    except Exception as e:
+        return {"ok": True, "comments": [], "total_anime_comments": 0, "error": str(e)}
+
+
+@router.post("/anime/{anime_id}/comments")
+async def create_anime_comment(anime_id: int, request: Request):
+    _ensure_comments_table()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    provider = str(body.get("auth_provider") or body.get("provider") or "").strip().lower()
+    user_id = str(body.get("user_id") or "").strip()
+    user_email = str(body.get("user_email") or body.get("email") or "").strip().lower()
+    user_name = str(body.get("user_name") or body.get("name") or "").strip()[:60]
+    user_avatar = str(body.get("user_avatar") or body.get("avatar") or "").strip()[:500]
+    content = str(body.get("content") or "").strip()
+    media_url = str(body.get("media_url") or "").strip()
+    media_type = str(body.get("media_type") or "").strip().lower()
+    if media_type not in ("", "image", "video", "voice"):
+        media_type = ""
+    media_duration = max(0, int(body.get("media_duration") or 0))
+    episode_number = max(1, int(body.get("episode_number") or 1))
+    is_spoiler = 1 if body.get("is_spoiler") else 0
+
+    # Strict Google Authentication enforcement
+    if provider != "google" or not user_email or "@" not in user_email or not user_id or not user_name:
+        raise HTTPException(
+            status_code=401,
+            detail="Only users authenticated with Google Sign-In can post in Discussions."
+        )
+
+    if not content and not media_url:
+        raise HTTPException(status_code=400, detail="Message or media attachment is required.")
+    if len(content) > 1200:
+        content = content[:1200]
+
+    now_ts = int(_time.time() * 1000)
+    try:
+        conn = sqlite3.connect(get_db_path(), timeout=15)
+        cur = conn.execute("""
+            INSERT INTO anime_comments (
+                anime_id, episode_number, user_id, user_name, user_email,
+                user_avatar, auth_provider, content, media_url, media_type,
+                media_duration, is_spoiler, likes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'google', ?, ?, ?, ?, ?, 0, ?)
+        """, (
+            anime_id, episode_number, user_id, user_name, user_email,
+            user_avatar, content, media_url, media_type, media_duration, is_spoiler, now_ts
+        ))
+        cid = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return {
+            "ok": True,
+            "comment": {
+                "comment_id": cid,
+                "anime_id": anime_id,
+                "episode_number": episode_number,
+                "user_id": user_id,
+                "user_name": user_name,
+                "user_avatar": user_avatar,
+                "auth_provider": "google",
+                "content": content,
+                "media_url": media_url,
+                "media_type": media_type,
+                "media_duration": media_duration,
+                "is_spoiler": is_spoiler,
+                "likes": 0,
+                "created_at": now_ts,
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save comment: {e}")
+
+
+@router.delete("/anime/{anime_id}/comments/{comment_id}")
+def delete_anime_comment(anime_id: int, comment_id: int, user_id: str = "", user_email: str = ""):
+    _ensure_comments_table()
+    uid = (user_id or "").strip()
+    uemail = (user_email or "").strip().lower()
+    if not uid and not uemail:
+        raise HTTPException(status_code=401, detail="Authentication required to delete a comment.")
+    try:
+        conn = sqlite3.connect(get_db_path(), timeout=15)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT user_id, user_email FROM anime_comments WHERE comment_id = ? AND anime_id = ?",
+            (comment_id, anime_id)
+        ).fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Comment not found.")
+        if row["user_id"] != uid and row["user_email"].lower() != uemail:
+            conn.close()
+            raise HTTPException(status_code=403, detail="You can only delete your own comments.")
+        conn.execute("DELETE FROM anime_comments WHERE comment_id = ? AND anime_id = ?", (comment_id, anime_id))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "deleted": comment_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/anime/{anime_id}/comments/{comment_id}/like")
+async def like_anime_comment(anime_id: int, comment_id: int, request: Request):
+    _ensure_comments_table()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    delta = -1 if body.get("unlike") else 1
+    try:
+        conn = sqlite3.connect(get_db_path(), timeout=15)
+        conn.execute(
+            "UPDATE anime_comments SET likes = MAX(0, likes + ?) WHERE comment_id = ? AND anime_id = ?",
+            (delta, comment_id, anime_id)
+        )
+        row = conn.execute(
+            "SELECT likes FROM anime_comments WHERE comment_id = ? AND anime_id = ?",
+            (comment_id, anime_id)
+        ).fetchone()
+        conn.commit()
+        conn.close()
+        return {"ok": True, "likes": row[0] if row else 0}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 app.include_router(router, prefix="/api")
 app.include_router(router)
