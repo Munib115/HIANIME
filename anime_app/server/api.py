@@ -418,8 +418,15 @@ def home():
         FROM anime
         WHERE banner_image IS NOT NULL 
           AND banner_image != ''
-          AND (title NOT LIKE '%Special%' AND title NOT LIKE '%OVA%' AND title NOT LIKE '%Movie 1%')
-        ORDER BY anilist_popularity DESC NULLS LAST
+          AND (status LIKE '%Currently Airing%' OR anilist_status='RELEASING' OR category='airing')
+          AND status NOT LIKE '%Finished%'
+          AND (anilist_status IS NULL OR anilist_status != 'FINISHED')
+          AND episode_count > 1
+          AND (title NOT LIKE '%Special%' AND title NOT LIKE '%OVA%' AND title NOT LIKE '%Movie%' AND title NOT LIKE '%Uncensored%')
+        ORDER BY
+          CASE WHEN anime_id IN (1, 90, 6, 144, 4587, 2866, 1898, 5) THEN 0 ELSE 1 END,
+          CASE WHEN banner_image LIKE '%image.tmdb.org%' THEN 0 ELSE 1 END,
+          anilist_popularity DESC NULLS LAST
         LIMIT 8
     """)
     rails = {

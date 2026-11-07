@@ -562,16 +562,25 @@ function initHeroSpotlight(spotlightList) {
   const items = heroCarouselState.items;
   heroCarouselState.currentIndex = 0;
 
-  // 1. Render slides in stage with high-res 1080p/4K backdrops
+  // 1. Render slides in stage with responsive 1080p/4K backdrops optimized for mobile & PC
   stageEl.innerHTML = items.map((item, idx) => {
-    let banner = item.banner_image || item.poster_large || item.poster || '';
-    if (banner.includes('image.tmdb.org')) {
-      banner = banner.replace(/\/t\/p\/[^/]+/, '/t/p/w1920_and_h1080_multi_faces');
+    let rawBanner = item.banner_image || item.poster_large || item.poster || '';
+    let pcBanner = rawBanner;
+    let ambientBanner = rawBanner;
+    let srcsetAttr = '';
+    if (rawBanner.includes('image.tmdb.org')) {
+      const w780 = rawBanner.replace(/\/t\/p\/[^/]+/, '/t/p/w780');
+      const w1280 = rawBanner.replace(/\/t\/p\/[^/]+/, '/t/p/w1280');
+      const w1920 = rawBanner.replace(/\/t\/p\/[^/]+/, '/t/p/w1920_and_h1080_multi_faces');
+      const orig = rawBanner.replace(/\/t\/p\/[^/]+/, '/t/p/original');
+      pcBanner = orig;
+      ambientBanner = w780;
+      srcsetAttr = `srcset="${w780} 780w, ${w1280} 1280w, ${w1920} 1920w, ${orig} 3840w" sizes="100vw"`;
     }
     return `
       <div class="hero-slide ${idx === 0 ? 'active' : ''}" data-idx="${idx}">
-        <div class="hero-slide-ambient" style="background-image: url('${banner}')" aria-hidden="true"></div>
-        <img class="hero-slide-img" src="${banner}" alt="${item.title}" loading="${idx === 0 ? 'eager' : 'lazy'}" />
+        <div class="hero-slide-ambient" style="background-image: url('${ambientBanner}')" aria-hidden="true"></div>
+        <img class="hero-slide-img" src="${pcBanner}" ${srcsetAttr} alt="${item.title}" loading="${idx === 0 ? 'eager' : 'lazy'}" fetchpriority="${idx === 0 ? 'high' : 'auto'}" decoding="async" />
       </div>
     `;
   }).join('');
