@@ -168,7 +168,7 @@ def main():
 
     print(f"Initial Munib Server DB: {len(existing_anime):,} Anime | {sum(len(v) for v in existing_streams.values()):,} Streamed Episodes")
 
-    # 1. Discover all Releasing + 2026 + 2025 anime from reanime.to
+    # 1. Discover all Releasing + 2026 + 2025 + unscraped catalog anime from reanime.to
     candidates_by_al = {}
     queries = [
         f"{SEARCH_API}?status=RELEASING&offset=0&limit=100",
@@ -179,15 +179,21 @@ def main():
         f"{SEARCH_API}?year=2026&offset=200&limit=100",
         f"{SEARCH_API}?year=2025&offset=0&limit=100",
         f"{SEARCH_API}?year=2025&offset=100&limit=100",
+        f"{SEARCH_API}?year=2024&offset=0&limit=100",
+        f"{SEARCH_API}?year=2024&offset=100&limit=100",
+        f"{SEARCH_API}?offset=8900&limit=100",
+        f"{SEARCH_API}?offset=9000&limit=100",
+        f"{SEARCH_API}?offset=9100&limit=100",
+        f"{SEARCH_API}?offset=9200&limit=100",
     ]
-    for q_url in queries:
-        data = fetch_json(q_url)
-        for item in (data.get("results") if data else []) or []:
-            al_id = item.get("anilist_id")
-            if al_id:
-                candidates_by_al[int(al_id)] = item
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for data in pool.map(fetch_json, queries):
+            for item in (data.get("results") if data else []) or []:
+                al_id = item.get("anilist_id")
+                if al_id:
+                    candidates_by_al[int(al_id)] = item
 
-    print(f"Scanned {len(candidates_by_al):,} active/recent anime on reanime.to for new episodes & new titles.")
+    print(f"Scanned {len(candidates_by_al):,} active/catalog anime on reanime.to for new episodes & new titles.", flush=True)
 
     new_anime_added = 0
     new_episodes_added = 0

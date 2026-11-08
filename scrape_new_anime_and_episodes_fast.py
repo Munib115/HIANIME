@@ -317,38 +317,40 @@ def main():
     seen_target_ids = set()
 
     scan_sources = [
-        (f"{BASE_URL}/recently-updated?page={{}}", 20),
-        (f"{BASE_URL}/top-airing?page={{}}", 8),
-        (f"{BASE_URL}/movie?page={{}}", 8),
-        (f"{BASE_URL}/tv?page={{}}", 8),
+        (f"{BASE_URL}/recently-updated?page={{}}", 15),
+        (f"{BASE_URL}/top-airing?page={{}}", 6),
+        (f"{BASE_URL}/movie?page={{}}", 5),
+        (f"{BASE_URL}/tv?page={{}}", 5),
     ]
 
-    for url_pattern, max_pages in scan_sources:
-        for p in range(1, max_pages + 1):
-            html = fetch(url_pattern.format(p))
-            if not html: break
-            soup = BeautifulSoup(html, "html.parser")
-            for item in soup.select(".film_list-wrap .flw-item"):
-                a = item.select_one(".film-name a")
-                if not a or not a.get("href"): continue
-                m = re.search(r"-(\d+)$", a.get("href"))
-                if not m: continue
-                aid = int(m.group(1))
-                if aid in seen_target_ids: continue
+    scan_urls = [url_pattern.format(p) for url_pattern, max_pages in scan_sources for p in range(1, max_pages + 1)]
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        html_results = list(pool.map(fetch, scan_urls))
 
-                ep_sub = item.select_one(".tick-sub")
-                ep_num = int(ep_sub.text.strip()) if (ep_sub and ep_sub.text.strip().isdigit()) else 0
-                old_ep = db_anime.get(aid, 0)
-                if aid in db_anime and ep_num > old_ep:
-                    seen_target_ids.add(aid)
-                    updated_anime_targets.append({
-                        "anime_id": aid,
-                        "title": a.text.strip(),
-                        "old_count": old_ep,
-                        "expected_count": ep_num,
-                    })
+    for html in html_results:
+        if not html: continue
+        soup = BeautifulSoup(html, "html.parser")
+        for item in soup.select(".film_list-wrap .flw-item"):
+            a = item.select_one(".film-name a")
+            if not a or not a.get("href"): continue
+            m = re.search(r"-(\d+)$", a.get("href"))
+            if not m: continue
+            aid = int(m.group(1))
+            if aid in seen_target_ids: continue
 
-    print(f"Found {len(updated_anime_targets)} anime with newly dropped episodes.")
+            ep_sub = item.select_one(".tick-sub")
+            ep_num = int(ep_sub.text.strip()) if (ep_sub and ep_sub.text.strip().isdigit()) else 0
+            old_ep = db_anime.get(aid, 0)
+            if aid in db_anime and ep_num > old_ep:
+                seen_target_ids.add(aid)
+                updated_anime_targets.append({
+                    "anime_id": aid,
+                    "title": a.text.strip(),
+                    "old_count": old_ep,
+                    "expected_count": ep_num,
+                })
+
+    print(f"Found {len(updated_anime_targets)} anime with newly dropped episodes.", flush=True)
 
     total_new_episodes = 0
     for idx, target in enumerate(updated_anime_targets, 1):
@@ -400,35 +402,37 @@ def main():
     seen_new_ids = set()
 
     discovery_sources = [
-        (f"{BASE_URL}/new-anime?page={{}}", 50),
-        (f"{BASE_URL}/recently-updated?page={{}}", 25),
+        (f"{BASE_URL}/new-anime?page={{}}", 30),
+        (f"{BASE_URL}/recently-updated?page={{}}", 15),
         (f"{BASE_URL}/movie?page={{}}", 15),
         (f"{BASE_URL}/ova?page={{}}", 15),
         (f"{BASE_URL}/ona?page={{}}", 15),
         (f"{BASE_URL}/special?page={{}}", 15),
     ]
 
-    for url_pattern, max_pages in discovery_sources:
-        for p in range(1, max_pages + 1):
-            html = fetch(url_pattern.format(p))
-            if not html: break
-            soup = BeautifulSoup(html, "html.parser")
-            for item in soup.select(".film_list-wrap .flw-item"):
-                a = item.select_one(".film-name a")
-                if not a or not a.get("href"): continue
-                m = re.search(r"-(\d+)$", a.get("href"))
-                if not m: continue
-                aid = int(m.group(1))
-                if (aid not in db_anime or db_anime.get(aid, 0) == 0) and aid not in seen_new_ids:
-                    seen_new_ids.add(aid)
-                    full_url = a.get("href") if a.get("href").startswith("http") else BASE_URL + a.get("href")
-                    new_anime_targets.append({
-                        "anime_id": aid,
-                        "title": a.text.strip(),
-                        "url": full_url,
-                    })
+    disc_urls = [url_pattern.format(p) for url_pattern, max_pages in discovery_sources for p in range(1, max_pages + 1)]
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        disc_htmls = list(pool.map(fetch, disc_urls))
 
-    print(f"Discovered {len(new_anime_targets)} brand new anime titles to scrape.")
+    for html in disc_htmls:
+        if not html: continue
+        soup = BeautifulSoup(html, "html.parser")
+        for item in soup.select(".film_list-wrap .flw-item"):
+            a = item.select_one(".film-name a")
+            if not a or not a.get("href"): continue
+            m = re.search(r"-(\d+)$", a.get("href"))
+            if not m: continue
+            aid = int(m.group(1))
+            if (aid not in db_anime or db_anime.get(aid, 0) == 0) and aid not in seen_new_ids:
+                seen_new_ids.add(aid)
+                full_url = a.get("href") if a.get("href").startswith("http") else BASE_URL + a.get("href")
+                new_anime_targets.append({
+                    "anime_id": aid,
+                    "title": a.text.strip(),
+                    "url": full_url,
+                })
+
+    print(f"Discovered {len(new_anime_targets)} brand new anime titles to scrape.", flush=True)
 
     total_new_anime = 0
     for idx, target in enumerate(new_anime_targets, 1):
