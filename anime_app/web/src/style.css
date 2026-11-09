@@ -6861,8 +6861,10 @@ body.kuro-reduced-motion *::after {
   --font-family: 'Satoshi', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-display: 'Satoshi', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 
-  /* Pass 9: Single Restrained Motion Curve (No bouncy spring overshoots) */
+  /* Pass 9: Unslop Motion Curves (Open = ease-out, Close = crisp exit, Zero bounce overshoot) */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.32, 0, 0.67, 0);
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-snappy: cubic-bezier(0.22, 1, 0.36, 1);
@@ -6955,7 +6957,12 @@ body {
   font-weight: 500 !important;
   color: var(--text-secondary) !important;
   box-shadow: none !important;
-  transition: background-color 0.15s var(--ease-out), color 0.15s var(--ease-out) !important;
+  transform: translate3d(0, 0, 0);
+  transition:
+    background-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    box-shadow 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
 .nav-btn svg {
@@ -6963,7 +6970,7 @@ body {
   height: 15px !important;
   stroke-width: 1.6 !important;
   color: var(--text-muted);
-  transition: color 0.15s var(--ease-out);
+  transition: color 0.16s var(--ease-out), transform 0.16s var(--ease-out);
 }
 
 .nav-btn:hover {
@@ -6973,6 +6980,10 @@ body {
 
 .nav-btn:hover svg {
   color: var(--text-secondary);
+}
+
+.nav-btn:active {
+  transform: scale3d(0.97, 0.97, 1) !important;
 }
 
 .nav-btn.active {
@@ -6996,7 +7007,12 @@ body {
   border: 1px solid var(--border) !important;
   color: var(--text-secondary) !important;
   box-shadow: var(--inset-highlight) !important;
-  transition: background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s var(--ease-out) !important;
+  transform: translate3d(0, 0, 0);
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
 .header-icon-btn svg,
@@ -7004,6 +7020,7 @@ body {
   width: 16px !important;
   height: 16px !important;
   stroke-width: 1.65 !important;
+  transition: transform 0.18s var(--ease-out);
 }
 
 .header-icon-btn:hover,
@@ -7017,7 +7034,7 @@ body {
 
 .header-icon-btn:active,
 .user-profile-btn:active {
-  transform: scale(0.97) !important;
+  transform: scale3d(0.95, 0.95, 1) !important;
 }
 
 .user-profile-btn.active {
@@ -7118,16 +7135,16 @@ body {
   font-weight: 600 !important;
   font-size: 0.875rem !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
-  transition: background-color 0.15s var(--ease-out), transform 0.15s var(--ease-out) !important;
+  transition: background-color 0.16s var(--ease-out), transform 0.14s var(--ease-out) !important;
 }
 
 .btn-hero-play:hover {
   background: #ffffff !important;
-  transform: translateY(-1px) !important;
+  transform: translate3d(0, -1px, 0) !important;
 }
 
 .btn-hero-play:active {
-  transform: translateY(0) scale(0.98) !important;
+  transform: translate3d(0, 0, 0) scale3d(0.98, 0.98, 1) !important;
 }
 
 .btn-hero-ghost {
@@ -7140,12 +7157,20 @@ body {
   font-weight: 500 !important;
   font-size: 0.875rem !important;
   box-shadow: var(--inset-highlight) !important;
-  transition: background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out) !important;
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
 .btn-hero-ghost:hover {
   background: rgba(29, 34, 46, 0.85) !important;
   border-color: rgba(238, 240, 245, 0.24) !important;
+}
+
+.btn-hero-ghost:active {
+  transform: scale3d(0.97, 0.97, 1) !important;
 }
 
 .btn-hero-ghost.active {
@@ -7206,11 +7231,11 @@ body {
 }
 
 .anime-card:hover {
-  transform: translateY(-2px) !important;
+  transform: translate3d(0, -2px, 0) !important;
 }
 
 .anime-card:active {
-  transform: translateY(0) scale(0.99) !important;
+  transform: translate3d(0, 0, 0) scale3d(0.99, 0.99, 1) !important;
 }
 
 .card-poster-wrapper {
@@ -7232,7 +7257,7 @@ body {
 }
 
 .anime-card:hover .card-poster-img {
-  transform: scale(1.02) !important;
+  transform: scale3d(1.02, 1.02, 1) !important;
 }
 
 /* Quiet Dark-Glass Card Badges Instead of Neon Blue/Purple Rainbow Pills */
@@ -7325,7 +7350,7 @@ body {
 }
 
 .continue-card:hover {
-  transform: translateY(-2px) !important;
+  transform: translate3d(0, -2px, 0) !important;
   border-color: var(--border-strong) !important;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55) !important;
 }
@@ -7337,13 +7362,13 @@ body {
 }
 
 .continue-card:hover .continue-play-icon {
-  transform: scale(1.05) !important;
+  transform: scale3d(1.05, 1.05, 1) !important;
   background: var(--text-primary) !important;
   color: var(--bg-app) !important;
   box-shadow: none !important;
 }
 
-/* ─── Pass 1, 5, 7: Browse Catalog, Filters, Custom Selects & Pagination ─── */
+/* ─── Pass 1, 5, 7, 9: Browse Catalog, Filters, Custom Selects (Open & Close Animation) ─── */
 .page-title {
   font-family: var(--font-display) !important;
   font-size: clamp(1.35rem, 2.5vw, 1.75rem) !important;
@@ -7367,7 +7392,7 @@ body {
   color: var(--text-secondary) !important;
 }
 
-/* Genre Chips: Radius-8 Controls with Quiet Surface Active State */
+/* Genre Chips: Radius-8 Controls with Tactile Toggle & Surface Active State */
 .chip-btn {
   height: 32px;
   padding: 0 12px !important;
@@ -7378,13 +7403,22 @@ body {
   font-size: 0.8rem !important;
   font-weight: 500 !important;
   box-shadow: none !important;
-  transition: background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s var(--ease-out) !important;
+  transform: translate3d(0, 0, 0);
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
 .chip-btn:hover {
   background: var(--bg-surface-elevated) !important;
   border-color: var(--border-strong) !important;
   color: var(--text-primary) !important;
+}
+
+.chip-btn:active {
+  transform: scale3d(0.96, 0.96, 1) !important;
 }
 
 .chip-btn.active {
@@ -7395,7 +7429,7 @@ body {
   box-shadow: none !important;
 }
 
-/* Custom Dropdowns: Clean Surface & Hairline Border (No Red Border Glow) */
+/* Custom Dropdowns: Bidirectional Open & Close GPU Animation */
 .custom-select-trigger {
   height: 36px;
   padding: 0 12px !important;
@@ -7406,7 +7440,14 @@ body {
   font-size: 0.82rem !important;
   font-weight: 500 !important;
   box-shadow: var(--inset-highlight) !important;
-  transition: border-color 0.15s var(--ease-out), background-color 0.15s var(--ease-out) !important;
+  transition:
+    border-color 0.16s var(--ease-out),
+    background-color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
+}
+
+.custom-select-trigger:active {
+  transform: scale3d(0.985, 0.985, 1) !important;
 }
 
 .custom-select-trigger:hover,
@@ -7416,24 +7457,45 @@ body {
   box-shadow: var(--inset-highlight) !important;
 }
 
+.custom-select-arrow {
+  transition: transform 0.2s var(--ease-out), color 0.16s var(--ease-out) !important;
+}
+
+.custom-select-wrapper.open .custom-select-arrow {
+  transform: rotate(180deg) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Stay display:flex so BOTH open and close animate smoothly at 120fps */
 .custom-select-dropdown {
+  display: flex !important;
   background: #141821 !important;
   border: 1px solid var(--border-strong) !important;
   border-radius: 10px !important;
   padding: 4px !important;
   box-shadow: var(--shadow-modal) !important;
-  animation: dropdownFadeIn 0.16s var(--ease-out) forwards !important;
+  animation: none !important;
+  transform-origin: top center;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, -6px, 0) scale3d(0.97, 0.97, 1);
+  will-change: transform, opacity;
+  transition:
+    transform 0.15s var(--ease-in-out),
+    opacity 0.13s var(--ease-in-out),
+    visibility 0s linear 0.15s !important;
 }
 
-@keyframes dropdownFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.custom-select-wrapper.open .custom-select-dropdown {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+  transition:
+    transform 0.2s var(--ease-out),
+    opacity 0.16s var(--ease-out),
+    visibility 0s linear 0s !important;
 }
 
 .custom-select-option {
@@ -7442,13 +7504,20 @@ body {
   font-size: 0.82rem !important;
   font-weight: 500 !important;
   color: var(--text-secondary) !important;
-  transition: background-color 0.12s var(--ease-out), color 0.12s var(--ease-out) !important;
+  transition:
+    background-color 0.14s var(--ease-out),
+    color 0.14s var(--ease-out),
+    transform 0.1s var(--ease-out) !important;
 }
 
 .custom-select-option:hover {
   background: rgba(255, 255, 255, 0.05) !important;
   color: var(--text-primary) !important;
   padding-left: 10px !important;
+}
+
+.custom-select-option:active {
+  transform: scale3d(0.98, 0.98, 1);
 }
 
 .custom-select-option.active {
@@ -7469,15 +7538,22 @@ body {
   font-size: 0.84rem !important;
   font-weight: 500 !important;
   box-shadow: var(--inset-highlight) !important;
-  transition: background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out) !important;
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
 .btn-pagination:not(:disabled):hover {
   background: var(--bg-surface-elevated) !important;
   border-color: var(--border-strong) !important;
   color: #ffffff !important;
-  transform: none !important;
+  transform: translate3d(0, -1px, 0) !important;
   box-shadow: var(--inset-highlight) !important;
+}
+
+.btn-pagination:not(:disabled):active {
+  transform: scale3d(0.97, 0.97, 1) !important;
 }
 
 .page-indicator-pill {
@@ -7512,7 +7588,10 @@ body {
   font-size: 0.92rem !important;
   font-weight: 400 !important;
   box-shadow: var(--inset-highlight) !important;
-  transition: border-color 0.15s var(--ease-out), background-color 0.15s var(--ease-out) !important;
+  transition:
+    border-color 0.16s var(--ease-out),
+    background-color 0.16s var(--ease-out),
+    box-shadow 0.16s var(--ease-out) !important;
 }
 
 .search-input:focus {
@@ -7537,14 +7616,21 @@ body {
   color: var(--text-secondary) !important;
   font-size: 0.8rem !important;
   font-weight: 500 !important;
-  transition: background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s var(--ease-out) !important;
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
-.tag-chip:hover,
-.tag-chip:active {
+.tag-chip:hover {
   background: var(--bg-surface-elevated) !important;
   border-color: var(--border-strong) !important;
   color: var(--text-primary) !important;
+}
+
+.tag-chip:active {
+  transform: scale3d(0.96, 0.96, 1) !important;
 }
 
 .tab-pill-bar {
@@ -7562,6 +7648,15 @@ body {
   font-weight: 500 !important;
   color: var(--text-secondary) !important;
   box-shadow: none !important;
+  transition:
+    background-color 0.18s var(--ease-out),
+    color 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
+}
+
+.tab-pill:active {
+  transform: scale3d(0.97, 0.97, 1) !important;
 }
 
 .tab-pill.active {
@@ -7579,6 +7674,15 @@ body {
   font-weight: 500 !important;
   font-size: 0.82rem !important;
   padding: 7px 14px !important;
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
+}
+
+.detail-back-btn:hover {
+  background: rgba(23, 27, 36, 0.95) !important;
+  border-color: var(--border-focus) !important;
 }
 
 .detail-title {
@@ -7594,6 +7698,7 @@ body {
   font-weight: 600 !important;
   font-size: 0.88rem !important;
   box-shadow: none !important;
+  transition: background-color 0.16s var(--ease-out), transform 0.12s var(--ease-out) !important;
 }
 
 .detail-actions-bar .btn-primary:hover {
@@ -7609,6 +7714,11 @@ body {
   font-weight: 500 !important;
   font-size: 0.86rem !important;
   box-shadow: var(--inset-highlight) !important;
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
 .detail-actions-bar .btn-secondary.active {
@@ -7626,19 +7736,48 @@ body {
   max-width: 72ch;
 }
 
+.range-tab-btn {
+  border-radius: 7px !important;
+  font-weight: 500 !important;
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
+}
+
+.range-tab-btn:active {
+  transform: scale3d(0.96, 0.96, 1) !important;
+}
+
+.range-tab-btn.active {
+  background: var(--text-primary) !important;
+  border-color: var(--text-primary) !important;
+  color: var(--bg-app) !important;
+  font-weight: 600 !important;
+}
+
 .episode-btn {
   border-radius: 7px !important;
   background: var(--bg-surface) !important;
   border: 1px solid var(--border) !important;
   font-weight: 500 !important;
   box-shadow: none !important;
-  transition: background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s var(--ease-out) !important;
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
 .episode-btn:hover {
   background: var(--bg-surface-elevated) !important;
   border-color: var(--border-strong) !important;
-  transform: none !important;
+  transform: translate3d(0, -1px, 0) !important;
+}
+
+.episode-btn:active {
+  transform: scale3d(0.95, 0.95, 1) !important;
 }
 
 .episode-btn.active {
@@ -7666,14 +7805,54 @@ body {
   color: var(--text-muted) !important;
 }
 
-/* ─── Pass 7 & 8: User Dropdown, Settings Modal & Google Auth Modal ─── */
+/* ─── Pass 9: Bidirectional GPU Open & Close Animations for All Toggles, Popovers & Modals ─── */
+
+/* 1. View Screen Transitions (Home / Browse / Search / My List / Detail / Watch) */
+.view-screen.active {
+  animation: kuroViewEnter 0.2s var(--ease-out) both;
+}
+
+@keyframes kuroViewEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* 2. User Profile Dropdown Popover: Smooth Open (200ms ease-out) AND Smooth Close (150ms ease-in-out) */
 .user-dropdown-popover {
+  display: flex !important;
   background: #131720 !important;
   border: 1px solid var(--border-strong) !important;
   border-radius: 14px !important;
   box-shadow: var(--shadow-modal) !important;
   padding: 8px !important;
-  animation: dropdownFadeIn 0.16s var(--ease-out) forwards !important;
+  animation: none !important;
+  transform-origin: top right;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, -8px, 0) scale3d(0.96, 0.96, 1);
+  will-change: transform, opacity;
+  transition:
+    transform 0.15s var(--ease-in-out),
+    opacity 0.13s var(--ease-in-out),
+    visibility 0s linear 0.15s !important;
+}
+
+.user-dropdown-popover.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+  transition:
+    transform 0.22s var(--ease-out),
+    opacity 0.18s var(--ease-out),
+    visibility 0s linear 0s !important;
 }
 
 .user-avatar-badge {
@@ -7693,13 +7872,19 @@ body {
 .user-popover-item {
   border-radius: 8px !important;
   padding: 8px 10px !important;
-  transition: background-color 0.15s var(--ease-out) !important;
+  transition:
+    background-color 0.15s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
 }
 
 .user-popover-item:hover {
   background: rgba(255, 255, 255, 0.05) !important;
   border-color: transparent !important;
   transform: none !important;
+}
+
+.user-popover-item:active {
+  transform: scale3d(0.98, 0.98, 1) !important;
 }
 
 .settings-icon-box {
@@ -7713,12 +7898,48 @@ body {
   font-size: 0.84rem !important;
 }
 
-.settings-modal-card {
+/* 3. Settings Modal & Google Auth Modal: Bidirectional Backdrop & Card Open/Close */
+.settings-modal-backdrop,
+.google-auth-backdrop {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.16s var(--ease-in-out),
+    visibility 0s linear 0.16s !important;
+}
+
+.settings-modal-backdrop.active,
+.google-auth-backdrop.active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 0.22s var(--ease-out),
+    visibility 0s linear 0s !important;
+}
+
+.settings-modal-card,
+.google-auth-card {
   background: #12151e !important;
   border: 1px solid var(--border-strong) !important;
   border-radius: 16px !important;
   box-shadow: var(--shadow-modal) !important;
-  transition: transform 0.2s var(--ease-out), opacity 0.18s var(--ease-out) !important;
+  transform: translate3d(0, 10px, 0) scale3d(0.96, 0.96, 1) !important;
+  opacity: 0;
+  will-change: transform, opacity;
+  transition:
+    transform 0.16s var(--ease-in-out),
+    opacity 0.14s var(--ease-in-out) !important;
+}
+
+.settings-modal-backdrop.active .settings-modal-card,
+.google-auth-backdrop.active .google-auth-card {
+  transform: translate3d(0, 0, 0) scale3d(1, 1, 1) !important;
+  opacity: 1;
+  transition:
+    transform 0.24s var(--ease-out),
+    opacity 0.18s var(--ease-out) !important;
 }
 
 .settings-modal-glow {
@@ -7740,10 +7961,25 @@ body {
   font-size: 1.02rem !important;
 }
 
-.settings-modal-close:hover {
+.settings-modal-close,
+.google-auth-close {
+  transition:
+    background-color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    color 0.15s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
+}
+
+.settings-modal-close:hover,
+.google-auth-close:hover {
   background: var(--bg-surface-hover) !important;
   border-color: var(--border-strong) !important;
   transform: none !important;
+}
+
+.settings-modal-close:active,
+.google-auth-close:active {
+  transform: scale3d(0.92, 0.92, 1) !important;
 }
 
 .settings-group-title {
@@ -7758,6 +7994,7 @@ body {
   background: var(--bg-surface) !important;
   border: 1px solid var(--border) !important;
   border-radius: 10px !important;
+  transition: background-color 0.16s var(--ease-out), border-color 0.16s var(--ease-out) !important;
 }
 
 .setting-row:hover {
@@ -7770,11 +8007,47 @@ body {
   font-size: 0.86rem !important;
 }
 
+/* 4. Tactile Toggle Switch (Open/On & Close/Off GPU Thumb Glide + Press Feedback) */
+.switch-slider {
+  background: rgba(238, 240, 245, 0.14) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out) !important;
+}
+
+.switch-slider::before {
+  left: 2px !important;
+  bottom: 2px !important;
+  width: 20px !important;
+  height: 20px !important;
+  transform: translate3d(0, 0, 0);
+  will-change: transform, width;
+  transition:
+    transform 0.2s var(--ease-out),
+    width 0.14s var(--ease-out),
+    background-color 0.16s var(--ease-out) !important;
+}
+
+.setting-switch:active .switch-slider::before {
+  width: 23px !important;
+}
+
 .setting-switch input:checked + .switch-slider {
   background: var(--accent) !important;
+  border-color: rgba(255, 255, 255, 0.12);
   box-shadow: none !important;
 }
 
+.setting-switch input:checked + .switch-slider::before {
+  transform: translate3d(20px, 0, 0) !important;
+}
+
+.setting-switch:active input:checked + .switch-slider::before {
+  transform: translate3d(17px, 0, 0) !important;
+}
+
+/* 5. Segmented Control Toggles (Audio Sub/Dub, Quality 1080p/720p/Auto, Discussion Scope) */
 .setting-segmented-control {
   background: var(--bg-app) !important;
   border: 1px solid var(--border) !important;
@@ -7787,6 +8060,16 @@ body {
   font-weight: 500 !important;
   font-size: 0.76rem !important;
   padding: 5px 12px !important;
+  transform: translate3d(0, 0, 0);
+  transition:
+    background-color 0.18s var(--ease-out),
+    color 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
+}
+
+.segment-btn:active {
+  transform: scale3d(0.96, 0.96, 1) !important;
 }
 
 .segment-btn.active {
@@ -7804,12 +8087,77 @@ body {
   font-size: 0.82rem !important;
   padding: 7px 18px !important;
   box-shadow: none !important;
+  transition: background-color 0.16s var(--ease-out), transform 0.12s var(--ease-out) !important;
 }
 
 .btn-settings-done:hover {
   background: #ffffff !important;
   transform: none !important;
   box-shadow: none !important;
+}
+
+.btn-settings-done:active {
+  transform: scale3d(0.97, 0.97, 1) !important;
+}
+
+/* 6. Vegeta AI Advisor Drawer Toggle: Smooth Open & Close */
+.vegeta-trigger-btn {
+  transition:
+    transform 0.18s var(--ease-out),
+    border-color 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out) !important;
+}
+
+.vegeta-trigger-btn:active {
+  transform: scale3d(0.96, 0.96, 1) !important;
+}
+
+.vegeta-chat-card {
+  transform-origin: bottom right;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, 10px, 0) scale3d(0.96, 0.96, 1) !important;
+  will-change: transform, opacity;
+  transition:
+    transform 0.16s var(--ease-in-out),
+    opacity 0.14s var(--ease-in-out),
+    visibility 0s linear 0.16s !important;
+}
+
+.vegeta-chat-card.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0) scale3d(1, 1, 1) !important;
+  transition:
+    transform 0.22s var(--ease-out),
+    opacity 0.18s var(--ease-out),
+    visibility 0s linear 0s !important;
+}
+
+/* 7. In-Player Popovers (Quality / Speed) & Download Modal Open/Close */
+.nf-popover {
+  transform-origin: bottom right;
+  transform: translate3d(0, 8px, 0) scale3d(0.96, 0.96, 1) !important;
+  opacity: 0 !important;
+  visibility: hidden;
+  pointer-events: none !important;
+  transition:
+    transform 0.15s var(--ease-in-out),
+    opacity 0.13s var(--ease-in-out),
+    visibility 0s linear 0.15s !important;
+}
+
+.nf-popover.open {
+  transform: translate3d(0, 0, 0) scale3d(1, 1, 1) !important;
+  opacity: 1 !important;
+  visibility: visible;
+  pointer-events: auto !important;
+  transition:
+    transform 0.2s var(--ease-out),
+    opacity 0.16s var(--ease-out),
+    visibility 0s linear 0s !important;
 }
 
 /* Stop decorative looping float on announcement banner */
