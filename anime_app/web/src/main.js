@@ -70,11 +70,20 @@ const state = {
   history: JSON.parse(localStorage.getItem('kuro_history') || '[]'),
 };
 
-const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE)
-  ? import.meta.env.VITE_API_BASE.replace(/\/+$/, '')
-  : (typeof window !== 'undefined' && window.__API_BASE__)
-    ? window.__API_BASE__.replace(/\/+$/, '')
-    : '/api';
+function resolveApiBase() {
+  const raw =
+    (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL)) ||
+    (typeof window !== 'undefined' && window.__API_BASE__) ||
+    '';
+  const cleaned = String(raw).trim().replace(/\/+$/, '');
+  if (!cleaned) return '/api';
+  if (cleaned.startsWith('http') && !cleaned.endsWith('/api')) {
+    return `${cleaned}/api`;
+  }
+  return cleaned;
+}
+
+const API_BASE = resolveApiBase();
 
 
 // ─── Lucide Icons Initializer ───────────────────────────────────────
