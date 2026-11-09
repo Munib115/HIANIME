@@ -197,6 +197,110 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── Zero-Overhead AI Bot & Scraper Blocker ──────────────────────────
+# Single pre-compiled regex checked in <0.002ms; completely skips /player/* streaming routes
+_AI_BOT_UA_RE = re.compile(
+    r"(GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-Web|anthropic-ai|"
+    r"PerplexityBot|Perplexity-User|Google-Extended|CCBot|Bytespider|Bytedance|"
+    r"Amazonbot|Meta-ExternalAgent|FacebookBot|Applebot-Extended|Diffbot|"
+    r"Cohere-ai|Omgilibot|YouBot|PetalBot|ImagesiftBot|Scrapy|HTTrack|HeadlessChrome)",
+    re.IGNORECASE,
+)
+
+_ROBOTS_TXT = """# KuroAnime — Block All AI Scrapers & LLM Training Crawlers
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: PerplexityBot
+Disallow: /
+
+User-agent: Perplexity-User
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+User-agent: Cohere-ai
+Disallow: /
+
+User-agent: Omgilibot
+Disallow: /
+
+User-agent: YouBot
+Disallow: /
+
+User-agent: PetalBot
+Disallow: /
+
+User-agent: Scrapy
+Disallow: /
+
+User-agent: *
+Disallow: /api/
+"""
+
+
+@app.middleware("http")
+async def block_ai_bots_middleware(request: Request, call_next):
+    path = request.url.path
+    # Never inspect or slow down HLS video streaming, segments, subtitles, or player routes
+    if "/player/" in path or "/clean-stream" in path or path.startswith("/assets/"):
+        return await call_next(request)
+
+    ua = request.headers.get("user-agent", "")
+    if ua and _AI_BOT_UA_RE.search(ua):
+        return Response(
+            content='{"detail":"Access denied for automated AI crawlers and scrapers."}',
+            status_code=403,
+            media_type="application/json",
+            headers={"X-Robots-Tag": "noai, noimageai"},
+        )
+
+    response = await call_next(request)
+    response.headers["X-Robots-Tag"] = "noai, noimageai"
+    return response
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def serve_robots_txt():
+    return Response(content=_ROBOTS_TXT, media_type="text/plain")
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
