@@ -820,7 +820,7 @@ async function initHome() {
     if (stats) {
       const footerStat = document.getElementById('footer-catalog-stats');
       if (footerStat) {
-        footerStat.textContent = `Streaming ${stats.anime.toLocaleString()} Anime Series & Movies • ${stats.streams.toLocaleString()} Verified High-Speed Streams`;
+        footerStat.textContent = `${stats.anime.toLocaleString()} titles · ${stats.streams.toLocaleString()} streams`;
       }
     }
   });
@@ -851,9 +851,9 @@ async function initHome() {
   if (railsContainer && homeData.rails) {
     const railConfigs = [
       { key: 'trending', title: 'Trending Now' },
-      { key: 'top_rated', title: 'Top Rated Masterpieces' },
+      { key: 'top_rated', title: 'Top Rated' },
       { key: 'airing', title: 'Currently Airing' },
-      { key: 'movies', title: 'Feature Films & Movies' },
+      { key: 'movies', title: 'Movies & Feature Films' },
       { key: 'recent', title: 'Recently Added' },
     ];
 
@@ -3209,16 +3209,16 @@ function initUserMenuAndSettings() {
         googleLoginBtn.classList.add('logged-in');
       }
     } else {
-      if (userDisplayName) userDisplayName.textContent = 'Guest Otaku';
-      if (userDisplayStatus) userDisplayStatus.textContent = 'Free Member • Ad-Free';
+      if (userDisplayName) userDisplayName.textContent = 'Guest';
+      if (userDisplayStatus) userDisplayStatus.textContent = 'Ad-free streaming';
       if (userStatusDot) {
         userStatusDot.classList.add('guest');
       }
       if (userAvatarBadge) {
         userAvatarBadge.innerHTML = '<i data-lucide="user"></i>';
       }
-      if (googleLoginLabel) googleLoginLabel.textContent = 'Login with Google';
-      if (googleLoginSub) googleLoginSub.textContent = 'Sync watchlist & history';
+      if (googleLoginLabel) googleLoginLabel.textContent = 'Sign in with Google';
+      if (googleLoginSub) googleLoginSub.textContent = 'Sync library and watch history';
       if (googleLoginBtn) {
         googleLoginBtn.classList.remove('logged-in');
       }
@@ -3313,7 +3313,7 @@ function initUserMenuAndSettings() {
       renderContinueWatchingRail();
       if (state.currentTab === 'watchlist') renderWatchlist();
       renderAuthState();
-      showToast('Signed out successfully. You are now browsing as Guest Otaku.');
+      showToast('Signed out. Browsing as guest.');
     } else {
       // Trigger Supabase Google OAuth
       triggerGoogleOAuth();
