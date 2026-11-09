@@ -27,8 +27,8 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MUNIB_DB_PATH = os.path.join(BASE_DIR, "munib_server.db")
-HIANIME_DB_PATH = os.path.join(BASE_DIR, "hianime.db")
+MUNIB_DB_PATH = os.environ.get("MUNIB_DB") or os.path.join(BASE_DIR, "munib_server.db")
+HIANIME_DB_PATH = os.environ.get("ANIME_DB") or os.path.join(BASE_DIR, "hianime.db")
 
 SEARCH_API = "https://reanime.to/api/v1/search"
 FLIX_API = "https://reanime.to/api/flix"

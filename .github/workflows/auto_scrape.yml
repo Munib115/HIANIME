@@ -1,0 +1,47 @@
+name: Auto-Scrape New Anime & Episodes
+
+on:
+  schedule:
+    # Runs automatically every 6 hours
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-and-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Server 1 Scraper (ZokoAnime / hianime.db)
+        env:
+          MAX_NEW_ANIME_PER_RUN: "35"
+        run: python -u scrape_new_anime_and_episodes_fast.py
+
+      - name: Run Server 2 Scraper (Munib Server / munib_server.db)
+        run: python -u scrape_munib_new_episodes.py
+
+      - name: Commit & Push Updated Databases
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hianime.db munib_server.db api/hianime.db.gz api/munib_server.db.gz anime_app/web/api/hianime.db.gz anime_app/web/api/munib_server.db.gz
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(auto-scrape): sync newly released anime titles and episodes"
+            git push origin HEAD:main
+          else
+            echo "No new anime or episodes detected in this cycle."
+          fi

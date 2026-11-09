@@ -19,10 +19,17 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-DB_PATH     = os.path.join(BASE_DIR, "hianime.db")
+DB_PATH     = os.environ.get("ANIME_DB") or os.path.join(BASE_DIR, "hianime.db")
 BASE_URL    = "https://hianime.at"
 API_BASE    = "https://hianime.at/api/theme/"
 ANILIST_API = "https://graphql.anilist.co"
+MAX_NEW_ANIME_PER_RUN = int(os.environ.get("MAX_NEW_ANIME_PER_RUN", "35"))
+
+try:
+    import lxml  # noqa: F401
+    HTML_PARSER = "lxml"
+except ImportError:
+    HTML_PARSER = "html.parser"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -119,7 +126,7 @@ def enrich_anilist(title):
 def scrape_detail_page(url):
     html = fetch(url)
     if not html: return None
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, HTML_PARSER)
 
     m = re.search(r"-(\d+)$", url)
     if not m: return None
@@ -205,7 +212,7 @@ def scrape_detail_page(url):
 def get_episodes(anime_id):
     data = fetch(API_BASE + "episode/list/" + str(anime_id), as_json=True)
     if not data or "html" not in data: return []
-    soup = BeautifulSoup(data["html"], "lxml")
+    soup = BeautifulSoup(data["html"], HTML_PARSER)
     eps = []
     for a in soup.select("a.ep-item"):
         href = a.get("href", "")
@@ -234,7 +241,7 @@ def fetch_single_episode_servers(ep):
     data = fetch(API_BASE + "episode/servers?episodeId=" + str(ep_id), as_json=True)
     if not data or not data.get("status"): return []
 
-    soup = BeautifulSoup(data.get("html", ""), "lxml")
+    soup = BeautifulSoup(data.get("html", ""), HTML_PARSER)
     out = []
     for s in soup.select(".server-item"):
         sname = (s.get("data-server-name", "") or "ZokoAnime").strip()
@@ -436,6 +443,9 @@ def main():
 
     total_new_anime = 0
     for idx, target in enumerate(new_anime_targets, 1):
+        if total_new_anime >= MAX_NEW_ANIME_PER_RUN:
+            print(f"  Reached MAX_NEW_ANIME_PER_RUN={MAX_NEW_ANIME_PER_RUN} for this cycle.", flush=True)
+            break
         aid = target["anime_id"]
         title = target["title"]
         url = target["url"]

@@ -2419,5 +2419,86 @@ async def like_anime_comment(anime_id: int, comment_id: int, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/scraper/status")
+def scraper_status():
+    """Return live status of the automated Render background scrapers + DB counts."""
+    status_data = {
+        "auto_scraper_enabled": True,
+        "running": False,
+        "last_run_at": None,
+        "next_run_at": None,
+        "runs_completed": 0,
+        "last_summary": None,
+    }
+    status_candidates = [
+        os.environ.get("SCRAPER_STATUS_FILE"),
+        os.path.join(os.getcwd(), "scraper_status.json"),
+        os.path.join(PARENT_DIR, "scraper_status.json"),
+        "/tmp/scraper_status.json",
+    ]
+    for sf in status_candidates:
+        if sf and os.path.exists(sf):
+            try:
+                with open(sf, "r", encoding="utf-8") as f:
+                    status_data.update(json.load(f))
+                break
+            except Exception:
+                pass
+
+    try:
+        db1 = get_db_path()
+        if db1 and os.path.exists(db1):
+            c1 = sqlite3.connect(db1, timeout=10).cursor()
+            status_data["server1_anime"] = c1.execute("SELECT COUNT(*) FROM anime").fetchone()[0]
+            status_data["server1_episodes"] = c1.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+            status_data["server1_streams"] = c1.execute("SELECT COUNT(*) FROM streams").fetchone()[0]
+            c1.connection.close()
+    except Exception:
+        pass
+
+    try:
+        db2 = get_munib_db_path()
+        if db2 and os.path.exists(db2):
+            c2 = sqlite3.connect(db2, timeout=10).cursor()
+            status_data["server2_anime"] = c2.execute("SELECT COUNT(*) FROM anime").fetchone()[0]
+            status_data["server2_episodes"] = c2.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+            status_data["server2_streams"] = c2.execute("SELECT COUNT(*) FROM streams").fetchone()[0]
+            c2.connection.close()
+    except Exception:
+        pass
+
+    return status_data
+
+
 app.include_router(router, prefix="/api")
 app.include_router(router)
+
+# ─── Standalone / Render Static Frontend Serving ─────────────────────
+if not os.environ.get("VERCEL"):
+    _dist_candidates = [
+        os.path.join(os.getcwd(), "anime_app", "web", "dist"),
+        os.path.join(PARENT_DIR, "anime_app", "web", "dist"),
+        os.path.join(CURRENT_DIR, "..", "web", "dist"),
+    ]
+    for _dist_dir in _dist_candidates:
+        _dist_abs = os.path.abspath(_dist_dir)
+        if os.path.isdir(_dist_abs) and os.path.exists(os.path.join(_dist_abs, "index.html")):
+            from fastapi.staticfiles import StaticFiles
+            from fastapi.responses import FileResponse
+
+            _assets_dir = os.path.join(_dist_abs, "assets")
+            if os.path.isdir(_assets_dir):
+                app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+            @app.get("/{full_path:path}", include_in_schema=False)
+            async def serve_spa_frontend(full_path: str):
+                candidate_file = os.path.abspath(os.path.join(_dist_abs, full_path))
+                if (
+                    full_path
+                    and candidate_file.startswith(_dist_abs)
+                    and os.path.isfile(candidate_file)
+                ):
+                    return FileResponse(candidate_file)
+                return FileResponse(os.path.join(_dist_abs, "index.html"))
+
+            break
