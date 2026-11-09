@@ -2523,31 +2523,134 @@ async def like_anime_comment(anime_id: int, comment_id: int, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ─── Built-In Render Background Auto-Scraper Daemon ──────────────────
+import subprocess as _subprocess
+import sys as _sys
+import threading as _threading
+from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone
+
+_SCRAPER_LOCK = _threading.Lock()
+_SCRAPER_THREAD_STARTED = False
+_SCRAPER_TRIGGER_EVENT = _threading.Event()
+_SCRAPER_INTERVAL_MIN = int(os.environ.get("SCRAPE_INTERVAL_MINUTES", "60"))
+_SCRAPER_STATE = {
+    "auto_scraper_enabled": not bool(os.environ.get("VERCEL")),
+    "interval_minutes": _SCRAPER_INTERVAL_MIN,
+    "running": False,
+    "current_task": "idle",
+    "last_run_at": None,
+    "next_run_at": None,
+    "runs_completed": 0,
+    "last_summary": None,
+}
+
+
+def _find_project_root() -> str:
+    for cand in [os.getcwd(), PARENT_DIR, os.path.dirname(PARENT_DIR), CURRENT_DIR]:
+        if cand and os.path.exists(os.path.join(cand, "scrape_new_anime_and_episodes_fast.py")):
+            return os.path.abspath(cand)
+    return os.getcwd()
+
+
+def _run_scraper_pass():
+    root_dir = _find_project_root()
+    env = os.environ.copy()
+    try:
+        db1 = get_db_path()
+        if db1:
+            env["ANIME_DB"] = db1
+    except Exception:
+        pass
+    try:
+        db2 = get_munib_db_path()
+        if db2:
+            env["MUNIB_DB"] = db2
+    except Exception:
+        pass
+    env.setdefault("MAX_NEW_ANIME_PER_RUN", "25")
+
+    _SCRAPER_STATE["running"] = True
+    _SCRAPER_STATE["last_run_at"] = _datetime.now(_timezone.utc).isoformat()
+    summaries = {}
+
+    for script_name, key_name, label in [
+        ("scrape_new_anime_and_episodes_fast.py", "server1", "Server 1 (ZokoAnime)"),
+        ("scrape_munib_new_episodes.py", "server2", "Server 2 (Munib Server)"),
+    ]:
+        script_path = os.path.join(root_dir, script_name)
+        _SCRAPER_STATE["current_task"] = f"Running {label} ({script_name})"
+        if not os.path.exists(script_path):
+            summaries[key_name] = f"{script_name} not found in {root_dir}"
+            continue
+        t0 = _time.time()
+        try:
+            proc = _subprocess.run(
+                [_sys.executable, "-u", script_path],
+                cwd=root_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            dt = _time.time() - t0
+            lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()][-5:]
+            summaries[key_name] = f"OK ({dt:.1f}s): " + (" | ".join(lines) if lines else f"exit={proc.returncode}")
+        except Exception as e:
+            summaries[key_name] = f"Error: {e}"
+
+    _SCRAPER_STATE["running"] = False
+    _SCRAPER_STATE["current_task"] = "idle"
+    _SCRAPER_STATE["runs_completed"] = int(_SCRAPER_STATE.get("runs_completed") or 0) + 1
+    _SCRAPER_STATE["last_summary"] = summaries
+    _SCRAPER_STATE["last_run_at"] = _datetime.now(_timezone.utc).isoformat()
+    _SCRAPER_STATE["next_run_at"] = (
+        _datetime.now(_timezone.utc) + _timedelta(minutes=_SCRAPER_INTERVAL_MIN)
+    ).isoformat()
+
+    try:
+        sf = "/tmp/scraper_status.json" if os.path.exists("/tmp") else os.path.join(root_dir, "scraper_status.json")
+        with open(sf, "w", encoding="utf-8") as f:
+            json.dump(_SCRAPER_STATE, f, indent=2)
+    except Exception:
+        pass
+
+
+def _background_scraper_worker():
+    # Wait 8 seconds after server boot so health checks pass immediately, then run first scrape pass
+    _SCRAPER_STATE["next_run_at"] = (_datetime.now(_timezone.utc) + _timedelta(seconds=8)).isoformat()
+    _SCRAPER_TRIGGER_EVENT.wait(timeout=8)
+    while True:
+        _SCRAPER_TRIGGER_EVENT.clear()
+        try:
+            _run_scraper_pass()
+        except Exception as e:
+            _SCRAPER_STATE["running"] = False
+            _SCRAPER_STATE["current_task"] = f"error: {e}"
+        # Wait for next scheduled interval or manual trigger
+        _SCRAPER_TRIGGER_EVENT.wait(timeout=_SCRAPER_INTERVAL_MIN * 60)
+
+
+def _ensure_background_scraper_started():
+    global _SCRAPER_THREAD_STARTED
+    if os.environ.get("VERCEL") or os.environ.get("DISABLE_AUTO_SCRAPER", "").lower() in ("1", "true", "yes"):
+        return
+    with _SCRAPER_LOCK:
+        if not _SCRAPER_THREAD_STARTED:
+            _SCRAPER_THREAD_STARTED = True
+            t = _threading.Thread(target=_background_scraper_worker, name="KuroAutoScraper", daemon=True)
+            t.start()
+
+
+@app.on_event("startup")
+def _on_app_startup():
+    _ensure_background_scraper_started()
+
+
 @router.get("/scraper/status")
 def scraper_status():
     """Return live status of the automated Render background scrapers + DB counts."""
-    status_data = {
-        "auto_scraper_enabled": True,
-        "running": False,
-        "last_run_at": None,
-        "next_run_at": None,
-        "runs_completed": 0,
-        "last_summary": None,
-    }
-    status_candidates = [
-        os.environ.get("SCRAPER_STATUS_FILE"),
-        os.path.join(os.getcwd(), "scraper_status.json"),
-        os.path.join(PARENT_DIR, "scraper_status.json"),
-        "/tmp/scraper_status.json",
-    ]
-    for sf in status_candidates:
-        if sf and os.path.exists(sf):
-            try:
-                with open(sf, "r", encoding="utf-8") as f:
-                    status_data.update(json.load(f))
-                break
-            except Exception:
-                pass
+    _ensure_background_scraper_started()
+    status_data = dict(_SCRAPER_STATE)
 
     try:
         db1 = get_db_path()
@@ -2572,6 +2675,19 @@ def scraper_status():
         pass
 
     return status_data
+
+
+@router.get("/scraper/trigger")
+@router.post("/scraper/trigger")
+def trigger_scraper_now():
+    """Immediately wake up the background auto-scraper on Render to fetch new anime & episodes."""
+    _ensure_background_scraper_started()
+    _SCRAPER_TRIGGER_EVENT.set()
+    return {
+        "ok": True,
+        "message": "Scraper pass triggered in background. Check /api/scraper/status for live progress.",
+        "status": _SCRAPER_STATE,
+    }
 
 
 app.include_router(router, prefix="/api")
