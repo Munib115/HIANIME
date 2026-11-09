@@ -4,8 +4,10 @@ services:
     runtime: python
     plan: free
     buildCommand: |
+      export UV_LINK_MODE=copy
+      unset npm_config_cache_dir NPM_CONFIG_CACHE_DIR
       pip install -r requirements.txt
-      npm --prefix anime_app/web install
+      npm --prefix anime_app/web install --no-audit --no-fund
       npm --prefix anime_app/web run build
     startCommand: python -u render_start.py
     envVars:
@@ -13,6 +15,8 @@ services:
         value: 3.11.9
       - key: NODE_VERSION
         value: 20.18.0
+      - key: UV_LINK_MODE
+        value: copy
       - key: SCRAPE_INTERVAL_MINUTES
         value: "120"
       - key: MAX_NEW_ANIME_PER_RUN
@@ -21,4 +25,3 @@ services:
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
         sync: false
-

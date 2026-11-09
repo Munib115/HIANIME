@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "build": {
+    "env": {
+      "UV_LINK_MODE": "copy",
+      "NPM_CONFIG_LOGLEVEL": "error"
+    }
+  },
   "functions": {
     "api/**/*.py": {
       "includeFiles": "api/*.db*"
