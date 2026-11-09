@@ -127,6 +127,8 @@ def load_hianime_reference():
 
 
 def sync_munib_copies():
+    if os.environ.get("SKIP_GZ_SYNC") or os.environ.get("RENDER"):
+        return
     import gzip
     gz_targets = [
         os.path.join(BASE_DIR, "api", "munib_server.db.gz"),
@@ -168,7 +170,13 @@ def main():
 
     print(f"Initial Munib Server DB: {len(existing_anime):,} Anime | {sum(len(v) for v in existing_streams.values()):,} Streamed Episodes")
 
-    # 1. Discover all Releasing + 2026 + 2025 + unscraped catalog anime from reanime.to
+    # 1. Discover all Releasing + 2026 + 2025 + dynamic unscraped catalog & Hentai offsets from reanime.to
+    MAX_NEW_ANIME = int(os.environ.get("MAX_NEW_ANIME_PER_RUN", "25"))
+    base_offset = max(8900, (len(existing_anime) // 100) * 100)
+    c.execute("SELECT COUNT(*) FROM anime WHERE lower(genres) LIKE '%hentai%'")
+    hentai_count = c.fetchone()[0] or 0
+    hentai_offset = max(0, ((hentai_count - 100) // 100) * 100)
+
     candidates_by_al = {}
     queries = [
         f"{SEARCH_API}?status=RELEASING&offset=0&limit=100",
@@ -176,24 +184,24 @@ def main():
         f"{SEARCH_API}?status=RELEASING&offset=200&limit=100",
         f"{SEARCH_API}?year=2026&offset=0&limit=100",
         f"{SEARCH_API}?year=2026&offset=100&limit=100",
-        f"{SEARCH_API}?year=2026&offset=200&limit=100",
         f"{SEARCH_API}?year=2025&offset=0&limit=100",
-        f"{SEARCH_API}?year=2025&offset=100&limit=100",
-        f"{SEARCH_API}?year=2024&offset=0&limit=100",
-        f"{SEARCH_API}?year=2024&offset=100&limit=100",
-        f"{SEARCH_API}?offset=8900&limit=100",
-        f"{SEARCH_API}?offset=9000&limit=100",
-        f"{SEARCH_API}?offset=9100&limit=100",
-        f"{SEARCH_API}?offset=9200&limit=100",
+        f"{SEARCH_API}?genre=Hentai&offset=0&limit=100",
+        f"{SEARCH_API}?genre=Hentai&offset={min(1500, hentai_offset)}&limit=100",
+        f"{SEARCH_API}?genre=Hentai&offset={min(1500, hentai_offset + 100)}&limit=100",
+        f"{SEARCH_API}?offset={base_offset}&limit=100",
+        f"{SEARCH_API}?offset={base_offset + 100}&limit=100",
+        f"{SEARCH_API}?offset={base_offset + 200}&limit=100",
+        f"{SEARCH_API}?offset={base_offset + 300}&limit=100",
+        f"{SEARCH_API}?offset={base_offset + 400}&limit=100",
     ]
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         for data in pool.map(fetch_json, queries):
             for item in (data.get("results") if data else []) or []:
                 al_id = item.get("anilist_id")
                 if al_id:
                     candidates_by_al[int(al_id)] = item
 
-    print(f"Scanned {len(candidates_by_al):,} active/catalog anime on reanime.to for new episodes & new titles.", flush=True)
+    print(f"Scanned {len(candidates_by_al):,} active/catalog/Hentai anime on reanime.to for new episodes & new titles.", flush=True)
 
     new_anime_added = 0
     new_episodes_added = 0
@@ -214,6 +222,8 @@ def main():
         # Skip gigantic 500+ episode long-runners unless checking latest 5 episodes
         have_ep_map = existing_streams.get(al_id, {})
         is_new_anime = al_id not in existing_anime or len(have_ep_map) == 0
+        if is_new_anime and new_anime_added >= MAX_NEW_ANIME:
+            continue
 
         # Determine which episode numbers need checking
         eps_to_fetch = []

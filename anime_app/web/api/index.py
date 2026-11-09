@@ -2567,7 +2567,8 @@ def _run_scraper_pass():
             env["MUNIB_DB"] = db2
     except Exception:
         pass
-    env.setdefault("MAX_NEW_ANIME_PER_RUN", "25")
+    env.setdefault("MAX_NEW_ANIME_PER_RUN", "15")
+    env["SKIP_GZ_SYNC"] = "1"
 
     _SCRAPER_STATE["running"] = True
     _SCRAPER_STATE["last_run_at"] = _datetime.now(_timezone.utc).isoformat()
@@ -2630,6 +2631,17 @@ def _background_scraper_worker():
         _SCRAPER_TRIGGER_EVENT.wait(timeout=_SCRAPER_INTERVAL_MIN * 60)
 
 
+def _keep_alive_worker():
+    """Ping external Render URL every 10 minutes so Render Free Tier never sleeps or resets /tmp."""
+    url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kuro-anime.onrender.com").rstrip("/") + "/api/stats"
+    while True:
+        _time.sleep(600)
+        try:
+            _requests.get(url, timeout=15)
+        except Exception:
+            pass
+
+
 def _ensure_background_scraper_started():
     global _SCRAPER_THREAD_STARTED
     if os.environ.get("VERCEL") or os.environ.get("DISABLE_AUTO_SCRAPER", "").lower() in ("1", "true", "yes"):
@@ -2639,6 +2651,8 @@ def _ensure_background_scraper_started():
             _SCRAPER_THREAD_STARTED = True
             t = _threading.Thread(target=_background_scraper_worker, name="KuroAutoScraper", daemon=True)
             t.start()
+            ka = _threading.Thread(target=_keep_alive_worker, name="KuroRenderKeepAlive", daemon=True)
+            ka.start()
 
 
 @app.on_event("startup")

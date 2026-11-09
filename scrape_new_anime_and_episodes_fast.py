@@ -283,6 +283,8 @@ def get_all_episode_streams(episodes):
     return all_streams
 
 def sync_db_copies():
+    if os.environ.get("SKIP_GZ_SYNC") or os.environ.get("RENDER"):
+        return
     import gzip
     targets = [
         os.path.join(BASE_DIR, "api", "hianime.db.gz"),
