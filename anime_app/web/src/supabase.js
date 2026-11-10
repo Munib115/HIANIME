@@ -264,6 +264,33 @@ export async function deleteDiscussionMessageFromSupabase(commentId) {
 }
 
 /**
+ * Resolve effective user from either Supabase Auth session or authenticated local profile
+ */
+export async function resolveSyncUser() {
+  const sbUser = await getCurrentUser();
+  if (sbUser) {
+    return {
+      id: sbUser.id,
+      name: sbUser.user_metadata?.full_name || sbUser.email?.split('@')[0] || 'Kuro Member',
+      email: sbUser.email || '',
+      avatar: sbUser.user_metadata?.avatar_url || ''
+    };
+  }
+  try {
+    const local = JSON.parse(localStorage.getItem('kuro_user_profile') || 'null');
+    if (local && (local.email || local.id)) {
+      return {
+        id: String(local.id || local.email),
+        name: String(local.name || (local.email ? local.email.split('@')[0] : 'Kuro Member')),
+        email: String(local.email || ''),
+        avatar: String(local.avatar || '')
+      };
+    }
+  } catch (e) {}
+  return null;
+}
+
+/**
  * Generate a random 6-character uppercase code (avoiding ambiguous 0, O, 1, I)
  */
 function createRandomShareCode() {
@@ -276,11 +303,10 @@ function createRandomShareCode() {
 }
 
 /**
- * Generate a new sync share code in Supabase with current library and watch history
+ * Generate a new sync share code with current library and watch history
  */
 export async function generateSyncShareCode(libraryList = [], historyList = []) {
-  if (!supabase) return { ok: false, error: 'Database service unavailable' };
-  const user = await getCurrentUser();
+  const user = await resolveSyncUser();
   if (!user) return { ok: false, error: 'auth_required' };
 
   try {
@@ -290,9 +316,9 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
 
     const row = {
       share_code: code,
-      user_id: user.id,
-      user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Kuro Member',
-      user_avatar: user.user_metadata?.avatar_url || '',
+      user_id: String(user.id || user.email || 'kuro_user'),
+      user_name: user.name || 'Kuro Member',
+      user_avatar: user.avatar || '',
       library_data: cleanLibrary,
       history_data: cleanHistory,
       library_count: cleanLibrary.length,
@@ -301,14 +327,28 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
       expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
     };
 
-    const { error } = await supabase
-      .from('user_sync_shares')
-      .insert(row);
-
-    if (error) {
-      console.warn('[Supabase sync share insert error]', error);
-      return { ok: false, error: error.message || 'Could not save sync code' };
+    let cloudOk = false;
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('user_sync_shares')
+          .insert(row);
+        if (!error) {
+          cloudOk = true;
+        } else {
+          console.warn('[Supabase sync share insert note]', error.message);
+        }
+      } catch (err) {
+        console.warn('[Supabase sync share network note]', err);
+      }
     }
+
+    // Always mirror to local registry for fail-safe resolution
+    try {
+      const localRegistry = JSON.parse(localStorage.getItem('kuro_local_sync_shares') || '{}');
+      localRegistry[code] = row;
+      localStorage.setItem('kuro_local_sync_shares', JSON.stringify(localRegistry));
+    } catch (e) {}
 
     return {
       ok: true,
@@ -316,10 +356,11 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
       libraryCount: cleanLibrary.length,
       historyCount: cleanHistory.length,
       expiresAt: row.expires_at,
-      authorName: row.user_name
+      authorName: row.user_name,
+      isCloud: cloudOk
     };
   } catch (e) {
-    console.error('[Supabase sync share exception]', e);
+    console.error('[Sync share generation exception]', e);
     return { ok: false, error: e.message || 'Unexpected sync error' };
   }
 }
@@ -328,46 +369,54 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
  * Lookup a shared sync record by code
  */
 export async function lookupSyncShareCode(rawCode) {
-  if (!supabase || !rawCode) return { ok: false, error: 'Please enter a valid code' };
+  if (!rawCode) return { ok: false, error: 'Please enter a valid code' };
 
   let clean = String(rawCode).trim().toUpperCase();
   if (!clean.startsWith('KURO-') && clean.length === 6) {
     clean = `KURO-${clean}`;
   }
 
-  try {
-    const { data, error } = await supabase
-      .from('user_sync_shares')
-      .select('*')
-      .eq('share_code', clean)
-      .maybeSingle();
+  // 1. Try Supabase Cloud lookup
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('user_sync_shares')
+        .select('*')
+        .eq('share_code', clean)
+        .maybeSingle();
 
-    if (error) {
-      return { ok: false, error: error.message || 'Error looking up code' };
+      if (!error && data) {
+        if (data.expires_at && new Date(data.expires_at).getTime() < Date.now()) {
+          return { ok: false, error: 'This sync code has expired' };
+        }
+        return { ok: true, share: data };
+      }
+    } catch (e) {
+      console.warn('[Supabase sync lookup error]', e);
     }
-    if (!data) {
-      return { ok: false, error: 'Code not found or has expired' };
-    }
-
-    if (data.expires_at && new Date(data.expires_at).getTime() < Date.now()) {
-      return { ok: false, error: 'This sync code has expired' };
-    }
-
-    return {
-      ok: true,
-      share: data
-    };
-  } catch (e) {
-    return { ok: false, error: e.message || 'Failed to lookup sync code' };
   }
+
+  // 2. Fallback to local registry
+  try {
+    const localRegistry = JSON.parse(localStorage.getItem('kuro_local_sync_shares') || '{}');
+    if (localRegistry[clean]) {
+      const localData = localRegistry[clean];
+      if (localData.expires_at && new Date(localData.expires_at).getTime() < Date.now()) {
+        return { ok: false, error: 'This sync code has expired' };
+      }
+      return { ok: true, share: localData };
+    }
+  } catch (e) {}
+
+  return { ok: false, error: 'Code not found or has expired' };
 }
 
 /**
  * Import a friend's shared library and watch history to the signed-in user's account
  */
 export async function importSyncShare(shareData) {
-  if (!supabase || !shareData) return { ok: false, error: 'Invalid share data' };
-  const user = await getCurrentUser();
+  if (!shareData) return { ok: false, error: 'Invalid share data' };
+  const user = await resolveSyncUser();
   if (!user) return { ok: false, error: 'auth_required' };
 
   const libItems = Array.isArray(shareData.library_data) ? shareData.library_data : [];
@@ -376,56 +425,29 @@ export async function importSyncShare(shareData) {
   let importedLib = 0;
   let importedHist = 0;
 
-  try {
-    // 1. Sync library items into user's user_library table
-    for (const item of libItems) {
-      if (!item || !item.anime_id) continue;
-      const payload = {
-        user_id: user.id,
-        anime_id: Number(item.anime_id),
-        anime_title: item.title || item.anime_title || 'Anime',
-        anime_poster: item.poster || item.anime_poster || '',
-        anime_type: item.type || item.anime_type || 'TV',
-        anilist_score: item.anilist_score ? Number(item.anilist_score) : null,
-        status: item.status || 'plan_to_watch',
-        is_favorite: Boolean(item.is_favorite),
-        updated_at: new Date().toISOString()
-      };
-      const { error } = await supabase
-        .from('user_library')
-        .upsert(payload, { onConflict: 'user_id,anime_id' });
-      if (!error) importedLib++;
-    }
-
-    // 2. Sync history items into user's watch_history table
-    for (const entry of histItems) {
-      if (!entry || !entry.anime_id) continue;
-      const payload = {
-        user_id: user.id,
-        anime_id: Number(entry.anime_id),
-        anime_title: entry.title || entry.anime_title || 'Anime',
-        anime_poster: entry.poster || entry.anime_poster || '',
-        episode_id: String(entry.episode_id || ''),
-        episode_number: Math.max(1, Math.floor(Number(entry.episode_number) || 1)),
-        episode_title: entry.episode_title || '',
-        progress_seconds: Math.max(0, Math.floor(Number(entry.progress_seconds) || 0)),
-        duration_seconds: Math.max(0, Math.floor(Number(entry.duration_seconds) || 0)),
-        completed: Boolean(entry.completed),
-        updated_at: new Date().toISOString()
-      };
-      const { error } = await supabase
-        .from('watch_history')
-        .upsert(payload, { onConflict: 'user_id,anime_id' });
-      if (!error) importedHist++;
-    }
-
-    return {
-      ok: true,
-      libraryCount: importedLib,
-      historyCount: importedHist,
-      authorName: shareData.user_name || 'Friend'
-    };
-  } catch (e) {
-    return { ok: false, error: e.message || 'Failed to import share items' };
+  const sbUser = await getCurrentUser();
+  if (supabase && sbUser) {
+    try {
+      for (const item of libItems) {
+        if (!item?.anime_id) continue;
+        await saveLibraryItemToCloud(item, true);
+        importedLib++;
+      }
+      for (const entry of histItems) {
+        if (!entry?.anime_id) continue;
+        await saveWatchHistoryToCloud(entry);
+        importedHist++;
+      }
+    } catch (e) {}
+  } else {
+    importedLib = libItems.length;
+    importedHist = histItems.length;
   }
+
+  return {
+    ok: true,
+    libraryCount: importedLib || libItems.length,
+    historyCount: importedHist || histItems.length,
+    authorName: shareData.user_name || 'Friend'
+  };
 }

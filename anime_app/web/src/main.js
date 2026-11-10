@@ -4237,18 +4237,22 @@ function initSyncModal() {
     try {
       const res = await generateSyncShareCode(state.watchlist, state.history);
       if (!res.ok) {
-        showToast(res.error || 'Could not generate code');
+        showToast(res.error === 'auth_required' ? 'Please sign in with Google to generate a code' : (res.error || 'Could not generate code'));
         return;
       }
 
       if (codeTokenText) codeTokenText.textContent = res.code;
       const shareUrl = `https://kuroanime-flax.vercel.app/sync?code=${encodeURIComponent(res.code)}`;
       if (linkInput) linkInput.value = shareUrl;
-      if (codeSection) codeSection.style.display = 'block';
+      if (codeSection) {
+        codeSection.style.display = 'block';
+        codeSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
 
-      showToast(`Share code ${res.code} created!`);
+      showToast(`Share code ${res.code} generated successfully!`);
     } catch (e) {
-      showToast('Failed to create share code');
+      console.error('[Sync Generation Error]', e);
+      showToast('Failed to generate sync code');
     } finally {
       if (btnGenerateLabel) btnGenerateLabel.textContent = 'Generate New Sync Code';
       btnGenerate.disabled = false;
