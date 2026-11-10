@@ -9628,3 +9628,614 @@ a.anime-card {
   justify-content: center;
   gap: 8px;
 }
+
+
+/* ==========================================================================
+   ESTIMATED ANIME SCHEDULE (PAKISTAN STANDARD TIME - PKT / UNSLOP DESIGN)
+   ========================================================================== */
+
+.schedule-section {
+  max-width: 1560px;
+  margin: 36px auto 16px;
+  padding: 0 24px;
+  position: relative;
+  z-index: 5;
+}
+
+.schedule-shell {
+  background: #0d1017;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 22px 24px 24px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.schedule-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.schedule-title-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.schedule-title-group .rail-title {
+  margin: 0;
+  font-size: 1.22rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+}
+
+.schedule-tz-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+  animation: pktPulseDot 2.2s infinite ease-in-out;
+}
+
+@keyframes pktPulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.88); }
+}
+
+.schedule-header-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.schedule-filter-group {
+  display: inline-flex;
+  align-items: center;
+  background: #080a0f;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.schedule-filter-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s cubic-bezier(0.22, 1, 0.36, 1), color 0.2s ease;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-filter-btn:hover {
+  color: #f1f5f9;
+}
+
+.schedule-filter-btn.active {
+  background: rgba(229, 9, 20, 0.18);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(229, 9, 20, 0.42);
+}
+
+.schedule-clock-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #080a0f;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.schedule-clock-box svg {
+  width: 14px;
+  height: 14px;
+  color: #e50914;
+  flex-shrink: 0;
+}
+
+/* 7-Day Selector Strip */
+.schedule-days-track {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(112px, 1fr));
+  gap: 8px;
+  margin-bottom: 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.schedule-days-track::-webkit-scrollbar {
+  display: none;
+}
+
+.schedule-day-btn {
+  appearance: none;
+  background: #131722;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+  transition:
+    background 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.schedule-day-btn:hover {
+  background: #181d2b;
+  border-color: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.schedule-day-btn.active {
+  background: linear-gradient(180deg, rgba(229, 9, 20, 0.2) 0%, rgba(229, 9, 20, 0.06) 100%);
+  border-color: rgba(229, 9, 20, 0.65);
+  box-shadow: 0 8px 20px rgba(229, 9, 20, 0.14);
+}
+
+.schedule-day-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 6px;
+}
+
+.schedule-day-name {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: 0.01em;
+}
+
+.schedule-day-btn.active .schedule-day-name {
+  color: #ffffff;
+}
+
+.schedule-today-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(229, 9, 20, 0.24);
+  color: #ff6b72;
+  border: 1px solid rgba(229, 9, 20, 0.4);
+}
+
+.schedule-day-date {
+  font-size: 0.73rem;
+  font-weight: 500;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-day-btn.active .schedule-day-date {
+  color: #e2e8f0;
+}
+
+.schedule-day-count {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #64748b;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-day-btn.active .schedule-day-count {
+  color: #fca5a5;
+}
+
+/* Schedule Cards Grid */
+.schedule-list-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.schedule-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  background: #131722;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    background 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.schedule-card:hover {
+  background: #181e2c;
+  border-color: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+/* Pakistan Time Column */
+.schedule-time-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 78px;
+  flex-shrink: 0;
+  padding-right: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-pkt-time {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.schedule-pkt-zone {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.schedule-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  flex-shrink: 0;
+}
+
+.schedule-card.is-video-unavailable .schedule-status-dot {
+  background: #f59e0b;
+}
+
+/* Poster Wrapper */
+.schedule-poster-wrap {
+  width: 50px;
+  height: 68px;
+  border-radius: 7px;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  background: #090b10;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.schedule-poster-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: filter 0.3s cubic-bezier(0.22, 1, 0.36, 1), transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ==========================================================================
+   BLURRY VISUAL STATE WHEN VIDEO IS NOT AVAILABLE (.is-video-unavailable)
+   ========================================================================== */
+.schedule-card.is-video-unavailable {
+  background: rgba(15, 18, 26, 0.78);
+  border-color: rgba(255, 255, 255, 0.045);
+}
+
+.schedule-card.is-video-unavailable .schedule-poster-img {
+  filter: blur(6px) saturate(0.42) brightness(0.55);
+  transform: scale(1.14);
+}
+
+.schedule-card.is-video-unavailable .schedule-blur-body {
+  filter: blur(2.4px);
+  opacity: 0.68;
+  transition: filter 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease;
+}
+
+.schedule-card.is-video-unavailable:hover .schedule-blur-body {
+  filter: blur(0px);
+  opacity: 0.94;
+}
+
+.schedule-poster-lock {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(9, 11, 16, 0.48);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  color: #f8fafc;
+  pointer-events: none;
+}
+
+.schedule-poster-lock svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.2;
+  color: #fbbf24;
+}
+
+/* Card Main Info */
+.schedule-info-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.schedule-anime-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.schedule-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.73rem;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-ep-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e2e8f0;
+  font-weight: 600;
+  font-size: 0.7rem;
+}
+
+.schedule-unavail-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.13);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.schedule-avail-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.32);
+  color: #34d399;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+/* Right Action Pill */
+.schedule-action-col {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.schedule-watch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(229, 9, 20, 0.16);
+  border: 1px solid rgba(229, 9, 20, 0.38);
+  color: #ffffff;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.18s ease;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-card:hover .schedule-watch-btn {
+  background: #e50914;
+  border-color: #e50914;
+}
+
+.schedule-watch-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.schedule-locked-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-locked-btn svg {
+  width: 12px;
+  height: 12px;
+  color: #f59e0b;
+}
+
+/* Footer Expand / Collapse Toggle */
+.schedule-footer-bar {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.schedule-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 0.74rem;
+  color: #94a3b8;
+}
+
+.schedule-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.schedule-toggle-more {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.schedule-toggle-more:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.schedule-toggle-more svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.schedule-toggle-more.expanded svg {
+  transform: rotate(180deg);
+}
+
+/* Skeletons */
+.schedule-day-skel {
+  height: 62px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.schedule-row-skel {
+  height: 88px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 960px) {
+  .schedule-list-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .schedule-section {
+    padding: 0 14px;
+    margin: 24px auto 12px;
+  }
+  .schedule-shell {
+    padding: 16px 14px;
+  }
+  .schedule-days-track {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+  }
+  .schedule-day-btn {
+    min-width: 104px;
+    flex-shrink: 0;
+  }
+  .schedule-card {
+    padding: 10px 11px;
+    gap: 10px;
+  }
+  .schedule-time-col {
+    min-width: 66px;
+    padding-right: 8px;
+  }
+  .schedule-pkt-time {
+    font-size: 0.78rem;
+  }
+  .schedule-watch-btn span,
+  .schedule-locked-btn span {
+    display: none;
+  }
+}

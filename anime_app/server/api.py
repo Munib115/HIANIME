@@ -551,7 +551,35 @@ def home():
     for k in rails:
         with_flags(rails[k])
     with_flags(spotlight)
-    return {"spotlight": spotlight, "rails": rails}
+    schedule_items = build_schedule_catalog()
+    return {"spotlight": spotlight, "rails": rails, "schedule": schedule_items}
+
+
+def build_schedule_catalog():
+    """Return airing & seasonal anime enriched with stream availability counts for the PKT Schedule."""
+    items = rows("""
+        SELECT a.anime_id, a.anilist_id, a.title, a.title_english, a.type, a.status,
+               a.episode_count, a.al_episodes, a.anilist_score, a.mal_score, a.season_year,
+               a.genres, a.duration,
+               COALESCE(NULLIF(a.poster_large,''), a.poster_url) AS poster,
+               (SELECT COUNT(DISTINCT s.episode_id)
+                FROM streams s
+                WHERE s.anime_id = a.anime_id
+                  AND s.embed_url IS NOT NULL AND s.embed_url != '') AS available_streams
+        FROM anime a
+        WHERE (a.status LIKE '%Currently Airing%' OR a.anilist_status='RELEASING' OR a.category='airing')
+          AND a.status NOT LIKE '%Finished%'
+          AND (a.anilist_status IS NULL OR a.anilist_status != 'FINISHED')
+          AND (a.title NOT LIKE '%Uncensored%')
+        ORDER BY a.anilist_popularity DESC NULLS LAST
+        LIMIT 70
+    """)
+    return with_flags(items)
+
+
+@router.get("/schedule")
+def get_schedule():
+    return {"timezone": "Asia/Karachi", "utc_offset": "+05:00", "items": build_schedule_catalog()}
 
 
 MUNIB_CARD_COLS = """anime_id, title, title_english, type, status, episode_count,

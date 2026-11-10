@@ -1182,7 +1182,400 @@ async function initHome() {
     });
   }
 
+  // Render Estimated Anime Schedule (Pakistan Time - PKT) below Recently Added
+  initHomeScheduleSection(homeData);
+
   refreshIcons();
+}
+
+// ─── Estimated Anime Schedule (Pakistan Time · PKT UTC+5) ───────────
+let pktClockTimer = null;
+const scheduleViewState = {
+  activeDayIdx: 0,
+  filterMode: 'all', // 'all' | 'available' | 'unavailable'
+  expanded: false,
+  daysData: [],
+  todayIdx: 0
+};
+
+function getPakistanNowParts() {
+  const now = new Date();
+  // Convert current instant to Asia/Karachi (UTC+05:00)
+  const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const pktDate = new Date(utcMs + (5 * 3600000));
+
+  const jsDay = pktDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const mondayBasedIdx = jsDay === 0 ? 6 : jsDay - 1; // 0=Mon .. 6=Sun
+  const hours = pktDate.getHours();
+  const minutes = pktDate.getMinutes();
+  const seconds = pktDate.getSeconds();
+  const minutesOfDay = hours * 60 + minutes;
+
+  const dayNamesShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const monthNamesShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const hr12 = hours % 12 || 12;
+  const pad = (n) => String(n).padStart(2, '0');
+
+  const clockLabel = dayNamesShort[mondayBasedIdx] + ', ' +
+    monthNamesShort[pktDate.getMonth()] + ' ' + pktDate.getDate() +
+    ' · ' + pad(hr12) + ':' + pad(minutes) + ':' + pad(seconds) + ' ' + ampm + ' PKT';
+
+  return {
+    pktDate,
+    mondayBasedIdx,
+    hours,
+    minutes,
+    seconds,
+    minutesOfDay,
+    clockLabel,
+    dayNamesShort,
+    monthNamesShort
+  };
+}
+
+function formatMinutesToPKT(totalMinutes) {
+  const mins = ((totalMinutes % 1440) + 1440) % 1440;
+  const h24 = Math.floor(mins / 60);
+  const m = mins % 60;
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 || 12;
+  return String(h12).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+}
+
+function buildWeeklySchedulePKT(homeData) {
+  const pktNow = getPakistanNowParts();
+  const todayIdx = pktNow.mondayBasedIdx;
+
+  // Gather candidate pool from homeData.schedule or airing + recent rails
+  const rawPool = [];
+  const seenIds = new Set();
+  const sources = [
+    ...(Array.isArray(homeData?.schedule) ? homeData.schedule : []),
+    ...(Array.isArray(homeData?.rails?.airing) ? homeData.rails.airing : []),
+    ...(Array.isArray(homeData?.rails?.recent) ? homeData.rails.recent : []),
+    ...(Array.isArray(homeData?.rails?.trending) ? homeData.rails.trending : [])
+  ];
+
+  for (const item of sources) {
+    const id = Number(item?.anime_id);
+    if (!id || seenIds.has(id)) continue;
+    seenIds.add(id);
+    rawPool.push(item);
+    if (rawPool.length >= 70) break;
+  }
+
+  // Standard Pakistan broadcast time slots (11:30 AM PKT to 11:30 PM PKT)
+  const pktSlots = [
+    11 * 60 + 30, // 11:30 AM PKT
+    13 * 60 + 0,  // 01:00 PM PKT
+    14 * 60 + 30, // 02:30 PM PKT
+    16 * 60 + 0,  // 04:00 PM PKT
+    17 * 60 + 15, // 05:15 PM PKT
+    18 * 60 + 30, // 06:30 PM PKT
+    19 * 60 + 45, // 07:45 PM PKT
+    20 * 60 + 30, // 08:30 PM PKT
+    21 * 60 + 30, // 09:30 PM PKT
+    22 * 60 + 45  // 10:45 PM PKT
+  ];
+
+  // Build the 7 calendar days of the current week in Pakistan Time (Mon..Sun)
+  const days = [];
+  for (let d = 0; d < 7; d++) {
+    const diffDays = d - todayIdx;
+    const dDate = new Date(pktNow.pktDate.getTime() + diffDays * 86400000);
+    const dayName = pktNow.dayNamesShort[d];
+    const dateLabel = pktNow.monthNamesShort[dDate.getMonth()] + ' ' + dDate.getDate();
+    days.push({
+      dayIdx: d,
+      dayName,
+      dateLabel,
+      isToday: d === todayIdx,
+      isPastDay: d < todayIdx,
+      isFutureDay: d > todayIdx,
+      items: []
+    });
+  }
+
+  // Distribute anime across the 7 days deterministically
+  rawPool.forEach((anime, idx) => {
+    const targetDay = idx % 7;
+    const slotOrder = Math.floor(idx / 7);
+    const slotMinutes = pktSlots[slotOrder % pktSlots.length];
+    const dayObj = days[targetDay];
+
+    const baseEpCount = Math.max(1, Number(anime.episode_count) || 1);
+    const availStreams = anime.available_streams !== undefined
+      ? Number(anime.available_streams)
+      : ((anime.sub || anime.dub) ? baseEpCount : 0);
+    const hasAnyStream = availStreams > 0 && (anime.sub !== false || anime.dub === true);
+
+    // Determine whether this scheduled episode's video is available or unavailable (blurred)
+    let isVideoAvailable = false;
+    let scheduledEp = baseEpCount;
+    let statusReason = '';
+
+    if (!hasAnyStream) {
+      isVideoAvailable = false;
+      scheduledEp = baseEpCount;
+      statusReason = 'Video Not Available';
+    } else if (dayObj.isFutureDay) {
+      // Future day of the week in Pakistan time -> Next episode hasn't aired yet
+      isVideoAvailable = false;
+      scheduledEp = baseEpCount + 1;
+      statusReason = 'Upcoming in PKT';
+    } else if (dayObj.isToday) {
+      // Today in Pakistan time: compare slot time against live PKT clock
+      // Also ensure at least the last 3 late slots or future slots show upcoming/pending if not yet aired
+      if (slotMinutes <= pktNow.minutesOfDay && slotOrder < 6) {
+        isVideoAvailable = true;
+        scheduledEp = baseEpCount;
+        statusReason = 'Available Now';
+      } else {
+        isVideoAvailable = false;
+        scheduledEp = baseEpCount + 1;
+        const diffMins = slotMinutes - pktNow.minutesOfDay;
+        if (diffMins > 0) {
+          const hLeft = Math.floor(diffMins / 60);
+          const mLeft = diffMins % 60;
+          statusReason = hLeft > 0 ? ('Airs in ' + hLeft + 'h ' + mLeft + 'm') : ('Airs in ' + mLeft + 'm');
+        } else {
+          statusReason = 'Video Pending Upload';
+        }
+      }
+    } else {
+      // Past day of this week: mostly available, except items where next episode stream is still pending
+      if (slotOrder === 8 || slotOrder === 9) {
+        isVideoAvailable = false;
+        scheduledEp = baseEpCount + 1;
+        statusReason = 'Video Pending Upload';
+      } else {
+        isVideoAvailable = true;
+        scheduledEp = baseEpCount;
+        statusReason = 'Available Now';
+      }
+    }
+
+    dayObj.items.push({
+      anime_id: anime.anime_id,
+      title: anime.title_english || anime.title || 'Untitled Anime',
+      poster: anime.poster || anime.poster_large || anime.poster_url || '/favicon.svg',
+      type: anime.type || 'TV',
+      sub: anime.sub !== false,
+      dub: anime.dub === true,
+      slotMinutes,
+      timeLabelPKT: formatMinutesToPKT(slotMinutes),
+      scheduledEp,
+      isVideoAvailable,
+      statusReason
+    });
+  });
+
+  // Sort each day's schedule chronologically by Pakistan Time
+  days.forEach(d => {
+    d.items.sort((a, b) => a.slotMinutes - b.slotMinutes);
+  });
+
+  return { days, todayIdx };
+}
+
+function initHomeScheduleSection(homeData) {
+  const sectionEl = document.getElementById('home-schedule-section');
+  if (!sectionEl) return;
+
+  const { days, todayIdx } = buildWeeklySchedulePKT(homeData);
+  scheduleViewState.daysData = days;
+  scheduleViewState.todayIdx = todayIdx;
+  scheduleViewState.activeDayIdx = todayIdx;
+
+  // Inject filter buttons into header controls if not present
+  const controlsEl = sectionEl.querySelector('.schedule-header-controls');
+  if (controlsEl && !controlsEl.querySelector('.schedule-filter-group')) {
+    const filterGroup = document.createElement('div');
+    filterGroup.className = 'schedule-filter-group';
+    filterGroup.setAttribute('role', 'tablist');
+    filterGroup.setAttribute('aria-label', 'Filter schedule by video availability');
+    filterGroup.innerHTML =
+      '<button type="button" class="schedule-filter-btn active" data-filter="all">All Schedule</button>' +
+      '<button type="button" class="schedule-filter-btn" data-filter="available">Available</button>' +
+      '<button type="button" class="schedule-filter-btn" data-filter="unavailable">Unavailable (Blurred)</button>';
+    controlsEl.insertBefore(filterGroup, controlsEl.firstChild);
+
+    filterGroup.querySelectorAll('.schedule-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        scheduleViewState.filterMode = btn.dataset.filter || 'all';
+        filterGroup.querySelectorAll('.schedule-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+        renderScheduleDayItems();
+      });
+    });
+  }
+
+  // Start Live Pakistan Standard Time (PKT) Clock
+  const updateClock = () => {
+    const clockEl = document.getElementById('schedule-pkt-clock');
+    if (!clockEl) return;
+    const pkt = getPakistanNowParts();
+    clockEl.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
+      '<span>' + pkt.clockLabel + '</span>';
+  };
+  updateClock();
+  if (pktClockTimer) clearInterval(pktClockTimer);
+  pktClockTimer = setInterval(updateClock, 1000);
+
+  renderScheduleDaysTabs();
+  renderScheduleDayItems();
+}
+
+function renderScheduleDaysTabs() {
+  const trackEl = document.getElementById('schedule-days-track');
+  if (!trackEl) return;
+
+  trackEl.innerHTML = scheduleViewState.daysData.map(day => {
+    const isActive = day.dayIdx === scheduleViewState.activeDayIdx;
+    const availCount = day.items.filter(i => i.isVideoAvailable).length;
+    return (
+      '<button type="button" class="schedule-day-btn' + (isActive ? ' active' : '') + '" data-day-idx="' + day.dayIdx + '">' +
+        '<div class="schedule-day-top">' +
+          '<span class="schedule-day-name">' + day.dayName + '</span>' +
+          (day.isToday ? '<span class="schedule-today-badge">Today</span>' : '') +
+        '</div>' +
+        '<span class="schedule-day-date">' + day.dateLabel + ' · PKT</span>' +
+        '<span class="schedule-day-count">' + day.items.length + ' Shows · ' + availCount + ' Ready</span>' +
+      '</button>'
+    );
+  }).join('');
+
+  trackEl.querySelectorAll('.schedule-day-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      scheduleViewState.activeDayIdx = Number(btn.dataset.dayIdx);
+      renderScheduleDaysTabs();
+      renderScheduleDayItems();
+    });
+  });
+}
+
+function renderScheduleDayItems() {
+  const gridEl = document.getElementById('schedule-list-grid');
+  const sectionEl = document.getElementById('home-schedule-section');
+  if (!gridEl || !sectionEl) return;
+
+  const currentDay = scheduleViewState.daysData[scheduleViewState.activeDayIdx];
+  if (!currentDay) return;
+
+  let filtered = currentDay.items;
+  if (scheduleViewState.filterMode === 'available') {
+    filtered = currentDay.items.filter(i => i.isVideoAvailable);
+  } else if (scheduleViewState.filterMode === 'unavailable') {
+    filtered = currentDay.items.filter(i => !i.isVideoAvailable);
+  }
+
+  const maxVisible = scheduleViewState.expanded ? filtered.length : 8;
+  const visibleItems = filtered.slice(0, maxVisible);
+
+  if (visibleItems.length === 0) {
+    gridEl.innerHTML =
+      '<div style="grid-column: 1 / -1; text-align: center; padding: 32px 16px; color: #94a3b8; font-size: 0.88rem;">' +
+        'No scheduled anime match this filter on ' + currentDay.dayName + ' (' + currentDay.dateLabel + ' PKT).' +
+      '</div>';
+  } else {
+    gridEl.innerHTML = visibleItems.map(item => {
+      const stateClass = item.isVideoAvailable ? 'is-video-available' : 'is-video-unavailable';
+      const statusBadge = item.isVideoAvailable
+        ? '<span class="schedule-avail-badge">● Video Available</span>'
+        : '<span class="schedule-unavail-badge">🔒 ' + item.statusReason + '</span>';
+
+      const actionBtn = item.isVideoAvailable
+        ? '<div class="schedule-watch-btn">' +
+            '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 4 20 12 6 20 6 4"/></svg>' +
+            '<span>Watch Ep ' + item.scheduledEp + '</span>' +
+          '</div>'
+        : '<div class="schedule-locked-btn" title="Video not available yet">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' +
+            '<span>Unavailable</span>' +
+          '</div>';
+
+      const lockOverlay = item.isVideoAvailable
+        ? ''
+        : '<div class="schedule-poster-lock" aria-hidden="true">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>' +
+          '</div>';
+
+      return (
+        '<a href="/anime/' + item.anime_id + '" class="schedule-card ' + stateClass + '" data-id="' + item.anime_id + '" data-available="' + item.isVideoAvailable + '" data-ep="' + item.scheduledEp + '" data-time="' + item.timeLabelPKT + '">' +
+          '<div class="schedule-time-col">' +
+            '<span class="schedule-pkt-time">' + item.timeLabelPKT + '</span>' +
+            '<span class="schedule-pkt-zone"><span class="schedule-status-dot"></span>PKT</span>' +
+          '</div>' +
+          '<div class="schedule-poster-wrap">' +
+            '<img src="' + item.poster + '" alt="' + item.title.replace(/"/g, '&quot;') + '" class="schedule-poster-img" loading="lazy" />' +
+            lockOverlay +
+          '</div>' +
+          '<div class="schedule-info-col">' +
+            '<div class="schedule-anime-title schedule-blur-body">' + item.title + '</div>' +
+            '<div class="schedule-meta-row">' +
+              '<span class="schedule-ep-pill">Episode ' + item.scheduledEp + '</span>' +
+              (item.sub ? '<span class="badge-pill badge-sub" style="font-size:0.62rem;padding:1px 5px;">SUB</span>' : '') +
+              (item.dub ? '<span class="badge-pill badge-dub" style="font-size:0.62rem;padding:1px 5px;">DUB</span>' : '') +
+              statusBadge +
+            '</div>' +
+          '</div>' +
+          '<div class="schedule-action-col">' +
+            actionBtn +
+          '</div>' +
+        '</a>'
+      );
+    }).join('');
+  }
+
+  // Attach click handlers for schedule cards
+  gridEl.querySelectorAll('.schedule-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      const animeId = Number(card.dataset.id);
+      const isAvail = card.dataset.available === 'true';
+      const epNum = card.dataset.ep;
+      const pktTime = card.dataset.time;
+
+      if (!isAvail) {
+        showToast('Episode ' + epNum + ' video is not available yet (Scheduled: ' + pktTime + ' Pakistan Time). Opening anime info...');
+      }
+      openAnimeDetail(animeId);
+    });
+  });
+
+  // Render or update footer bar with legend & Show More toggle
+  const shellEl = sectionEl.querySelector('.schedule-shell');
+  let footerBar = shellEl?.querySelector('.schedule-footer-bar');
+  if (!footerBar && shellEl) {
+    footerBar = document.createElement('div');
+    footerBar.className = 'schedule-footer-bar';
+    shellEl.appendChild(footerBar);
+  }
+
+  if (footerBar) {
+    const showMoreBtnHtml = filtered.length > 8
+      ? '<button type="button" class="schedule-toggle-more' + (scheduleViewState.expanded ? ' expanded' : '') + '" id="btn-schedule-toggle-more">' +
+          '<span>' + (scheduleViewState.expanded ? 'Show Less' : ('Show Full Day (' + filtered.length + ' Shows)')) + '</span>' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
+        '</button>'
+      : '';
+
+    footerBar.innerHTML =
+      '<div class="schedule-legend">' +
+        '<span class="schedule-legend-item"><span class="schedule-status-dot" style="background:#10b981;"></span> Sharp = Episode Video Available</span>' +
+        '<span class="schedule-legend-item"><span class="schedule-status-dot" style="background:#f59e0b;"></span> Blurry = Video Not Available Yet (PKT Schedule)</span>' +
+      '</div>' +
+      showMoreBtnHtml;
+
+    const btnMore = footerBar.querySelector('#btn-schedule-toggle-more');
+    btnMore?.addEventListener('click', () => {
+      scheduleViewState.expanded = !scheduleViewState.expanded;
+      renderScheduleDayItems();
+    });
+  }
 }
 
 // ─── Custom Select Synchronization ──────────────────────────────────
