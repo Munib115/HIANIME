@@ -8960,3 +8960,10 @@ body {
     flex-shrink: 0;
   }
 }
+
+/* ─── Semantic <a> Anchor Card Normalization (Crawlable SEO Links) ─── */
+a.anime-card {
+  text-decoration: none !important;
+  color: inherit !important;
+  display: block;
+}

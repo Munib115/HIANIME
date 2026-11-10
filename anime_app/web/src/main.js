@@ -203,7 +203,7 @@ function showView(viewId, { pushHistory = true } = {}) {
     renderContinueWatchingRail();
     const railsContainer = document.getElementById('rails-container');
     if (railsContainer && railsContainer.children.length === 0) {
-      initHome();
+      handleInitialRoute();
     }
   }
 
@@ -215,15 +215,32 @@ function showView(viewId, { pushHistory = true } = {}) {
     btn.classList.toggle('active', btn.dataset.tab === state.currentTab);
   });
 
-  // Push browser history state so hardware/browser Back button never hits a black screen
+  // Push semantic crawlable URL to browser history state
   if (pushHistory && !isHandlingPopState) {
     try {
+      let targetPath = '/';
+      if (viewId === 'view-browse') {
+        targetPath = state.browseGenre ? `/browse?genre=${encodeURIComponent(state.browseGenre)}` : '/browse';
+      } else if (viewId === 'view-search') {
+        const searchInput = document.getElementById('search-input-field');
+        const q = searchInput?.value?.trim();
+        targetPath = q ? `/search?q=${encodeURIComponent(q)}` : '/search';
+      } else if (viewId === 'view-watchlist') {
+        targetPath = '/watchlist';
+      } else if (viewId === 'view-detail' && state.activeAnimeId) {
+        targetPath = `/anime/${state.activeAnimeId}`;
+      } else if (viewId === 'view-watch' && state.activeAnimeId) {
+        const ep = state.activeEpisodes[state.activeEpisodeIndex];
+        const epNum = ep ? (ep.episode_number || state.activeEpisodeIndex + 1) : 1;
+        targetPath = `/watch/${state.activeAnimeId}?ep=${epNum}`;
+      }
+
       const currentState = window.history.state;
-      if (!currentState || currentState.viewId !== viewId || currentState.animeId !== state.activeAnimeId) {
+      if (!currentState || currentState.viewId !== viewId || currentState.animeId !== state.activeAnimeId || window.location.pathname !== targetPath) {
         window.history.pushState(
           { viewId, tab: state.currentTab, animeId: state.activeAnimeId },
           '',
-          window.location.pathname + window.location.search
+          targetPath
         );
       }
     } catch (e) {}
@@ -231,24 +248,27 @@ function showView(viewId, { pushHistory = true } = {}) {
 }
 
 window.addEventListener('popstate', (e) => {
-  const currentView = getActiveViewId();
   isHandlingPopState = true;
   try {
-    if (currentView === 'view-watch') {
-      if (state.playerEnteredFrom === 'home') {
-        switchTab('home');
-      } else {
-        showView('view-detail', { pushHistory: false });
-      }
-    } else if (currentView === 'view-detail') {
-      switchTab(state.currentTab || 'home');
-    } else if (e.state && e.state.viewId) {
-      if (e.state.viewId === 'view-home') {
-        switchTab('home');
-      } else {
-        showView(e.state.viewId, { pushHistory: false });
-      }
-    } else if (currentView !== 'view-home') {
+    const path = window.location.pathname;
+    const animeMatch = path.match(/^\/anime\/(\d+)/);
+    const watchMatch = path.match(/^\/watch\/(\d+)/);
+
+    if (animeMatch) {
+      const id = parseInt(animeMatch[1], 10);
+      openAnimeDetail(id, false);
+    } else if (watchMatch) {
+      const id = parseInt(watchMatch[1], 10);
+      const searchParams = new URLSearchParams(window.location.search);
+      const epNum = parseInt(searchParams.get('ep') || '1', 10);
+      openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum);
+    } else if (path === '/browse') {
+      switchTab('browse');
+    } else if (path === '/search') {
+      switchTab('search');
+    } else if (path === '/watchlist') {
+      switchTab('watchlist');
+    } else {
       switchTab('home');
     }
   } finally {
@@ -260,15 +280,35 @@ function switchTab(tabName) {
   state.currentTab = tabName || 'home';
   if (state.currentTab === 'home') {
     showView('view-home');
+    updatePageSeo({
+      title: 'KuroAnime — Stream Anime in Sub & Dub',
+      description: 'Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface.',
+      path: '/'
+    });
   } else if (state.currentTab === 'browse') {
     showView('view-browse');
     loadBrowse();
+    updatePageSeo({
+      title: 'Explore Anime Catalog in Sub & Dub | KuroAnime',
+      description: 'Browse popular anime series and movies filtered by genres, format, and status in Japanese Sub and English Dub.',
+      path: '/browse'
+    });
   } else if (state.currentTab === 'search') {
     showView('view-search');
     setTimeout(() => document.getElementById('search-input-field')?.focus(), 150);
+    updatePageSeo({
+      title: 'Search Anime | KuroAnime',
+      description: 'Search anime by English, Romaji, or Japanese title to stream episodes in Sub and Dub.',
+      path: '/search'
+    });
   } else if (state.currentTab === 'watchlist') {
     showView('view-watchlist');
     renderWatchlist();
+    updatePageSeo({
+      title: 'My Collection & Watchlist | KuroAnime',
+      description: 'Your saved anime watchlist and continue watching progress.',
+      path: '/watchlist'
+    });
   } else {
     state.currentTab = 'home';
     showView('view-home');
@@ -668,6 +708,70 @@ function renderPlayerFrameSkeleton() {
 }
 // ─── End YouTube-Style Unslop Skeleton Renderers ────────────────────
 
+// ─── Dynamic SEO Metadata, Canonical & JSON-LD Updater ──────────────
+function updatePageSeo(options = {}) {
+  const {
+    title = 'KuroAnime — Stream Anime in Sub & Dub',
+    description = 'Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface.',
+    image = 'https://kuroanime-flax.vercel.app/goku-banner.jpg',
+    path = window.location.pathname || '/',
+    type = 'website',
+    schema = null
+  } = options;
+
+  document.title = title;
+
+  let descMeta = document.querySelector('meta[name="description"]');
+  if (descMeta) {
+    descMeta.setAttribute('content', description);
+  }
+
+  const canonicalUrl = `https://kuroanime-flax.vercel.app${path}`;
+  let canonEl = document.getElementById('kuro-canonical') || document.querySelector('link[rel="canonical"]');
+  if (canonEl) {
+    canonEl.setAttribute('href', canonicalUrl);
+  }
+
+  const setMetaProp = (id, prop, val) => {
+    let el = document.getElementById(id) || document.querySelector(`meta[property="${prop}"]`);
+    if (el) el.setAttribute('content', val);
+  };
+  setMetaProp('kuro-og-type', 'og:type', type);
+  setMetaProp('kuro-og-url', 'og:url', canonicalUrl);
+  setMetaProp('kuro-og-title', 'og:title', title);
+  setMetaProp('kuro-og-desc', 'og:description', description);
+  setMetaProp('kuro-og-image', 'og:image', image);
+
+  const setMetaNamed = (id, name, val) => {
+    let el = document.getElementById(id) || document.querySelector(`meta[name="${name}"]`);
+    if (el) el.setAttribute('content', val);
+  };
+  setMetaNamed('kuro-tw-url', 'twitter:url', canonicalUrl);
+  setMetaNamed('kuro-tw-title', 'twitter:title', title);
+  setMetaNamed('kuro-tw-desc', 'twitter:description', description);
+  setMetaNamed('kuro-tw-image', 'twitter:image', image);
+
+  let schemaScript = document.getElementById('kuro-schema-json');
+  if (schemaScript) {
+    if (schema) {
+      schemaScript.textContent = JSON.stringify(schema, null, 2);
+    } else {
+      schemaScript.textContent = JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "KuroAnime",
+        "url": "https://kuroanime-flax.vercel.app/",
+        "description": "Stream thousands of anime in Sub and Dub with verified fast servers.",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "https://kuroanime-flax.vercel.app/search?q={search_term_string}",
+          "query-input": "required name=search_term_string"
+        }
+      }, null, 2);
+    }
+  }
+}
+
 // ─── Card Renderer Component ────────────────────────────────────────
 function renderAnimeCard(anime) {
   const poster = anime.poster || anime.poster_large || anime.poster_url || '';
@@ -677,9 +781,9 @@ function renderAnimeCard(anime) {
   const inWatchlist = isWatchlisted(anime.anime_id);
 
   return `
-    <div class="anime-card" data-id="${anime.anime_id}">
+    <a class="anime-card" href="/anime/${anime.anime_id}" data-id="${anime.anime_id}">
       <div class="card-poster-wrapper">
-        <img class="card-poster-img" src="${poster}" alt="${anime.title}" loading="lazy" decoding="async" onload="this.classList.add('is-loaded')" />
+        <img class="card-poster-img" src="${poster}" alt="${anime.title} anime poster" loading="lazy" decoding="async" onload="this.classList.add('is-loaded')" onerror="this.onerror=null;this.src='/favicon.svg';this.classList.add('is-fallback')" />
         <div class="card-top-badges">
           ${hasSub ? '<span class="pill-sub">SUB</span>' : ''}
           ${hasDub ? '<span class="pill-dub">DUB</span>' : ''}
@@ -692,7 +796,7 @@ function renderAnimeCard(anime) {
       </div>
       <div class="card-title">${anime.title}</div>
       <div class="card-subtitle">${anime.type || 'TV'}${anime.season_year ? ` • ${anime.season_year}` : ''}</div>
-    </div>
+    </a>
   `;
 }
 
@@ -1022,7 +1126,11 @@ async function initHome() {
 
     // Attach card clicks
     railsContainer.querySelectorAll('.anime-card').forEach(card => {
-      card.addEventListener('click', () => openAnimeDetail(Number(card.dataset.id)));
+      card.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        openAnimeDetail(Number(card.dataset.id));
+      });
     });
 
     railsContainer.querySelectorAll('.rail-see-all').forEach(btn => {
@@ -1204,7 +1312,11 @@ async function fetchBrowseResults() {
 
   grid.innerHTML = res.results.map(renderAnimeCard).join('');
   grid.querySelectorAll('.anime-card').forEach(card => {
-    card.addEventListener('click', () => openAnimeDetail(Number(card.dataset.id)));
+    card.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        openAnimeDetail(Number(card.dataset.id));
+      });
   });
 
   const pagination = document.getElementById('browse-pagination');
@@ -1251,7 +1363,11 @@ async function performSearch(query) {
 
   resultsGrid.innerHTML = res.results.map(renderAnimeCard).join('');
   resultsGrid.querySelectorAll('.anime-card').forEach(card => {
-    card.addEventListener('click', () => openAnimeDetail(Number(card.dataset.id)));
+    card.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        openAnimeDetail(Number(card.dataset.id));
+      });
   });
   refreshIcons();
 }
@@ -1298,6 +1414,37 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
 
   state.activeAnimeData = anime;
   state.activeEpisodes = epsData?.episodes || [];
+
+  // Update dynamic SEO title, description, canonical link, Open Graph and Schema.org TVSeries/Movie
+  const animeTitle = anime.title_english || anime.title || 'Anime';
+  const scoreVal = anime.anilist_score ? (anime.anilist_score / 10).toFixed(1) : (anime.mal_score || 'N/A');
+  const synopsisClean = (anime.synopsis || anime.al_description || '').replace(/<[^>]*>?/gm, '').trim();
+  const metaDesc = synopsisClean.length > 155
+    ? synopsisClean.slice(0, 152) + '...'
+    : (synopsisClean || `Watch ${animeTitle} in Sub or Dub on KuroAnime. Episodes, ratings, and My List.`);
+
+  updatePageSeo({
+    title: `Watch ${animeTitle} Sub & Dub | KuroAnime`,
+    description: metaDesc,
+    image: anime.banner_image || anime.poster_large || anime.poster || 'https://kuroanime-flax.vercel.app/goku-banner.jpg',
+    path: `/anime/${anime.anime_id}`,
+    type: 'video.tv_show',
+    schema: {
+      "@context": "https://schema.org",
+      "@type": anime.type === 'Movie' ? 'Movie' : 'TVSeries',
+      "name": animeTitle,
+      "description": synopsisClean,
+      "image": anime.poster || anime.banner_image,
+      "numberOfEpisodes": anime.episode_count || anime.al_episodes || undefined,
+      "inLanguage": ["Japanese", "English"],
+      "aggregateRating": scoreVal !== 'N/A' ? {
+        "@type": "AggregateRating",
+        "ratingValue": String(scoreVal),
+        "bestRating": "10",
+        "worstRating": "1"
+      } : undefined
+    }
+  });
 
   // Resolve user's saved watch history for this anime so resume works accurately
   const savedHist = state.history.find(h => Number(h.anime_id) === Number(animeId));
@@ -2953,7 +3100,11 @@ function renderWatchlist() {
 
   grid.innerHTML = items.map(renderAnimeCard).join('');
   grid.querySelectorAll('.anime-card').forEach(card => {
-    card.addEventListener('click', () => openAnimeDetail(Number(card.dataset.id)));
+    card.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        openAnimeDetail(Number(card.dataset.id));
+      });
   });
   refreshIcons();
 }
@@ -3763,6 +3914,45 @@ function initUserMenuAndSettings() {
 
   // Initialize display
   renderAuthState();
+}
+
+// ─── Initial URL Route Dispatcher ────────────────────────────────────
+function handleInitialRoute() {
+  const path = window.location.pathname;
+  const animeMatch = path.match(/^\/anime\/(\d+)/);
+  const watchMatch = path.match(/^\/watch\/(\d+)/);
+
+  if (animeMatch) {
+    const id = parseInt(animeMatch[1], 10);
+    openAnimeDetail(id, false);
+  } else if (watchMatch) {
+    const id = parseInt(watchMatch[1], 10);
+    const searchParams = new URLSearchParams(window.location.search);
+    const epNum = parseInt(searchParams.get('ep') || '1', 10);
+    openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum);
+  } else if (path === '/browse') {
+    switchTab('browse');
+    const searchParams = new URLSearchParams(window.location.search);
+    const genre = searchParams.get('genre');
+    if (genre) {
+      state.browseGenre = genre;
+      const chip = document.querySelector(`.chip-btn[data-genre="${genre}"]`);
+      if (chip) chip.click();
+    }
+  } else if (path === '/search') {
+    switchTab('search');
+    const searchParams = new URLSearchParams(window.location.search);
+    const q = searchParams.get('q');
+    if (q) {
+      const input = document.getElementById('search-input-field');
+      if (input) input.value = q;
+      performSearch(q);
+    }
+  } else if (path === '/watchlist') {
+    switchTab('watchlist');
+  } else {
+    initHome();
+  }
 }
 
   // Init App
