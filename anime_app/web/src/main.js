@@ -52,7 +52,9 @@ import {
   LogOut,
   Trash2,
   Share2,
-  Copy
+  Copy,
+  ChevronDown,
+  Info
 } from 'lucide';
 
 // ─── Global State & Storage ─────────────────────────────────────────
@@ -101,7 +103,7 @@ function refreshIcons() {
       Home, Compass, Search, Bookmark, Play, Star, ArrowLeft,
       Layers, Volume2, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
       ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download, Plus,
-      User, Settings, LogOut, Trash2, Share2, Copy
+      User, Settings, LogOut, Trash2, Share2, Copy, ChevronDown, Info
     }
   });
 }
@@ -1696,7 +1698,7 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
         <!-- SEO Streaming Guide & FAQ Section -->
         <section class="kuro-faq-section" aria-label="Streaming Guide and FAQs">
           <div class="section-label-row">
-            <span class="section-label"><i data-lucide="help-circle"></i> Streaming Guide &amp; FAQs</span>
+            <span class="section-label"><i data-lucide="info"></i> Streaming Guide &amp; FAQs</span>
           </div>
           <div class="kuro-faq-grid">
             <details class="kuro-faq-item" open>
