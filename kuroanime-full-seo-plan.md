@@ -62,9 +62,9 @@ Tools: Google Search Console (free), Google Analytics 4 (free), Google PageSpeed
 
 ---
 
-## 4. Phase 1 — Technical SEO Implementation
+## 4. Phase 1 — Technical SEO Implementation (COMPLETED & DEPLOYED)
 
-### 4.1 Real URLs & Semantic Anchor Tags
+### 4.1 Real URLs & Semantic Anchor Tags [DONE]
 - Every anime card rendered on Home, Browse, and Search is an `<a class="anime-card" href="/anime/${anime.anime_id}">`.
 - SPA navigation intercepts left-clicks with `e.preventDefault()` to smoothly transition views without page reload, while allowing web crawlers, middle-clicks, and right-clicks ("Open in new tab") to work naturally.
 - Client-side route parser in `main.js`:
@@ -74,29 +74,16 @@ Tools: Google Search Console (free), Google Analytics 4 (free), Google PageSpeed
   - `/search` -> Search View
   - `/watchlist` -> My List View
 
-### 4.2 Dynamic Metadata, Open Graph & JSON-LD
+### 4.2 Dynamic Metadata, Open Graph & JSON-LD [DONE]
 Every route dynamically updates:
 - `<title>`: Under 60 characters (e.g. `Watch One Piece Sub & Dub | KuroAnime`).
 - `<meta name="description">`: 140–160 characters describing the anime, Sub/Dub availability, and streaming options.
 - `<link rel="canonical">`: Explicitly set to `https://kuroanime-flax.vercel.app/anime/:id`.
 - Open Graph tags (`og:title`, `og:description`, `og:image`, `og:url`, `og:type="video.tv_show"`).
 - Twitter Card (`summary_large_image`).
-- Schema.org JSON-LD:
-```json
-{
-  "@context": "https://schema.org",
-  "@type": "TVSeries",
-  "name": "One Piece",
-  "numberOfEpisodes": 1100,
-  "inLanguage": ["Japanese", "English"],
-  "aggregateRating": {
-    "@type": "AggregateRating",
-    "ratingValue": "8.7"
-  }
-}
-```
+- Multi-Entity Schema.org Graph (`WebSite`, `TVSeries`/`Movie`, `BreadcrumbList`, and `FAQPage`).
 
-### 4.3 robots.txt
+### 4.3 robots.txt [DONE]
 Located at `anime_app/web/public/robots.txt`:
 ```
 # KuroAnime Search Engine Directives
@@ -121,56 +108,81 @@ Disallow: /
 Sitemap: https://kuroanime-flax.vercel.app/sitemap.xml
 ```
 
-### 4.4 Automated Database-Driven Sitemap (`generate_sitemap.py`)
+### 4.4 Automated Database-Driven Sitemap (`generate_sitemap.py`) [DONE]
 - Automatically queries [`hianime.db`](file:///c:/Users/Munib%20Raza/OneDrive/Desktop/HIANIME/hianime.db) to extract all active anime titles, genres, and static routes.
-- Outputs a valid XML sitemap directly into `anime_app/web/public/sitemap.xml` during build.
+- Generates 6,188 URLs directly into `anime_app/web/public/sitemap.xml` and `anime_app/web/dist/sitemap.xml`.
 - Built-in URL structure:
   - Homepage (`priority: 1.0`, `changefreq: daily`)
   - Browse & Search (`priority: 0.8`, `changefreq: daily`)
-  - Genre pages (`priority: 0.8`, `changefreq: weekly`)
-  - All anime titles `/anime/{id}` (`priority: 0.7`, `changefreq: weekly`)
+  - 100 Genre landing pages `/browse?genre={genre}` (`priority: 0.8`, `changefreq: weekly`)
+  - 6,085 anime titles `/anime/{id}` (`priority: 0.7`, `changefreq: weekly`)
 
-### 4.5 Vercel Routing Configuration (`vercel.json`)
+### 4.5 Vercel Routing Configuration (`vercel.json`) [DONE]
 - Preserves `/robots.txt` and `/sitemap.xml` static file delivery.
 - Routes `/api/*` to the Python FastAPI backend.
 - Rewrites all other user routes (`/anime/*`, `/browse`, `/search`) to `/index.html` for clean client-side hydration.
 
-### 4.6 Image Stability & Core Web Vitals
+### 4.6 Image Stability & Core Web Vitals [DONE]
 - Fallback handler `onerror="this.onerror=null;this.src='/favicon.svg';this.classList.add('is-fallback')"` on all poster images.
 - Native `loading="lazy"` and `decoding="async"` on all offscreen images.
 - GPU-composited skeleton loaders preventing Layout Shift (CLS score < 0.05).
 
 ---
 
-## 5. Phase 2 — Keyword Strategy & Catalog Discoverability (Days 15–45)
+## 5. Phase 2 — Keyword Strategy, Rich Entities & Catalog Discoverability (COMPLETED & DEPLOYED)
 
-### 5.1 Keyword Targeting
-Focus on high-intent streaming search terms:
-- Primary:
+### 5.1 On-Page Keyword Targeting & Headings [DONE]
+- Primary heading structure:
+  - `<h1>${anime.title}</h1>`
+  - `<p class="detail-seo-subheading">Watch ${anime.title} Online in English Sub & Dub Free HD</p>`
+- Targets high-intent searches:
   - `watch [anime] sub and dub`
   - `[anime] all episodes sub dub`
   - `[anime] english dub stream`
-- Secondary:
   - `best [genre] anime sub dub`
-  - `top rated anime 2026`
-  - `currently airing anime sub dub`
 
-### 5.2 Automatic Catalog Coverage
-Because all 6,000+ anime titles are indexed via the sitemap and accessible via crawlable `<a href="/anime/:id">` links, top franchises (One Piece, Demon Slayer, Jujutsu Kaisen, Solo Leveling, Attack on Titan, Naruto, Bleach) are immediately discoverable by Google without manual page-by-page authoring.
+### 5.2 Dynamic Browse Genre & Search Meta Tracking [DONE]
+- Selecting any genre automatically updates document title, description, and canonical path (`/browse?genre=Action` -> `Action Anime — Stream in Sub & Dub | KuroAnime`).
+- Searching updates query URL and metadata (`/search?q=Demon+Slayer` -> `Watch Demon Slayer Online Sub & Dub | KuroAnime`).
+
+### 5.3 On-Page Breadcrumb Navigation & Schema [DONE]
+- Renders clickable breadcrumb trail: `Home › Browse › [Genre] › [Anime Title]`
+- Emits Schema.org `BreadcrumbList` for Google Rich Search snippets.
+
+### 5.4 Frequently Asked Questions (FAQPage Schema & UI Accordion) [DONE]
+- Embedded responsive, zero-layout-shift `<details>` FAQ accordions on anime detail pages answering:
+  1. Where can I watch in English Sub & Dub?
+  2. How many episodes are available?
+  3. Is the anime free to watch on KuroAnime?
+- Injected Schema.org `FAQPage` JSON-LD to unlock expandable Google SERP rich result cards.
 
 ---
 
-## 6. Phase 3 & 4 — Off-Page Authority, Socials & Search Console (Days 30–90)
+## 6. Phase 3 — Repository Authority & Backlinks (COMPLETED & DEPLOYED)
 
-1. **Google Search Console (GSC)**:
-   - Add property `https://kuroanime-flax.vercel.app/`.
-   - Submit sitemap `https://kuroanime-flax.vercel.app/sitemap.xml`.
-   - Request indexing for homepage and top 10 trending anime.
-2. **GitHub Repository SEO**:
-   - Update `Munib115/HIANIME` README with canonical live demo link and keywords: "KuroAnime — Free ad-free anime streaming platform in Sub & Dub".
-3. **Clean Backlinks**:
-   - Link from developer portfolio, social bios (X/Twitter, LinkedIn, Instagram).
-   - Never buy low-quality backlinks or participate in link farms.
+1. **GitHub Repository SEO [DONE]**:
+   - Created comprehensive root [`README.md`](file:///c:/Users/Munib%20Raza/OneDrive/Desktop/HIANIME/README.md) on `Munib115/HIANIME` linking directly to `https://kuroanime-flax.vercel.app/`.
+   - Outlines tech stack, features, and high-intent streaming keywords, leveraging GitHub's DA 96+ authority.
+
+---
+
+## 7. Phase 4 — Google Search Console Submission & Verification (Action Items for User)
+
+1. **Open Google Search Console**:
+   - Go to [Google Search Console](https://search.google.com/search-console).
+   - Add property: `https://kuroanime-flax.vercel.app/` (URL prefix method).
+   - Verify via HTML tag (already pre-configured) or Vercel DNS.
+
+2. **Submit Sitemap**:
+   - In GSC left sidebar, click **Sitemaps**.
+   - Under "Add a new sitemap", enter: `sitemap.xml`
+   - Click **Submit**. Status will show **Success** with ~6,188 discovered URLs.
+
+3. **Request Fast Indexing for Key Pages**:
+   - In the top search bar ("Inspect any URL in https://kuroanime-flax.vercel.app/"), enter:
+     - `https://kuroanime-flax.vercel.app/` -> Click **Request Indexing**.
+     - `https://kuroanime-flax.vercel.app/browse` -> Click **Request Indexing**.
+     - Your top 3 favorite anime titles (e.g. `https://kuroanime-flax.vercel.app/anime/1`) -> Click **Request Indexing**.
 
 ---
 
