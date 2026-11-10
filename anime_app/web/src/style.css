@@ -8184,3 +8184,330 @@ body {
   color: var(--text-muted) !important;
   font-weight: 400 !important;
 }
+
+/* ─── Pass 8 & 9: YouTube-Style GPU Skeleton System (Zero Black Screen) ─── */
+
+:root {
+  --skel-base: #141822;
+  --skel-elevated: #181d29;
+  --skel-shimmer: rgba(238, 240, 245, 0.065);
+}
+
+/* GPU-Composited Directional Shimmer (transform: translate3d only — 0 layout/paint cost) */
+.yt-shimmer,
+.skeleton-pulse {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--skel-base) !important;
+  background-image: none !important;
+  animation: none !important;
+  contain: paint;
+}
+
+.yt-shimmer::after,
+.skeleton-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translate3d(-100%, 0, 0);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(238, 240, 245, 0.03) 25%,
+    var(--skel-shimmer) 50%,
+    rgba(238, 240, 245, 0.03) 75%,
+    transparent 100%
+  );
+  will-change: transform;
+  animation: ytShimmerGlide 1.65s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+@keyframes ytShimmerGlide {
+  100% {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+/* Poster Image Smooth Reveal Over Skeleton Surface */
+.card-poster-wrapper {
+  background-color: var(--skel-base) !important;
+}
+
+.card-poster-img {
+  opacity: 0;
+  transition: opacity 0.24s var(--ease-out), transform 0.3s var(--ease-out) !important;
+}
+
+.card-poster-img.is-loaded {
+  opacity: 1;
+}
+
+/* 1. YouTube-Style Poster Card Skeleton (.yt-card-skeleton) */
+.yt-card-skeleton {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  user-select: none;
+  pointer-events: none;
+}
+
+.rail-scroll-track .yt-card-skeleton {
+  flex: 0 0 clamp(132px, 34vw, 175px);
+  width: clamp(132px, 34vw, 175px);
+}
+
+.yt-skel-poster {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  background-color: var(--skel-base);
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.yt-skel-pill-top {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 32px;
+  height: 15px;
+  border-radius: 4px;
+  background: rgba(238, 240, 245, 0.05);
+}
+
+.yt-skel-pill-bot {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  width: 48px;
+  height: 12px;
+  border-radius: 3px;
+  background: rgba(238, 240, 245, 0.05);
+}
+
+.yt-skel-line {
+  display: block;
+  background-color: var(--skel-base);
+  border-radius: 4px;
+}
+
+.yt-skel-title {
+  height: 13px;
+  width: 84%;
+  margin-bottom: 6px;
+  border-radius: 4px;
+}
+
+.yt-skel-sub {
+  height: 10px;
+  width: 52%;
+  border-radius: 3px;
+  opacity: 0.72;
+}
+
+.yt-skel-rail-heading {
+  height: 17px;
+  border-radius: 5px;
+  display: inline-block;
+}
+
+.yt-skel-rail-more {
+  width: 54px;
+  height: 13px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+/* 2. Hero Spotlight Skeleton (.yt-hero-skeleton) */
+.hero-skeleton {
+  width: 100%;
+  height: 100%;
+  background-color: #10131b !important;
+}
+
+.yt-hero-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+  padding: 8px 0;
+  pointer-events: none;
+}
+
+.yt-hero-eyebrow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.yt-hero-title-1 {
+  width: clamp(220px, 42vw, 390px);
+  height: clamp(26px, 3.5vw, 38px);
+  border-radius: 7px;
+}
+
+.yt-hero-title-2 {
+  width: clamp(150px, 28vw, 250px);
+  height: clamp(26px, 3.5vw, 38px);
+  border-radius: 7px;
+  margin-bottom: 4px;
+}
+
+.yt-hero-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.yt-hero-desc-1 {
+  width: clamp(240px, 48vw, 440px);
+  height: 12px;
+  border-radius: 4px;
+}
+
+.yt-hero-desc-2 {
+  width: clamp(180px, 35vw, 320px);
+  height: 12px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.yt-hero-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.yt-skel-btn {
+  display: inline-block;
+  border-radius: 8px;
+  background-color: var(--skel-elevated);
+  border: 1px solid var(--border);
+}
+
+.yt-thumb-skel {
+  width: 88px;
+  height: 50px;
+  border-radius: 8px;
+  background-color: var(--skel-base);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* 3. Detail Page & Episode Grid Skeleton */
+.yt-skel-ep-tile {
+  height: 46px;
+  border-radius: 7px;
+  background-color: var(--skel-base);
+  border: 1px solid var(--border);
+}
+
+/* 4. 16:9 Cinema Video Player Skeleton (.yt-player-skeleton) */
+.yt-player-skeleton {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  background: #0d1017;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.yt-player-shimmer-bg {
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+}
+
+.yt-player-center-ring {
+  position: relative;
+  z-index: 2;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(17, 20, 28, 0.78);
+  border: 1px solid rgba(238, 240, 245, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.yt-player-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(238, 240, 245, 0.16);
+  border-top-color: var(--text-primary);
+  animation: ytSpin 0.75s linear infinite;
+}
+
+@keyframes ytSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.yt-player-bottom-bar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 14px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.yt-player-scrubber {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.yt-player-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.yt-player-ctrl-left,
+.yt-player-ctrl-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 5. Discussion Chat Comment Skeletons */
+.yt-disc-skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 2px;
+}
+
+.yt-disc-skel-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.yt-disc-skel-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.yt-disc-skel-bubble {
+  background: #121620;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+}

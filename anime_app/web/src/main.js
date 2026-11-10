@@ -525,6 +525,149 @@ async function syncCloudUserData() {
   }
 }
 
+// ─── YouTube-Style Unslop Skeleton Renderers ────────────────────────
+function renderCardSkeletons(count = 12) {
+  let out = '';
+  for (let i = 0; i < count; i++) {
+    const titleW = 72 + ((i * 7) % 22);
+    const subW = 44 + ((i * 5) % 18);
+    out += `
+      <div class="yt-card-skeleton" aria-hidden="true">
+        <div class="yt-skel-poster yt-shimmer">
+          <span class="yt-skel-pill-top"></span>
+          <span class="yt-skel-pill-bot"></span>
+        </div>
+        <div class="yt-skel-line yt-skel-title yt-shimmer" style="width:${titleW}%"></div>
+        <div class="yt-skel-line yt-skel-sub yt-shimmer" style="width:${subW}%"></div>
+      </div>
+    `;
+  }
+  return out;
+}
+
+function renderHomeSkeletons() {
+  const stageEl = document.getElementById('hero-stage');
+  const contentEl = document.getElementById('hero-content');
+  const thumbsEl = document.getElementById('hero-thumbs');
+  const railsContainer = document.getElementById('rails-container');
+
+  if (stageEl && !stageEl.querySelector('.hero-slide')) {
+    stageEl.innerHTML = '<div class="hero-skeleton yt-shimmer"></div>';
+  }
+  if (contentEl && !contentEl.querySelector('.hero-title')) {
+    contentEl.innerHTML = `
+      <div class="yt-hero-skeleton" aria-hidden="true">
+        <div class="yt-hero-eyebrow-row">
+          <span class="hero-eyebrow-line"></span>
+          <span class="yt-skel-line yt-shimmer" style="width:92px;height:12px;border-radius:4px;"></span>
+        </div>
+        <div class="yt-skel-line yt-shimmer yt-hero-title-1"></div>
+        <div class="yt-skel-line yt-shimmer yt-hero-title-2"></div>
+        <div class="yt-hero-meta-row">
+          <span class="yt-skel-line yt-shimmer" style="width:48px;height:14px;border-radius:4px;"></span>
+          <span class="yt-skel-line yt-shimmer" style="width:42px;height:14px;border-radius:4px;"></span>
+          <span class="yt-skel-line yt-shimmer" style="width:74px;height:14px;border-radius:4px;"></span>
+          <span class="yt-skel-line yt-shimmer" style="width:96px;height:14px;border-radius:4px;"></span>
+        </div>
+        <div class="yt-skel-line yt-shimmer yt-hero-desc-1"></div>
+        <div class="yt-skel-line yt-shimmer yt-hero-desc-2"></div>
+        <div class="yt-hero-actions-row">
+          <span class="yt-skel-btn yt-shimmer" style="width:104px;height:40px;"></span>
+          <span class="yt-skel-btn yt-shimmer" style="width:112px;height:40px;"></span>
+        </div>
+      </div>
+    `;
+  }
+  if (thumbsEl && !thumbsEl.querySelector('.hero-thumb')) {
+    thumbsEl.innerHTML = Array.from({ length: 6 }, () => '<div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>').join('');
+  }
+  if (railsContainer && !railsContainer.querySelector('.anime-card')) {
+    const widths = [136, 112, 148];
+    railsContainer.innerHTML = widths.map(w => `
+      <div class="rail-section yt-rail-skeleton" aria-hidden="true">
+        <div class="rail-header">
+          <span class="rail-title"><span class="rail-title-line"></span><span class="yt-skel-line yt-skel-rail-heading yt-shimmer" style="width:${w}px"></span></span>
+          <span class="yt-skel-line yt-skel-rail-more yt-shimmer"></span>
+        </div>
+        <div class="rail-scroll-track">
+          ${renderCardSkeletons(8)}
+        </div>
+      </div>
+    `).join('');
+  }
+}
+
+function renderDetailSkeleton() {
+  const epBones = Array.from({ length: 18 }, () => '<div class="yt-skel-ep-tile yt-shimmer"></div>').join('');
+  return `
+    <div class="detail-banner yt-shimmer" style="background-color: var(--bg-surface);">
+      <div class="detail-banner-overlay"></div>
+      <button class="detail-back-btn" id="detail-loading-back-btn">
+        <i data-lucide="arrow-left"></i> Back
+      </button>
+    </div>
+    <div class="detail-body yt-detail-skeleton" aria-hidden="true">
+      <div class="detail-header-card">
+        <div class="detail-poster yt-shimmer"></div>
+        <div class="detail-info">
+          <div class="yt-skel-line yt-shimmer" style="width:min(340px, 78%);height:28px;border-radius:6px;margin-bottom:6px;"></div>
+          <div class="yt-skel-line yt-shimmer" style="width:min(210px, 52%);height:14px;border-radius:4px;margin-bottom:10px;"></div>
+          <div class="detail-meta-row">
+            <span class="yt-skel-line yt-shimmer" style="width:52px;height:22px;border-radius:5px;"></span>
+            <span class="yt-skel-line yt-shimmer" style="width:42px;height:22px;border-radius:5px;"></span>
+            <span class="yt-skel-line yt-shimmer" style="width:88px;height:22px;border-radius:5px;"></span>
+            <span class="yt-skel-line yt-shimmer" style="width:46px;height:22px;border-radius:5px;"></span>
+          </div>
+        </div>
+      </div>
+      <div class="detail-actions-bar">
+        <div class="yt-skel-btn yt-shimmer" style="flex:2;height:42px;border-radius:8px;"></div>
+        <div class="yt-skel-btn yt-shimmer" style="flex:1;height:42px;border-radius:8px;"></div>
+      </div>
+      <div class="detail-synopsis-box" style="display:flex;flex-direction:column;gap:10px;">
+        <div class="yt-skel-line yt-shimmer" style="width:84px;height:13px;border-radius:4px;"></div>
+        <div class="yt-skel-line yt-shimmer" style="width:96%;height:12px;border-radius:4px;"></div>
+        <div class="yt-skel-line yt-shimmer" style="width:91%;height:12px;border-radius:4px;"></div>
+        <div class="yt-skel-line yt-shimmer" style="width:68%;height:12px;border-radius:4px;"></div>
+      </div>
+      <div class="episodes-section">
+        <div class="section-label-row" style="margin-bottom:12px;">
+          <div class="yt-skel-line yt-shimmer" style="width:120px;height:15px;border-radius:4px;"></div>
+        </div>
+        <div class="episodes-list-grid">
+          ${epBones}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderPlayerFrameSkeleton() {
+  return `
+    <div class="yt-player-skeleton" aria-hidden="true">
+      <div class="yt-player-shimmer-bg yt-shimmer"></div>
+      <div class="yt-player-center-ring">
+        <span class="yt-player-spinner"></span>
+      </div>
+      <div class="yt-player-bottom-bar">
+        <div class="yt-player-scrubber yt-shimmer"></div>
+        <div class="yt-player-controls-row">
+          <div class="yt-player-ctrl-left">
+            <span class="yt-skel-line yt-shimmer" style="width:28px;height:22px;border-radius:5px;"></span>
+            <span class="yt-skel-line yt-shimmer" style="width:28px;height:22px;border-radius:5px;"></span>
+            <span class="yt-skel-line yt-shimmer" style="width:76px;height:14px;border-radius:4px;"></span>
+          </div>
+          <div class="yt-player-ctrl-right">
+            <span class="yt-skel-line yt-shimmer" style="width:54px;height:22px;border-radius:5px;"></span>
+            <span class="yt-skel-line yt-shimmer" style="width:28px;height:22px;border-radius:5px;"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+// ─── End YouTube-Style Unslop Skeleton Renderers ────────────────────
+
 // ─── Card Renderer Component ────────────────────────────────────────
 function renderAnimeCard(anime) {
   const poster = anime.poster || anime.poster_large || anime.poster_url || '';
@@ -536,7 +679,7 @@ function renderAnimeCard(anime) {
   return `
     <div class="anime-card" data-id="${anime.anime_id}">
       <div class="card-poster-wrapper">
-        <img class="card-poster-img" src="${poster}" alt="${anime.title}" loading="lazy" />
+        <img class="card-poster-img" src="${poster}" alt="${anime.title}" loading="lazy" decoding="async" onload="this.classList.add('is-loaded')" />
         <div class="card-top-badges">
           ${hasSub ? '<span class="pill-sub">SUB</span>' : ''}
           ${hasDub ? '<span class="pill-dub">DUB</span>' : ''}
@@ -815,6 +958,7 @@ function renderHeroContent(index) {
 
 // ─── Home View ──────────────────────────────────────────────────────
 async function initHome() {
+  renderHomeSkeletons();
   // 1. Catalog Stats (Populates footer quietly)
   fetchApi('/stats').then(stats => {
     if (stats) {
@@ -1037,7 +1181,9 @@ async function loadBrowse() {
 async function fetchBrowseResults() {
   const grid = document.getElementById('browse-grid');
   if (!grid) return;
-  grid.innerHTML = '<div class="empty-state">Loading anime catalog...</div>';
+  const paginationEl = document.getElementById('browse-pagination');
+  if (paginationEl) paginationEl.style.display = 'none';
+  grid.innerHTML = renderCardSkeletons(18);
 
   const params = new URLSearchParams({
     page: state.browsePage,
@@ -1095,7 +1241,7 @@ async function performSearch(query) {
 
   if (suggestionsBox) suggestionsBox.style.display = 'none';
   if (clearBtn) clearBtn.style.display = 'flex';
-  resultsGrid.innerHTML = '<div class="empty-state">Searching anime...</div>';
+  resultsGrid.innerHTML = renderCardSkeletons(12);
 
   const res = await fetchApi(`/search?q=${encodeURIComponent(query)}`);
   if (!res || !res.results?.length) {
@@ -1119,12 +1265,8 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
   if (!autoPlayFirst) {
     state.playerEnteredFrom = 'detail';
     if (container && (!container.querySelector('.detail-body') || Number(container.dataset.renderedAnimeId) !== Number(animeId))) {
-      container.innerHTML = `
-        <div class="empty-state" style="padding: 80px 20px;">
-          <div style="margin-bottom: 14px;">Loading anime details...</div>
-          <button type="button" class="ep-nav-btn" id="detail-loading-back-btn" style="max-width: 160px; margin: 0 auto;">Back to Home</button>
-        </div>
-      `;
+      container.innerHTML = renderDetailSkeleton();
+      refreshIcons();
       document.getElementById('detail-loading-back-btn')?.addEventListener('click', () => {
         state.isFetchingDetail = false;
         switchTab('home');
@@ -1472,10 +1614,7 @@ async function openWatchPlayer(episodeIndex) {
 
     <!-- Video Container -->
     <div class="video-frame-wrapper" id="video-frame-container">
-      <div class="empty-state" style="padding: 60px 16px;">
-        <i data-lucide="sparkles" class="empty-state-icon"></i><br/>
-        Loading video stream servers...
-      </div>
+      ${renderPlayerFrameSkeleton()}
     </div>
 
     <!-- Controls Panel -->
