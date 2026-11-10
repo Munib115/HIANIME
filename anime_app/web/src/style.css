@@ -8967,3 +8967,101 @@ a.anime-card {
   color: inherit !important;
   display: block;
 }
+
+/* ─── Breadcrumb Navigation (SEO & UX) ────────────────────────────── */
+.detail-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted, #8b92a5);
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+.kuro-bc-link {
+  color: var(--color-text-muted, #8b92a5);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.kuro-bc-link:hover {
+  color: var(--color-primary, #e50914);
+}
+.kuro-bc-sep {
+  opacity: 0.5;
+  user-select: none;
+}
+.kuro-bc-current {
+  color: var(--color-text, #f0f2f7);
+  font-weight: 500;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Semantic Keyword Subheading ──────────────────────────────────── */
+.detail-seo-subheading {
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #94a3b8);
+  margin-top: 4px;
+  margin-bottom: 10px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+
+/* ─── Streaming Guide & FAQ Accordions ─────────────────────────────── */
+.kuro-faq-section {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.kuro-faq-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.kuro-faq-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+.kuro-faq-item[open] {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(229, 9, 20, 0.3);
+}
+.kuro-faq-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text, #f0f2f7);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.kuro-faq-summary::-webkit-details-marker {
+  display: none;
+}
+.kuro-faq-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted, #8b92a5);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.kuro-faq-item[open] .kuro-faq-chevron {
+  transform: rotate(180deg);
+  color: var(--color-primary, #e50914);
+}
+.kuro-faq-body {
+  padding: 0 16px 14px 16px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--color-text-muted, #cbd5e1);
+}

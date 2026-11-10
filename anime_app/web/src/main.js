@@ -1302,6 +1302,30 @@ async function fetchBrowseResults() {
   if (state.browseType) params.append('type', state.browseType);
   if (state.browseStatus) params.append('status', state.browseStatus);
 
+  // Dynamic Browse / Genre SEO updates
+  if (state.browseGenre) {
+    updatePageSeo({
+      title: `${state.browseGenre} Anime — Stream in Sub & Dub | KuroAnime`,
+      description: `Watch the best ${state.browseGenre} anime series and movies in Japanese Sub and English Dub with fast servers on KuroAnime.`,
+      path: `/browse?genre=${encodeURIComponent(state.browseGenre)}`
+    });
+    try {
+      if (window.location.pathname === '/browse') {
+        window.history.replaceState(
+          { viewId: 'view-browse', tab: 'browse', genre: state.browseGenre },
+          '',
+          `/browse?genre=${encodeURIComponent(state.browseGenre)}`
+        );
+      }
+    } catch (e) {}
+  } else {
+    updatePageSeo({
+      title: 'Explore Anime Catalog in Sub & Dub | KuroAnime',
+      description: 'Browse popular anime series and movies filtered by genres, format, and status in Japanese Sub and English Dub.',
+      path: '/browse'
+    });
+  }
+
   const res = await fetchApi(`/browse?${params.toString()}`);
   if (!res || !res.results?.length) {
     grid.innerHTML = '<div class="empty-state">No anime found matching filters.</div>';
@@ -1354,6 +1378,20 @@ async function performSearch(query) {
   if (suggestionsBox) suggestionsBox.style.display = 'none';
   if (clearBtn) clearBtn.style.display = 'flex';
   resultsGrid.innerHTML = renderCardSkeletons(12);
+
+  // Dynamic Search SEO and URL tracking
+  updatePageSeo({
+    title: `Watch ${query} Online Sub & Dub | KuroAnime`,
+    description: `Search results and streaming episodes for ${query} in Japanese Sub and English Dub on KuroAnime.`,
+    path: `/search?q=${encodeURIComponent(query)}`
+  });
+  try {
+    window.history.replaceState(
+      { viewId: 'view-search', tab: 'search', q: query },
+      '',
+      `/search?q=${encodeURIComponent(query)}`
+    );
+  } catch (e) {}
 
   const res = await fetchApi(`/search?q=${encodeURIComponent(query)}`);
   if (!res || !res.results?.length) {
@@ -1423,6 +1461,87 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
     ? synopsisClean.slice(0, 152) + '...'
     : (synopsisClean || `Watch ${animeTitle} in Sub or Dub on KuroAnime. Episodes, ratings, and My List.`);
 
+  // Phase 2: Rich Multi-Entity Schema.org Graph (BreadcrumbList + TVSeries/Movie + FAQPage)
+  const primaryGenre = (anime.genres || '').split(/\s+/).filter(Boolean)[0] || 'Anime';
+  const totalEpisodeCount = epsData?.episodes?.length || anime.episode_count || anime.al_episodes || 0;
+
+  const breadcrumbListSchema = {
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Home",
+        "item": "https://kuroanime-flax.vercel.app/"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": "Browse",
+        "item": "https://kuroanime-flax.vercel.app/browse"
+      },
+      {
+        "@type": "ListItem",
+        "position": 3,
+        "name": primaryGenre,
+        "item": `https://kuroanime-flax.vercel.app/browse?genre=${encodeURIComponent(primaryGenre)}`
+      },
+      {
+        "@type": "ListItem",
+        "position": 4,
+        "name": animeTitle,
+        "item": `https://kuroanime-flax.vercel.app/anime/${anime.anime_id}`
+      }
+    ]
+  };
+
+  const entitySchema = {
+    "@type": anime.type === 'Movie' ? 'Movie' : 'TVSeries',
+    "name": animeTitle,
+    "alternateName": anime.title_english && anime.title_english !== anime.title ? anime.title_english : undefined,
+    "description": synopsisClean,
+    "image": anime.poster || anime.banner_image,
+    "numberOfEpisodes": totalEpisodeCount || undefined,
+    "inLanguage": ["Japanese", "English"],
+    "genre": (anime.genres || '').split(/\s+/).filter(Boolean),
+    "aggregateRating": scoreVal !== 'N/A' ? {
+      "@type": "AggregateRating",
+      "ratingValue": String(scoreVal),
+      "bestRating": "10",
+      "worstRating": "1"
+    } : undefined
+  };
+
+  const faqSchema = {
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": `Where can I watch ${animeTitle} in English Sub and Dub?`,
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": `You can stream all released episodes of ${animeTitle} in HD with Japanese audio + English subtitles and English dub on KuroAnime with fast, verified servers.`
+        }
+      },
+      {
+        "@type": "Question",
+        "name": `How many episodes are there in ${animeTitle}?`,
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": `${animeTitle} has ${totalEpisodeCount || 'multiple'} episodes available for instant streaming on KuroAnime.`
+        }
+      },
+      {
+        "@type": "Question",
+        "name": `Is ${animeTitle} available in English Dub?`,
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": `${anime.dub === true ? `Yes, ${animeTitle} is available with English Dub on KuroAnime.` : `${animeTitle} is available with English Subtitles and multi-server playback.`}`
+        }
+      }
+    ]
+  };
+
   updatePageSeo({
     title: `Watch ${animeTitle} Sub & Dub | KuroAnime`,
     description: metaDesc,
@@ -1431,18 +1550,7 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
     type: 'video.tv_show',
     schema: {
       "@context": "https://schema.org",
-      "@type": anime.type === 'Movie' ? 'Movie' : 'TVSeries',
-      "name": animeTitle,
-      "description": synopsisClean,
-      "image": anime.poster || anime.banner_image,
-      "numberOfEpisodes": anime.episode_count || anime.al_episodes || undefined,
-      "inLanguage": ["Japanese", "English"],
-      "aggregateRating": scoreVal !== 'N/A' ? {
-        "@type": "AggregateRating",
-        "ratingValue": String(scoreVal),
-        "bestRating": "10",
-        "worstRating": "1"
-      } : undefined
+      "@graph": [breadcrumbListSchema, entitySchema, faqSchema]
     }
   });
 
@@ -1493,10 +1601,24 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
       </div>
 
       <div class="detail-body">
+        <!-- Breadcrumbs (SEO & Navigation) -->
+        <nav class="detail-breadcrumbs" aria-label="Breadcrumb">
+          <a href="/" class="kuro-bc-link" id="bc-nav-home">Home</a>
+          <span class="kuro-bc-sep">&rsaquo;</span>
+          <a href="/browse" class="kuro-bc-link" id="bc-nav-browse">Browse</a>
+          ${anime.genres ? `
+            <span class="kuro-bc-sep">&rsaquo;</span>
+            <a href="/browse?genre=${encodeURIComponent(primaryGenre)}" class="kuro-bc-link kuro-bc-genre" data-genre="${escapeHtmlText(primaryGenre)}">${escapeHtmlText(primaryGenre)}</a>
+          ` : ''}
+          <span class="kuro-bc-sep">&rsaquo;</span>
+          <span class="kuro-bc-current" title="${escapeHtmlText(anime.title)}">${escapeHtmlText(anime.title)}</span>
+        </nav>
+
         <div class="detail-header-card">
-          <img class="detail-poster" src="${anime.poster}" alt="${anime.title}" />
+          <img class="detail-poster" src="${anime.poster}" alt="${anime.title} poster" onerror="this.onerror=null;this.src='/favicon.svg';this.classList.add('is-fallback')" />
           <div class="detail-info">
             <h1 class="detail-title">${anime.title}</h1>
+            <p class="detail-seo-subheading">Watch ${escapeHtmlText(anime.title)} Online in English Sub &amp; Dub Free HD</p>
             ${anime.title_english && anime.title_english !== anime.title ? `<div class="detail-japanese-title">${anime.title_english}</div>` : ''}
             <div class="detail-meta-row">
               <span class="badge-gold"><i data-lucide="star"></i> ${score}</span>
@@ -1565,6 +1687,42 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
 
         <!-- Discussion Section (Below Episodes) -->
         <section class="kuro-discussion-section" id="detail-discussion-section"></section>
+
+        <!-- SEO Streaming Guide & FAQ Section -->
+        <section class="kuro-faq-section" aria-label="Streaming Guide and FAQs">
+          <div class="section-label-row">
+            <span class="section-label"><i data-lucide="help-circle"></i> Streaming Guide &amp; FAQs</span>
+          </div>
+          <div class="kuro-faq-grid">
+            <details class="kuro-faq-item" open>
+              <summary class="kuro-faq-summary">
+                <span>Where can I watch ${escapeHtmlText(anime.title)} in English Sub &amp; Dub?</span>
+                <i data-lucide="chevron-down" class="kuro-faq-chevron"></i>
+              </summary>
+              <div class="kuro-faq-body">
+                You can stream all released episodes of ${escapeHtmlText(anime.title)} in 1080p/720p HD on KuroAnime with fast multi-server playback. Enjoy Japanese audio with synchronized English subtitles or full English Dub where available.
+              </div>
+            </details>
+            <details class="kuro-faq-item">
+              <summary class="kuro-faq-summary">
+                <span>How many episodes are available for ${escapeHtmlText(anime.title)}?</span>
+                <i data-lucide="chevron-down" class="kuro-faq-chevron"></i>
+              </summary>
+              <div class="kuro-faq-body">
+                ${escapeHtmlText(anime.title)} features ${totalEps || 'multiple'} episodes available for instant streaming. Use the episode selector buttons above to browse and watch any episode.
+              </div>
+            </details>
+            <details class="kuro-faq-item">
+              <summary class="kuro-faq-summary">
+                <span>Is ${escapeHtmlText(anime.title)} free to watch on KuroAnime?</span>
+                <i data-lucide="chevron-down" class="kuro-faq-chevron"></i>
+              </summary>
+              <div class="kuro-faq-body">
+                Yes! KuroAnime provides high-speed streaming without mandatory subscription paywalls. Bookmark this anime to your personal Watchlist to track your progress and resume anytime.
+              </div>
+            </details>
+          </div>
+        </section>
       </div>
     `;
 
@@ -1574,6 +1732,28 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
     mountDiscussionSection('detail-discussion-section', anime, resumeEpObj?.episode_number || 1, 'all');
 
     // Events
+    // Breadcrumb Navigation Handlers
+    document.getElementById('bc-nav-home')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchTab('home');
+    });
+    document.getElementById('bc-nav-browse')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchTab('browse');
+    });
+    document.querySelectorAll('.kuro-bc-genre').forEach(gLink => {
+      gLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        const gName = gLink.dataset.genre;
+        if (gName) {
+          state.browseGenre = gName;
+          switchTab('browse');
+          const chip = document.querySelector(`.chip-btn[data-genre="${gName}"]`);
+          if (chip) chip.click();
+        }
+      });
+    });
+
     document.getElementById('detail-back-home-btn')?.addEventListener('click', () => {
       switchTab(state.currentTab || 'home');
     });
