@@ -8511,3 +8511,452 @@ body {
   border-radius: 10px;
   padding: 9px 12px;
 }
+
+/* ─── Pass 6, 7 & 9: Episode Discussion Redesign (Unified '+' Media/Voice Hub) ─── */
+
+.kuro-disc-card.kuro-wa-container {
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--shadow-card) !important;
+  overflow: visible !important;
+}
+
+.kuro-disc-header {
+  background: var(--bg-surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  border-radius: 12px 12px 0 0;
+  padding: 12px 16px !important;
+}
+
+.kuro-disc-accent-bar {
+  width: 2px !important;
+  height: 18px !important;
+  border-radius: 1px !important;
+  background: var(--accent) !important;
+}
+
+.kuro-disc-heading {
+  font-family: var(--font-display) !important;
+  font-size: 0.92rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.015em !important;
+  color: var(--text-primary) !important;
+}
+
+.kuro-wa-header-sub {
+  font-family: var(--font-family) !important;
+  font-size: 0.72rem !important;
+  font-weight: 400 !important;
+  color: var(--text-muted) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.kuro-disc-scope-tabs {
+  background: var(--bg-app) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  padding: 2px !important;
+  gap: 2px !important;
+}
+
+.kuro-disc-scope-btn {
+  font-family: var(--font-family) !important;
+  font-size: 0.74rem !important;
+  font-weight: 500 !important;
+  color: var(--text-secondary) !important;
+  padding: 5px 10px !important;
+  border-radius: 6px !important;
+  transition:
+    background-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out) !important;
+}
+
+.kuro-disc-scope-btn:active {
+  transform: scale3d(0.96, 0.96, 1) !important;
+}
+
+.kuro-disc-scope-btn.active {
+  background: var(--bg-surface-hover) !important;
+  color: var(--text-primary) !important;
+  font-weight: 600 !important;
+  box-shadow: var(--inset-highlight) !important;
+}
+
+/* Chat Feed Viewport */
+.kuro-wa-chat-viewport {
+  background: #0d1017 !important;
+  padding: 16px 14px !important;
+  min-height: 180px !important;
+  max-height: 380px !important;
+}
+
+.kuro-disc-empty {
+  padding: 32px 16px !important;
+  max-width: 340px;
+  margin: auto !important;
+}
+
+.kuro-disc-empty-title {
+  font-family: var(--font-family) !important;
+  font-size: 0.86rem !important;
+  font-weight: 500 !important;
+  color: var(--text-secondary) !important;
+  margin-bottom: 4px !important;
+}
+
+.kuro-disc-empty-sub {
+  font-family: var(--font-family) !important;
+  font-size: 0.76rem !important;
+  font-weight: 400 !important;
+  line-height: 1.45 !important;
+  color: var(--text-muted) !important;
+}
+
+/* Message Bubbles */
+.kuro-wa-avatar {
+  background: var(--bg-surface-elevated) !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-primary) !important;
+  font-weight: 600 !important;
+}
+
+.kuro-wa-bubble {
+  background: var(--bg-surface-elevated) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px 10px 10px 4px !important;
+}
+
+.kuro-wa-bubble.is-own {
+  background: rgba(229, 72, 77, 0.1) !important;
+  border-color: rgba(229, 72, 77, 0.28) !important;
+  border-radius: 10px 10px 4px 10px !important;
+}
+
+.kuro-wa-author {
+  font-weight: 600 !important;
+  color: var(--text-primary) !important;
+}
+
+.kuro-wa-bubble.is-own .kuro-wa-author {
+  color: #ffadb0 !important;
+}
+
+.kuro-wa-ep-badge {
+  font-weight: 500 !important;
+  color: var(--text-muted) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.kuro-wa-msg-text {
+  font-weight: 400 !important;
+  color: var(--text-primary) !important;
+}
+
+/* Unified Composer Bar (Single '+' Icon + Wide Input + Send Icon) */
+.kuro-wa-composer-wrap {
+  background: var(--bg-surface) !important;
+  border-top: 1px solid var(--border) !important;
+  border-radius: 0 0 12px 12px;
+  padding: 10px 12px !important;
+}
+
+.kuro-wa-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+}
+
+/* '+' Attachment Hub Button & Bidirectional Floating Menu */
+.kuro-disc-hub-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.kuro-disc-plus-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: var(--inset-highlight);
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out);
+}
+
+.kuro-disc-plus-btn:hover,
+.kuro-disc-plus-btn.open {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.kuro-disc-plus-btn:active {
+  transform: scale3d(0.94, 0.94, 1);
+}
+
+.kuro-disc-plus-icon {
+  transition: transform 0.2s var(--ease-out);
+}
+
+.kuro-disc-plus-btn.open .kuro-disc-plus-icon {
+  transform: rotate(45deg);
+}
+
+.kuro-disc-spoiler-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Floating Attachment Popover Menu (Photo, Video, Voice, Spoiler) */
+.kuro-disc-attach-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 184px;
+  background: #141822;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: var(--shadow-modal);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transform-origin: bottom left;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, 6px, 0) scale3d(0.96, 0.96, 1);
+  will-change: transform, opacity;
+  transition:
+    transform 0.15s var(--ease-in-out),
+    opacity 0.13s var(--ease-in-out),
+    visibility 0s linear 0.15s;
+}
+
+.kuro-disc-attach-menu.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+  transition:
+    transform 0.2s var(--ease-out),
+    opacity 0.16s var(--ease-out),
+    visibility 0s linear 0s;
+}
+
+.kuro-disc-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.14s var(--ease-out), color 0.14s var(--ease-out);
+}
+
+.kuro-disc-menu-item svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: color 0.14s var(--ease-out);
+}
+
+.kuro-disc-menu-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.kuro-disc-menu-item:hover svg {
+  color: var(--text-secondary);
+}
+
+.kuro-disc-menu-item.active {
+  background: rgba(229, 72, 77, 0.12) !important;
+  color: #ffadb0 !important;
+}
+
+.kuro-disc-menu-item.active svg {
+  color: var(--accent) !important;
+}
+
+.kuro-disc-menu-state {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.kuro-disc-menu-item.active .kuro-disc-menu-state {
+  color: var(--accent);
+}
+
+.kuro-disc-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 4px;
+}
+
+/* Spacious Input Container + Inline Spoiler Tag */
+.kuro-disc-input-wrap {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  transition: border-color 0.16s var(--ease-out), background-color 0.16s var(--ease-out);
+}
+
+.kuro-disc-input-wrap:focus-within {
+  border-color: var(--border-focus);
+  background: #0e1118;
+}
+
+.kuro-disc-inline-spoiler {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(229, 72, 77, 0.14);
+  border: 1px solid rgba(229, 72, 77, 0.35);
+  color: #ffadb0;
+  font-size: 0.66rem;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.kuro-wa-input {
+  flex: 1 !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-family) !important;
+  font-size: 0.84rem !important;
+  font-weight: 400 !important;
+}
+
+/* Primary Off-White Send Icon Button */
+.kuro-wa-send-btn {
+  width: 36px !important;
+  height: 36px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  background: var(--text-primary) !important;
+  color: var(--bg-app) !important;
+  border: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  transition: background-color 0.16s var(--ease-out), transform 0.12s var(--ease-out), opacity 0.16s var(--ease-out) !important;
+}
+
+.kuro-wa-send-btn:hover {
+  background: #ffffff !important;
+}
+
+.kuro-wa-send-btn:active {
+  transform: scale3d(0.94, 0.94, 1) !important;
+}
+
+.kuro-wa-send-btn.is-sending {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Unauthenticated Sign-In Footer Bar */
+.kuro-wa-auth-bar {
+  background: var(--bg-surface) !important;
+  border-top: 1px solid var(--border) !important;
+  border-radius: 0 0 12px 12px;
+  padding: 10px 14px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+.kuro-wa-auth-text {
+  font-size: 0.78rem !important;
+  font-weight: 400 !important;
+  color: var(--text-secondary) !important;
+}
+
+.kuro-disc-google-btn {
+  height: 34px !important;
+  padding: 0 14px !important;
+  border-radius: 8px !important;
+  background: var(--text-primary) !important;
+  color: var(--bg-app) !important;
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+  transition: background-color 0.16s var(--ease-out), transform 0.12s var(--ease-out) !important;
+}
+
+.kuro-disc-google-btn:hover {
+  background: #ffffff !important;
+}
+
+.kuro-disc-google-btn:active {
+  transform: scale3d(0.97, 0.97, 1) !important;
+}
+
+@media (max-width: 768px) {
+  .kuro-wa-composer-wrap {
+    padding: 8px 10px !important;
+  }
+
+  .kuro-wa-bar {
+    gap: 6px !important;
+  }
+
+  .kuro-wa-auth-bar {
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    padding: 10px 12px !important;
+  }
+
+  .kuro-disc-google-btn {
+    width: auto !important;
+    flex-shrink: 0;
+  }
+}

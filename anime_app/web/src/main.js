@@ -2176,7 +2176,7 @@ function renderDiscussionShell(containerId) {
     </svg>
   `;
 
-  // WhatsApp-style bottom composer bar (or compact Google Auth bar when signed out)
+  // Unslop Cinema-Grade Composer Bar (Unified '+' Attachment Popover for Photo, Video, Voice & Spoiler)
   const bottomBarHtml = user
     ? `
       <div class="kuro-wa-composer-wrap" id="${containerId}-composer-wrap">
@@ -2188,15 +2188,15 @@ function renderDiscussionShell(containerId) {
           <div class="kuro-wa-rec-status">
             <span class="kuro-wa-rec-dot"></span>
             <span class="kuro-wa-rec-timer" id="${containerId}-rec-timer">0:00</span>
-            <span class="kuro-wa-rec-label">Recording voice...</span>
+            <span class="kuro-wa-rec-label">Recording voice note...</span>
           </div>
           <div class="kuro-wa-rec-actions">
             <button type="button" class="kuro-wa-rec-cancel" id="${containerId}-rec-cancel">Cancel</button>
-            <button type="button" class="kuro-wa-rec-send" id="${containerId}-rec-send">Send Voice</button>
+            <button type="button" class="kuro-wa-rec-send" id="${containerId}-rec-send">Send</button>
           </div>
         </div>
 
-        <!-- Main WhatsApp-Style Single-Row Input Bar -->
+        <!-- Unified Single-Row Composer Bar -->
         <form class="kuro-wa-bar" id="${containerId}-form" autocomplete="off">
           <input
             type="file"
@@ -2204,57 +2204,76 @@ function renderDiscussionShell(containerId) {
             accept="image/*,video/*"
             style="display:none"
           />
-          <button
-            type="button"
-            class="kuro-wa-tool-btn"
-            id="${containerId}-attach-btn"
-            title="Attach Photo or Video"
-          >
-            + Media
-          </button>
 
-          <button
-            type="button"
-            class="kuro-wa-spoiler-pill ${inst.isSpoiler ? 'active' : ''}"
-            id="${containerId}-spoiler-btn"
-            title="Mark message as Spoiler"
-          >
-            Spoiler
-          </button>
+          <!-- Unified '+' Media & Options Hub (Photo, Video, Voice, Spoiler in one icon) -->
+          <div class="kuro-disc-hub-wrap" id="${containerId}-hub-wrap">
+            <button
+              type="button"
+              class="kuro-disc-plus-btn ${inst.isSpoiler ? 'has-spoiler' : ''}"
+              id="${containerId}-hub-btn"
+              aria-label="Add photo, video, voice note, or spoiler tag"
+              aria-expanded="false"
+              title="Add media or voice note"
+            >
+              <svg class="kuro-disc-plus-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <span class="kuro-disc-spoiler-dot" id="${containerId}-spoiler-dot" style="display:${inst.isSpoiler ? 'block' : 'none'}"></span>
+            </button>
 
-          <input
-            type="text"
-            class="kuro-wa-input"
-            id="${containerId}-input"
-            maxlength="1200"
-            placeholder="Message Episode ${epNum} as ${escapeHtmlText(user.name)}..."
-          />
+            <!-- Floating GPU-Animated Attachment Popover -->
+            <div class="kuro-disc-attach-menu" id="${containerId}-attach-menu" role="menu" aria-hidden="true">
+              <button type="button" class="kuro-disc-menu-item" id="${containerId}-photo-btn" role="menuitem">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span>Photo</span>
+              </button>
+              <button type="button" class="kuro-disc-menu-item" id="${containerId}-video-btn" role="menuitem">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                <span>Video clip</span>
+              </button>
+              <button type="button" class="kuro-disc-menu-item" id="${containerId}-voice-btn" role="menuitem">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                <span>Voice note</span>
+              </button>
+              <div class="kuro-disc-menu-divider"></div>
+              <button type="button" class="kuro-disc-menu-item kuro-wa-spoiler-pill ${inst.isSpoiler ? 'active' : ''}" id="${containerId}-spoiler-btn" role="menuitem">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                <span>Spoiler blur</span>
+                <span class="kuro-disc-menu-state" id="${containerId}-spoiler-state">${inst.isSpoiler ? 'On' : 'Off'}</span>
+              </button>
+            </div>
+          </div>
 
-          <button
-            type="button"
-            class="kuro-wa-voice-btn"
-            id="${containerId}-voice-btn"
-            title="Record Voice Message"
-          >
-            Voice
-          </button>
+          <div class="kuro-disc-input-wrap">
+            <span class="kuro-disc-inline-spoiler" id="${containerId}-inline-spoiler" style="display:${inst.isSpoiler ? 'inline-flex' : 'none'}">Spoiler</span>
+            <input
+              type="text"
+              class="kuro-wa-input"
+              id="${containerId}-input"
+              maxlength="1200"
+              placeholder="Message Episode ${epNum}..."
+            />
+          </div>
 
           <button
             type="submit"
             class="kuro-wa-send-btn"
             id="${containerId}-submit-btn"
+            aria-label="Send message"
+            title="Send message"
           >
-            Send
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
           </button>
         </form>
       </div>
     `
     : `
       <div class="kuro-wa-auth-bar">
-        <div class="kuro-wa-auth-info">
-          <span class="kuro-wa-auth-badge">Google Auth Only</span>
-          <span class="kuro-wa-auth-text">Sign in with Google to send messages, photos, videos &amp; voice notes.</span>
-        </div>
+        <span class="kuro-wa-auth-text">Sign in to share messages, media, or voice notes</span>
         <button type="button" class="kuro-disc-google-btn" id="${containerId}-google-signin-btn">
           ${googleSvg}
           <span>Sign in with Google</span>
@@ -2325,12 +2344,19 @@ function renderDiscussionShell(containerId) {
 
   if (!user) return;
 
-  // Authenticated WhatsApp Composer Controls
+  // Authenticated Composer Controls (Unified '+' Hub Menu)
   const formEl = document.getElementById(`${containerId}-form`);
   const inputEl = document.getElementById(`${containerId}-input`);
   const fileInputEl = document.getElementById(`${containerId}-file-input`);
-  const attachBtnEl = document.getElementById(`${containerId}-attach-btn`);
+  const hubWrapEl = document.getElementById(`${containerId}-hub-wrap`);
+  const hubBtnEl = document.getElementById(`${containerId}-hub-btn`);
+  const attachMenuEl = document.getElementById(`${containerId}-attach-menu`);
+  const photoBtnEl = document.getElementById(`${containerId}-photo-btn`);
+  const videoBtnEl = document.getElementById(`${containerId}-video-btn`);
   const spoilerBtnEl = document.getElementById(`${containerId}-spoiler-btn`);
+  const spoilerDotEl = document.getElementById(`${containerId}-spoiler-dot`);
+  const spoilerStateEl = document.getElementById(`${containerId}-spoiler-state`);
+  const inlineSpoilerEl = document.getElementById(`${containerId}-inline-spoiler`);
   const voiceBtnEl = document.getElementById(`${containerId}-voice-btn`);
   const submitBtnEl = document.getElementById(`${containerId}-submit-btn`);
   const previewBarEl = document.getElementById(`${containerId}-preview-bar`);
@@ -2338,6 +2364,26 @@ function renderDiscussionShell(containerId) {
   const recTimerEl = document.getElementById(`${containerId}-rec-timer`);
   const recCancelEl = document.getElementById(`${containerId}-rec-cancel`);
   const recSendEl = document.getElementById(`${containerId}-rec-send`);
+
+  function toggleAttachMenu(forceState) {
+    if (!attachMenuEl || !hubBtnEl) return;
+    const nextOpen = typeof forceState === 'boolean' ? forceState : !attachMenuEl.classList.contains('open');
+    attachMenuEl.classList.toggle('open', nextOpen);
+    hubBtnEl.classList.toggle('open', nextOpen);
+    hubBtnEl.setAttribute('aria-expanded', String(nextOpen));
+    attachMenuEl.setAttribute('aria-hidden', String(!nextOpen));
+  }
+
+  hubBtnEl?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleAttachMenu();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (hubWrapEl && !hubWrapEl.contains(e.target) && attachMenuEl?.classList.contains('open')) {
+      toggleAttachMenu(false);
+    }
+  });
 
   function updateMediaPreviewUI() {
     if (!previewBarEl) return;
@@ -2370,13 +2416,40 @@ function renderDiscussionShell(containerId) {
     });
   }
 
-  spoilerBtnEl?.addEventListener('click', () => {
+  function syncSpoilerUI() {
+    spoilerBtnEl?.classList.toggle('active', inst.isSpoiler);
+    hubBtnEl?.classList.toggle('has-spoiler', inst.isSpoiler);
+    if (spoilerDotEl) spoilerDotEl.style.display = inst.isSpoiler ? 'block' : 'none';
+    if (spoilerStateEl) spoilerStateEl.textContent = inst.isSpoiler ? 'On' : 'Off';
+    if (inlineSpoilerEl) inlineSpoilerEl.style.display = inst.isSpoiler ? 'inline-flex' : 'none';
+  }
+
+  spoilerBtnEl?.addEventListener('click', (e) => {
+    e.stopPropagation();
     inst.isSpoiler = !inst.isSpoiler;
-    spoilerBtnEl.classList.toggle('active', inst.isSpoiler);
+    syncSpoilerUI();
+    toggleAttachMenu(false);
   });
 
-  attachBtnEl?.addEventListener('click', () => {
-    fileInputEl?.click();
+  inlineSpoilerEl?.addEventListener('click', () => {
+    inst.isSpoiler = false;
+    syncSpoilerUI();
+  });
+
+  photoBtnEl?.addEventListener('click', () => {
+    toggleAttachMenu(false);
+    if (fileInputEl) {
+      fileInputEl.accept = 'image/*';
+      fileInputEl.click();
+    }
+  });
+
+  videoBtnEl?.addEventListener('click', () => {
+    toggleAttachMenu(false);
+    if (fileInputEl) {
+      fileInputEl.accept = 'video/*';
+      fileInputEl.click();
+    }
   });
 
   fileInputEl?.addEventListener('change', async () => {
@@ -2416,6 +2489,7 @@ function renderDiscussionShell(containerId) {
 
   // Live Voice Note Recording (MediaRecorder API)
   voiceBtnEl?.addEventListener('click', async () => {
+    toggleAttachMenu(false);
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       showToast('Microphone recording is not supported in this browser');
       return;
@@ -2504,7 +2578,7 @@ function renderDiscussionShell(containerId) {
 
     if (submitBtnEl) {
       submitBtnEl.disabled = true;
-      submitBtnEl.textContent = 'Sending...';
+      submitBtnEl.classList.add('is-sending');
     }
 
     // 1. Upload media to Supabase Storage (`discussion-media` bucket) if available, otherwise fallback to Data URL
@@ -2578,11 +2652,11 @@ function renderDiscussionShell(containerId) {
     inst.isSpoiler = false;
     if (inputEl) inputEl.value = '';
     if (fileInputEl) fileInputEl.value = '';
-    spoilerBtnEl?.classList.remove('active');
+    syncSpoilerUI();
     updateMediaPreviewUI();
     if (submitBtnEl) {
       submitBtnEl.disabled = false;
-      submitBtnEl.textContent = 'Send';
+      submitBtnEl.classList.remove('is-sending');
     }
 
     renderDiscussionFeed(containerId, true);
@@ -2637,8 +2711,8 @@ function renderDiscussionFeed(containerId, scrollToBottom = false) {
     const scopeLabel = inst.scope === 'episode' ? `Episode ${inst.episodeNumber}` : 'this anime';
     feedEl.innerHTML = `
       <div class="kuro-disc-empty">
-        <div class="kuro-disc-empty-title">No messages in ${escapeHtmlText(scopeLabel)} chat yet</div>
-        <div class="kuro-disc-empty-sub">Sign in with Google to send a message, photo, video, or voice note.</div>
+        <div class="kuro-disc-empty-title">No messages for ${escapeHtmlText(scopeLabel)} yet</div>
+        <div class="kuro-disc-empty-sub">Start the conversation with a comment, photo, video, or voice note.</div>
       </div>
     `;
     return;
