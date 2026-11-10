@@ -1200,7 +1200,7 @@ const scheduleViewState = {
 
 function getPakistanNowParts() {
   const now = new Date();
-  // Convert current instant to Asia/Karachi (UTC+05:00)
+  // Asia/Karachi (UTC+05:00)
   const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
   const pktDate = new Date(utcMs + (5 * 3600000));
 
@@ -1261,6 +1261,12 @@ function buildWeeklySchedulePKT(homeData) {
   for (const item of sources) {
     const id = Number(item?.anime_id);
     if (!id || seenIds.has(id)) continue;
+    const title = (item.title || item.title_english || '').toLowerCase();
+    const genres = (item.genres || '').toLowerCase();
+    // Exclude OVA, Special, Uncensored, and 18+/Hentai/Ecchi content from schedule
+    if (title.includes('ova') || title.includes('special') || title.includes('uncensored') || title.includes('hentai')) continue;
+    if (genres.includes('hentai') || genres.includes('ecchi') || genres.includes('erotica')) continue;
+
     seenIds.add(id);
     rawPool.push(item);
     if (rawPool.length >= 70) break;
@@ -1311,7 +1317,7 @@ function buildWeeklySchedulePKT(homeData) {
       : ((anime.sub || anime.dub) ? baseEpCount : 0);
     const hasAnyStream = availStreams > 0 && (anime.sub !== false || anime.dub === true);
 
-    // Determine whether this scheduled episode's video is available or unavailable (blurred)
+    // Determine whether this scheduled episode's video is available or unavailable (blurry thumbnail)
     let isVideoAvailable = false;
     let scheduledEp = baseEpCount;
     let statusReason = '';
@@ -1319,7 +1325,7 @@ function buildWeeklySchedulePKT(homeData) {
     if (!hasAnyStream) {
       isVideoAvailable = false;
       scheduledEp = baseEpCount;
-      statusReason = 'Video Not Available';
+      statusReason = 'Upcoming in PKT';
     } else if (dayObj.isFutureDay) {
       // Future day of the week in Pakistan time -> Next episode hasn't aired yet
       isVideoAvailable = false;
@@ -1327,7 +1333,6 @@ function buildWeeklySchedulePKT(homeData) {
       statusReason = 'Upcoming in PKT';
     } else if (dayObj.isToday) {
       // Today in Pakistan time: compare slot time against live PKT clock
-      // Also ensure at least the last 3 late slots or future slots show upcoming/pending if not yet aired
       if (slotMinutes <= pktNow.minutesOfDay && slotOrder < 6) {
         isVideoAvailable = true;
         scheduledEp = baseEpCount;
@@ -1341,15 +1346,15 @@ function buildWeeklySchedulePKT(homeData) {
           const mLeft = diffMins % 60;
           statusReason = hLeft > 0 ? ('Airs in ' + hLeft + 'h ' + mLeft + 'm') : ('Airs in ' + mLeft + 'm');
         } else {
-          statusReason = 'Video Pending Upload';
+          statusReason = 'Pending Stream';
         }
       }
     } else {
-      // Past day of this week: mostly available, except items where next episode stream is still pending
+      // Past day of this week
       if (slotOrder === 8 || slotOrder === 9) {
         isVideoAvailable = false;
         scheduledEp = baseEpCount + 1;
-        statusReason = 'Video Pending Upload';
+        statusReason = 'Pending Stream';
       } else {
         isVideoAvailable = true;
         scheduledEp = baseEpCount;
@@ -1397,9 +1402,9 @@ function initHomeScheduleSection(homeData) {
     filterGroup.setAttribute('role', 'tablist');
     filterGroup.setAttribute('aria-label', 'Filter schedule by video availability');
     filterGroup.innerHTML =
-      '<button type="button" class="schedule-filter-btn active" data-filter="all">All Schedule</button>' +
-      '<button type="button" class="schedule-filter-btn" data-filter="available">Available</button>' +
-      '<button type="button" class="schedule-filter-btn" data-filter="unavailable">Unavailable (Blurred)</button>';
+      '<button type="button" class="schedule-filter-btn active" data-filter="all">All Shows</button>' +
+      '<button type="button" class="schedule-filter-btn" data-filter="available">Ready to Stream</button>' +
+      '<button type="button" class="schedule-filter-btn" data-filter="unavailable">Upcoming (PKT)</button>';
     controlsEl.insertBefore(filterGroup, controlsEl.firstChild);
 
     filterGroup.querySelectorAll('.schedule-filter-btn').forEach(btn => {
@@ -1417,7 +1422,7 @@ function initHomeScheduleSection(homeData) {
     if (!clockEl) return;
     const pkt = getPakistanNowParts();
     clockEl.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
       '<span>' + pkt.clockLabel + '</span>';
   };
   updateClock();
@@ -1439,7 +1444,7 @@ function renderScheduleDaysTabs() {
       '<button type="button" class="schedule-day-btn' + (isActive ? ' active' : '') + '" data-day-idx="' + day.dayIdx + '">' +
         '<div class="schedule-day-top">' +
           '<span class="schedule-day-name">' + day.dayName + '</span>' +
-          (day.isToday ? '<span class="schedule-today-badge">Today</span>' : '') +
+          (day.isToday ? '<span class="schedule-today-tag">Today</span>' : '') +
         '</div>' +
         '<span class="schedule-day-date">' + day.dateLabel + ' · PKT</span>' +
         '<span class="schedule-day-count">' + day.items.length + ' Shows · ' + availCount + ' Ready</span>' +
@@ -1476,53 +1481,57 @@ function renderScheduleDayItems() {
 
   if (visibleItems.length === 0) {
     gridEl.innerHTML =
-      '<div style="grid-column: 1 / -1; text-align: center; padding: 32px 16px; color: #94a3b8; font-size: 0.88rem;">' +
-        'No scheduled anime match this filter on ' + currentDay.dayName + ' (' + currentDay.dateLabel + ' PKT).' +
+      '<div class="schedule-empty-state">' +
+        'No scheduled anime match this filter for ' + currentDay.dayName + ' (' + currentDay.dateLabel + ' PKT).' +
       '</div>';
   } else {
     gridEl.innerHTML = visibleItems.map(item => {
       const stateClass = item.isVideoAvailable ? 'is-video-available' : 'is-video-unavailable';
-      const statusBadge = item.isVideoAvailable
-        ? '<span class="schedule-avail-badge">● Video Available</span>'
-        : '<span class="schedule-unavail-badge">🔒 ' + item.statusReason + '</span>';
 
-      const actionBtn = item.isVideoAvailable
-        ? '<div class="schedule-watch-btn">' +
-            '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 4 20 12 6 20 6 4"/></svg>' +
-            '<span>Watch Ep ' + item.scheduledEp + '</span>' +
+      // Clean, unslop status line:
+      const statusMeta = item.isVideoAvailable
+        ? '<span class="sch-meta-status ready"><span class="sch-dot ready"></span>Ready to stream</span>'
+        : '<span class="sch-meta-status upcoming"><span class="sch-dot pending"></span>' + item.statusReason + '</span>';
+
+      // Clean unslop right-side action:
+      const actionCol = item.isVideoAvailable
+        ? '<div class="sch-play-trigger">' +
+            '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 5 19 12 7 19 7 5"/></svg>' +
+            '<span>Stream</span>' +
           '</div>'
-        : '<div class="schedule-locked-btn" title="Video not available yet">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' +
-            '<span>Unavailable</span>' +
+        : '<div class="sch-countdown-tag">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
+            '<span>' + (item.statusReason.includes('Airs in') ? item.statusReason : item.timeLabelPKT) + '</span>' +
           '</div>';
 
-      const lockOverlay = item.isVideoAvailable
+      // Subtle poster frosted badge when video is not yet available:
+      const posterBadge = item.isVideoAvailable
         ? ''
-        : '<div class="schedule-poster-lock" aria-hidden="true">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>' +
+        : '<div class="sch-poster-frost-badge" aria-hidden="true">' +
+            '<span>Upcoming</span>' +
           '</div>';
 
       return (
         '<a href="/anime/' + item.anime_id + '" class="schedule-card ' + stateClass + '" data-id="' + item.anime_id + '" data-available="' + item.isVideoAvailable + '" data-ep="' + item.scheduledEp + '" data-time="' + item.timeLabelPKT + '">' +
           '<div class="schedule-time-col">' +
             '<span class="schedule-pkt-time">' + item.timeLabelPKT + '</span>' +
-            '<span class="schedule-pkt-zone"><span class="schedule-status-dot"></span>PKT</span>' +
+            '<span class="schedule-pkt-zone">PKT</span>' +
           '</div>' +
           '<div class="schedule-poster-wrap">' +
             '<img src="' + item.poster + '" alt="' + item.title.replace(/"/g, '&quot;') + '" class="schedule-poster-img" loading="lazy" />' +
-            lockOverlay +
+            posterBadge +
           '</div>' +
           '<div class="schedule-info-col">' +
-            '<div class="schedule-anime-title schedule-blur-body">' + item.title + '</div>' +
+            '<div class="schedule-anime-title">' + item.title + '</div>' +
             '<div class="schedule-meta-row">' +
-              '<span class="schedule-ep-pill">Episode ' + item.scheduledEp + '</span>' +
-              (item.sub ? '<span class="badge-pill badge-sub" style="font-size:0.62rem;padding:1px 5px;">SUB</span>' : '') +
-              (item.dub ? '<span class="badge-pill badge-dub" style="font-size:0.62rem;padding:1px 5px;">DUB</span>' : '') +
-              statusBadge +
+              '<span class="schedule-ep-pill">Ep ' + item.scheduledEp + '</span>' +
+              (item.sub ? '<span class="sch-audio-pill">SUB</span>' : '') +
+              (item.dub ? '<span class="sch-audio-pill">DUB</span>' : '') +
+              statusMeta +
             '</div>' +
           '</div>' +
           '<div class="schedule-action-col">' +
-            actionBtn +
+            actionCol +
           '</div>' +
         '</a>'
       );
@@ -1540,7 +1549,7 @@ function renderScheduleDayItems() {
       const pktTime = card.dataset.time;
 
       if (!isAvail) {
-        showToast('Episode ' + epNum + ' video is not available yet (Scheduled: ' + pktTime + ' Pakistan Time). Opening anime info...');
+        showToast('Episode ' + epNum + ' is scheduled for ' + pktTime + ' Pakistan Time. Opening anime details...');
       }
       openAnimeDetail(animeId);
     });
@@ -1559,14 +1568,14 @@ function renderScheduleDayItems() {
     const showMoreBtnHtml = filtered.length > 8
       ? '<button type="button" class="schedule-toggle-more' + (scheduleViewState.expanded ? ' expanded' : '') + '" id="btn-schedule-toggle-more">' +
           '<span>' + (scheduleViewState.expanded ? 'Show Less' : ('Show Full Day (' + filtered.length + ' Shows)')) + '</span>' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
         '</button>'
       : '';
 
     footerBar.innerHTML =
       '<div class="schedule-legend">' +
-        '<span class="schedule-legend-item"><span class="schedule-status-dot" style="background:#10b981;"></span> Sharp = Episode Video Available</span>' +
-        '<span class="schedule-legend-item"><span class="schedule-status-dot" style="background:#f59e0b;"></span> Blurry = Video Not Available Yet (PKT Schedule)</span>' +
+        '<span><span class="sch-legend-bullet ready"></span>Ready to stream</span>' +
+        '<span><span class="sch-legend-bullet blurred"></span>Upcoming broadcast (PKT)</span>' +
       '</div>' +
       showMoreBtnHtml;
 

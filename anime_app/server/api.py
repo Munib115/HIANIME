@@ -556,7 +556,7 @@ def home():
 
 
 def build_schedule_catalog():
-    """Return airing & seasonal anime enriched with stream availability counts for the PKT Schedule."""
+    """Return clean airing broadcast TV anime enriched with stream availability counts for the PKT Schedule."""
     items = rows("""
         SELECT a.anime_id, a.anilist_id, a.title, a.title_english, a.type, a.status,
                a.episode_count, a.al_episodes, a.anilist_score, a.mal_score, a.season_year,
@@ -570,7 +570,9 @@ def build_schedule_catalog():
         WHERE (a.status LIKE '%Currently Airing%' OR a.anilist_status='RELEASING' OR a.category='airing')
           AND a.status NOT LIKE '%Finished%'
           AND (a.anilist_status IS NULL OR a.anilist_status != 'FINISHED')
-          AND (a.title NOT LIKE '%Uncensored%')
+          AND (a.title NOT LIKE '%Uncensored%' AND a.title NOT LIKE '%Special%' AND a.title NOT LIKE '%OVA%' AND a.title NOT LIKE '%Hentai%')
+          AND (a.genres IS NULL OR (a.genres NOT LIKE '%Hentai%' AND a.genres NOT LIKE '%Ecchi%'))
+          AND (a.type IS NULL OR a.type = 'TV' OR a.type LIKE '%TV%')
         ORDER BY a.anilist_popularity DESC NULLS LAST
         LIMIT 70
     """)
