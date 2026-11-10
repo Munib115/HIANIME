@@ -1636,8 +1636,8 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
             <i data-lucide="play"></i> ${resumeEpLabel}
           </button>
           <button class="btn-secondary ${watchlisted ? 'active' : ''}" id="detail-bookmark-btn">
-            <i data-lucide="${watchlisted ? 'check' : 'bookmark'}"></i>
-            <span>${watchlisted ? 'Saved' : 'Watchlist'}</span>
+            <i data-lucide="bookmark"></i>
+            <span>${watchlisted ? 'In Library' : 'Add to Library'}</span>
           </button>
         </div>
 
@@ -1776,7 +1776,7 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
       toggleWatchlist(anime);
       const nowSaved = isWatchlisted(animeId);
       bookmarkBtn.classList.toggle('active', nowSaved);
-      bookmarkBtn.innerHTML = `<i data-lucide="${nowSaved ? 'check' : 'bookmark'}"></i><span>${nowSaved ? 'Saved' : 'Watchlist'}</span>`;
+      bookmarkBtn.innerHTML = `<i data-lucide="bookmark"></i><span>${nowSaved ? 'In Library' : 'Add to Library'}</span>`;
       refreshIcons();
     });
 
@@ -1934,8 +1934,8 @@ async function openWatchPlayer(episodeIndex) {
         <div class="player-anime-title">${anime.title}</div>
         <div class="player-ep-title">Episode ${ep.episode_number}${ep.title ? `: ${ep.title}` : ''}</div>
       </div>
-      <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="Bookmark anime">
-        <i data-lucide="${isWatchlisted(anime.anime_id) ? 'check' : 'bookmark'}"></i>
+      <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="${isWatchlisted(anime.anime_id) ? 'In Library' : 'Add to Library'}" title="${isWatchlisted(anime.anime_id) ? 'In Library' : 'Add to Library'}">
+        <i data-lucide="bookmark"></i>
       </button>
     </div>
 
@@ -2038,7 +2038,9 @@ async function openWatchPlayer(episodeIndex) {
     toggleWatchlist(anime);
     const nowSaved = isWatchlisted(anime.anime_id);
     playerBookmarkBtn.classList.toggle('active', nowSaved);
-    playerBookmarkBtn.innerHTML = `<i data-lucide="${nowSaved ? 'check' : 'bookmark'}"></i>`;
+    playerBookmarkBtn.setAttribute('aria-label', nowSaved ? 'In Library' : 'Add to Library');
+    playerBookmarkBtn.setAttribute('title', nowSaved ? 'In Library' : 'Add to Library');
+    playerBookmarkBtn.innerHTML = `<i data-lucide="bookmark"></i>`;
     refreshIcons();
   });
 

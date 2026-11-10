@@ -272,7 +272,27 @@ button, input, select, textarea, optgroup {
 
 .header-icon-btn.active svg {
   stroke: #FFFFFF !important;
+  fill: none;
+}
+
+.header-icon-btn.active svg.lucide-bookmark,
+.header-icon-btn.active svg.lucide-star,
+.header-icon-btn.active svg.lucide-heart,
+.detail-actions-bar .btn-secondary.active svg.lucide-bookmark {
   fill: #FFFFFF !important;
+  stroke: #FFFFFF !important;
+}
+
+/* Guarantee Lucide stroke-only paths never deform with solid fill */
+svg.lucide-check,
+svg.lucide-check path,
+svg.lucide-x,
+svg.lucide-x path,
+svg.lucide-arrow-left,
+svg.lucide-arrow-left path,
+svg.lucide-chevron-right,
+svg.lucide-chevron-down {
+  fill: none !important;
 }
 
 .badge-dot {
