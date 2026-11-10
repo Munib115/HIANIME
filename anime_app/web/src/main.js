@@ -11,7 +11,10 @@ import {
   uploadDiscussionMediaToSupabase,
   fetchDiscussionMessagesFromSupabase,
   postDiscussionMessageToSupabase,
-  deleteDiscussionMessageFromSupabase
+  deleteDiscussionMessageFromSupabase,
+  generateSyncShareCode,
+  lookupSyncShareCode,
+  importSyncShare
 } from './supabase.js';
 
 // Initialize Vercel Web Analytics
@@ -47,7 +50,9 @@ import {
   User,
   Settings,
   LogOut,
-  Trash2
+  Trash2,
+  Share2,
+  Copy
 } from 'lucide';
 
 // ─── Global State & Storage ─────────────────────────────────────────
@@ -96,7 +101,7 @@ function refreshIcons() {
       Home, Compass, Search, Bookmark, Play, Star, ArrowLeft,
       Layers, Volume2, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
       ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download, Plus,
-      User, Settings, LogOut, Trash2
+      User, Settings, LogOut, Trash2, Share2, Copy
     }
   });
 }
@@ -4098,6 +4103,335 @@ function initUserMenuAndSettings() {
   renderAuthState();
 }
 
+// ─── Share & Sync Watch History and Library (Google Auth Gated) ──────
+function initSyncModal() {
+  const modalBackdrop = document.getElementById('kuro-sync-share-modal');
+  const btnClose = document.getElementById('btn-close-sync-modal');
+  const btnOpenHeader = document.getElementById('btn-user-sync-share');
+  const btnOpenCollection = document.getElementById('btn-open-sync-modal');
+
+  const authGate = document.getElementById('sync-auth-gate');
+  const authContent = document.getElementById('sync-auth-content');
+  const btnAuthTrigger = document.getElementById('btn-sync-auth-trigger');
+
+  const tabShare = document.getElementById('tab-btn-share-pane');
+  const tabImport = document.getElementById('tab-btn-import-pane');
+  const panelShare = document.getElementById('panel-sync-share');
+  const panelImport = document.getElementById('panel-sync-import');
+
+  const statLib = document.getElementById('sync-stat-lib-count');
+  const statHist = document.getElementById('sync-stat-hist-count');
+  const btnGenerate = document.getElementById('btn-trigger-generate-code');
+  const btnGenerateLabel = document.getElementById('btn-generate-code-label');
+  const codeSection = document.getElementById('sync-code-section');
+  const codeTokenText = document.getElementById('sync-code-token-text');
+  const linkInput = document.getElementById('sync-link-input');
+  const btnCopyCode = document.getElementById('btn-copy-sync-code');
+  const btnCopyCodeLabel = document.getElementById('btn-copy-code-label');
+  const btnCopyLink = document.getElementById('btn-copy-sync-link');
+
+  const inputCode = document.getElementById('input-sync-code');
+  const btnLookup = document.getElementById('btn-trigger-lookup-code');
+  const previewCard = document.getElementById('sync-preview-container');
+  const previewAuthor = document.getElementById('sync-preview-author');
+  const previewDetails = document.getElementById('sync-preview-details');
+  const previewSampleGrid = document.getElementById('sync-preview-sample-grid');
+  const btnImportConfirm = document.getElementById('btn-trigger-import-confirm');
+
+  let activePreviewShare = null;
+
+  function openModal(defaultTab = 'share', prefillCode = '') {
+    const user = getGoogleAuthenticatedUser();
+    if (!user) {
+      if (authGate) authGate.style.display = 'block';
+      if (authContent) authContent.style.display = 'none';
+    } else {
+      if (authGate) authGate.style.display = 'none';
+      if (authContent) authContent.style.display = 'block';
+      if (statLib) statLib.textContent = String(state.watchlist.length || 0);
+      if (statHist) statHist.textContent = String(state.history.length || 0);
+    }
+
+    if (defaultTab === 'import') {
+      switchSyncTab('import');
+      if (prefillCode && inputCode) {
+        inputCode.value = prefillCode.toUpperCase();
+        triggerLookup(prefillCode);
+      }
+    } else {
+      switchSyncTab('share');
+    }
+
+    modalBackdrop?.classList.add('open');
+    modalBackdrop?.setAttribute('aria-hidden', 'false');
+    refreshIcons();
+  }
+
+  function closeModal() {
+    modalBackdrop?.classList.remove('open');
+    modalBackdrop?.setAttribute('aria-hidden', 'true');
+  }
+
+  function switchSyncTab(tab) {
+    if (tab === 'import') {
+      tabShare?.classList.remove('active');
+      tabShare?.setAttribute('aria-selected', 'false');
+      tabImport?.classList.add('active');
+      tabImport?.setAttribute('aria-selected', 'true');
+      if (panelShare) panelShare.style.display = 'none';
+      if (panelImport) panelImport.style.display = 'block';
+      setTimeout(() => inputCode?.focus(), 100);
+    } else {
+      tabImport?.classList.remove('active');
+      tabImport?.setAttribute('aria-selected', 'false');
+      tabShare?.classList.add('active');
+      tabShare?.setAttribute('aria-selected', 'true');
+      if (panelImport) panelImport.style.display = 'none';
+      if (panelShare) panelShare.style.display = 'block';
+    }
+  }
+
+  // Trigger Google Login if Guest
+  btnAuthTrigger?.addEventListener('click', () => {
+    closeModal();
+    document.getElementById('btn-user-google-login')?.click();
+  });
+
+  // Open triggers
+  btnOpenCollection?.addEventListener('click', () => openModal('share'));
+  btnOpenHeader?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('user-dropdown-popover')?.classList.remove('open');
+    openModal('share');
+  });
+
+  // Close triggers
+  btnClose?.addEventListener('click', closeModal);
+  modalBackdrop?.addEventListener('click', (e) => {
+    if (e.target === modalBackdrop) closeModal();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modalBackdrop?.classList.contains('open')) {
+      closeModal();
+    }
+  });
+
+  // Tab switching
+  tabShare?.addEventListener('click', () => switchSyncTab('share'));
+  tabImport?.addEventListener('click', () => switchSyncTab('import'));
+
+  // Generate Code Handler
+  btnGenerate?.addEventListener('click', async () => {
+    const user = getGoogleAuthenticatedUser();
+    if (!user) {
+      showToast('Please sign in with Google to generate a share code');
+      openModal('share');
+      return;
+    }
+
+    if (btnGenerateLabel) btnGenerateLabel.textContent = 'Generating Secure Code...';
+    btnGenerate.disabled = true;
+
+    try {
+      const res = await generateSyncShareCode(state.watchlist, state.history);
+      if (!res.ok) {
+        showToast(res.error || 'Could not generate code');
+        return;
+      }
+
+      if (codeTokenText) codeTokenText.textContent = res.code;
+      const shareUrl = `https://kuroanime-flax.vercel.app/sync?code=${encodeURIComponent(res.code)}`;
+      if (linkInput) linkInput.value = shareUrl;
+      if (codeSection) codeSection.style.display = 'block';
+
+      showToast(`Share code ${res.code} created!`);
+    } catch (e) {
+      showToast('Failed to create share code');
+    } finally {
+      if (btnGenerateLabel) btnGenerateLabel.textContent = 'Generate New Sync Code';
+      btnGenerate.disabled = false;
+      refreshIcons();
+    }
+  });
+
+  // Copy Code
+  btnCopyCode?.addEventListener('click', async () => {
+    const code = codeTokenText?.textContent?.trim();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      if (btnCopyCodeLabel) btnCopyCodeLabel.textContent = 'Copied!';
+      showToast(`Code ${code} copied to clipboard`);
+      setTimeout(() => {
+        if (btnCopyCodeLabel) btnCopyCodeLabel.textContent = 'Copy';
+      }, 2000);
+    } catch (e) {
+      showToast('Could not copy to clipboard');
+    }
+  });
+
+  // Copy Link
+  btnCopyLink?.addEventListener('click', async () => {
+    const url = linkInput?.value?.trim();
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      btnCopyLink.textContent = 'Copied!';
+      showToast('Direct sync link copied to clipboard');
+      setTimeout(() => {
+        btnCopyLink.textContent = 'Copy Link';
+      }, 2000);
+    } catch (e) {
+      showToast('Could not copy link');
+    }
+  });
+
+  // Lookup Code Handler
+  async function triggerLookup(overrideCode = '') {
+    const code = (overrideCode || inputCode?.value || '').trim();
+    if (!code) {
+      showToast('Please enter a share code');
+      return;
+    }
+
+    if (btnLookup) {
+      btnLookup.disabled = true;
+      btnLookup.textContent = 'Searching...';
+    }
+
+    try {
+      const res = await lookupSyncShareCode(code);
+      if (!res.ok || !res.share) {
+        showToast(res.error || 'Share code not found');
+        if (previewCard) previewCard.style.display = 'none';
+        return;
+      }
+
+      activePreviewShare = res.share;
+      const share = res.share;
+
+      if (previewAuthor) previewAuthor.textContent = `${share.user_name}'s Collection`;
+      if (previewDetails) {
+        previewDetails.textContent = `${share.library_count || 0} anime in library · ${share.history_count || 0} episodes watched`;
+      }
+
+      // Preview poster thumbnails
+      if (previewSampleGrid) {
+        const samples = (share.library_data || []).slice(0, 5);
+        if (samples.length > 0) {
+          previewSampleGrid.innerHTML = samples.map(item => `
+            <img
+              src="${item.poster || item.anime_poster || '/favicon.svg'}"
+              alt="${item.title || 'Anime'}"
+              class="sync-sample-poster"
+              onerror="this.onerror=null;this.src='/favicon.svg';"
+            />
+          `).join('');
+        } else {
+          previewSampleGrid.innerHTML = '<span style="font-size:0.75rem;color:var(--color-text-muted)">Ready to sync anime records</span>';
+        }
+      }
+
+      if (previewCard) previewCard.style.display = 'block';
+      refreshIcons();
+    } catch (e) {
+      showToast('Error looking up sync code');
+    } finally {
+      if (btnLookup) {
+        btnLookup.disabled = false;
+        btnLookup.textContent = 'Find';
+      }
+    }
+  }
+
+  btnLookup?.addEventListener('click', () => triggerLookup());
+  inputCode?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      triggerLookup();
+    }
+  });
+
+  // Confirm Import Handler
+  btnImportConfirm?.addEventListener('click', async () => {
+    if (!activePreviewShare) return;
+    const user = getGoogleAuthenticatedUser();
+    if (!user) {
+      showToast('Please sign in with Google to sync to your account');
+      openModal('import');
+      return;
+    }
+
+    btnImportConfirm.disabled = true;
+    btnImportConfirm.innerHTML = '<span>Syncing Cloud Records...</span>';
+
+    try {
+      const res = await importSyncShare(activePreviewShare);
+      if (!res.ok) {
+        showToast(res.error || 'Failed to sync library');
+        return;
+      }
+
+      // Merge into local state.watchlist without duplicates
+      const incomingLib = activePreviewShare.library_data || [];
+      for (const item of incomingLib) {
+        const aId = Number(item.anime_id);
+        if (aId && !state.watchlist.some(w => Number(w.anime_id) === aId)) {
+          state.watchlist.unshift({
+            anime_id: aId,
+            title: item.title || item.anime_title || 'Anime',
+            poster: item.poster || item.anime_poster || '',
+            type: item.type || item.anime_type || 'TV',
+            anilist_score: item.anilist_score,
+            added_at: Date.now()
+          });
+        }
+      }
+
+      // Merge into local state.history
+      const incomingHist = activePreviewShare.history_data || [];
+      for (const entry of incomingHist) {
+        const aId = Number(entry.anime_id);
+        if (aId) {
+          const existingIdx = state.history.findIndex(h => Number(h.anime_id) === aId);
+          if (existingIdx === -1) {
+            state.history.unshift({
+              anime_id: aId,
+              title: entry.title || entry.anime_title || 'Anime',
+              poster: entry.poster || entry.anime_poster || '',
+              episode_id: entry.episode_id || '',
+              episode_number: Number(entry.episode_number) || 1,
+              episode_title: entry.episode_title || '',
+              progress_seconds: Number(entry.progress_seconds) || 0,
+              duration_seconds: Number(entry.duration_seconds) || 0,
+              completed: Boolean(entry.completed),
+              timestamp: Date.now()
+            });
+          }
+        }
+      }
+
+      localStorage.setItem('kuro_watchlist', JSON.stringify(state.watchlist));
+      localStorage.setItem('kuro_history', JSON.stringify(state.history));
+      updateWatchlistBadge();
+      renderWatchlist();
+
+      showToast(`Successfully synced ${res.libraryCount} anime from ${res.authorName}!`);
+      closeModal();
+    } catch (e) {
+      showToast('Sync error occurred');
+    } finally {
+      btnImportConfirm.disabled = false;
+      btnImportConfirm.innerHTML = '<i data-lucide="download"></i><span>Sync to My Account</span>';
+      refreshIcons();
+    }
+  });
+
+  return { openModal, closeModal };
+}
+
+let syncModalInstance = null;
+
 // ─── Initial URL Route Dispatcher ────────────────────────────────────
 function handleInitialRoute() {
   const path = window.location.pathname;
@@ -4132,6 +4466,11 @@ function handleInitialRoute() {
     }
   } else if (path === '/watchlist') {
     switchTab('watchlist');
+  } else if (path === '/sync') {
+    switchTab('watchlist');
+    const searchParams = new URLSearchParams(window.location.search);
+    const code = searchParams.get('code') || searchParams.get('sync') || '';
+    setTimeout(() => syncModalInstance?.openModal('import', code), 250);
   } else {
     initHome();
   }
@@ -4142,7 +4481,8 @@ function handleInitialRoute() {
   applyVisualSettings();
   initUserMenuAndSettings();
   updateWatchlistBadge();
-  initHome();
+  syncModalInstance = initSyncModal();
+  handleInitialRoute();
   refreshIcons();
 });
 

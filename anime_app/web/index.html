@@ -124,7 +124,19 @@
                   <i data-lucide="chevron-right" class="item-arrow"></i>
                 </button>
 
-                <!-- Primary Option 2: Settings -->
+                <!-- Primary Option 2: Share & Sync Library with Friends -->
+                <button type="button" class="user-popover-item sync-share-item" id="btn-user-sync-share">
+                  <span class="settings-icon-box">
+                    <i data-lucide="share-2"></i>
+                  </span>
+                  <div class="user-popover-text">
+                    <span class="item-primary-label">Share &amp; Sync Library</span>
+                    <span class="item-sub-label">Share with friends via sync code</span>
+                  </div>
+                  <i data-lucide="chevron-right" class="item-arrow"></i>
+                </button>
+
+                <!-- Primary Option 3: Settings -->
                 <button type="button" class="user-popover-item settings-item" id="btn-user-settings">
                   <span class="settings-icon-box">
                     <i data-lucide="settings"></i>
@@ -544,8 +556,16 @@
         <!-- 4. Watchlist & History View -->
         <section class="view-screen" id="view-watchlist">
           <div class="browse-header">
-            <h1 class="page-title">My Collection</h1>
-            <p class="page-subtitle">Your saved watchlist and continue-watching history</p>
+            <div class="collection-header-row">
+              <div>
+                <h1 class="page-title">My Collection</h1>
+                <p class="page-subtitle">Your saved watchlist and continue-watching history</p>
+              </div>
+              <button type="button" class="btn-collection-sync" id="btn-open-sync-modal" title="Share with friends or enter a sync code">
+                <i data-lucide="share-2"></i>
+                <span>Share &amp; Sync</span>
+              </button>
+            </div>
           </div>
 
           <div class="tab-pill-bar">
@@ -816,6 +836,140 @@
             <button type="button" class="btn-google-confirm" id="btn-google-confirm-signin">
               Continue as Kuro Otaku
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Library & Watch History Sync Modal -->
+      <div class="sync-modal-backdrop" id="kuro-sync-share-modal" aria-hidden="true">
+        <div class="sync-modal-card" role="dialog" aria-modal="true" aria-labelledby="sync-modal-title">
+          <button type="button" class="sync-modal-close" id="btn-close-sync-modal" aria-label="Close modal">
+            <i data-lucide="x"></i>
+          </button>
+
+          <div class="sync-modal-header">
+            <div class="sync-modal-icon-badge">
+              <i data-lucide="share-2"></i>
+            </div>
+            <div>
+              <h3 class="sync-modal-title" id="sync-modal-title">Share &amp; Sync Library</h3>
+              <p class="sync-modal-sub">Sync watch history and anime lists with friends</p>
+            </div>
+          </div>
+
+          <!-- Auth Gate for Guests -->
+          <div class="sync-auth-gate" id="sync-auth-gate" style="display:none">
+            <div class="sync-gate-badge">
+              <i data-lucide="shield"></i>
+            </div>
+            <h4 class="sync-gate-heading">Google Account Required</h4>
+            <p class="sync-gate-desc">
+              Sign in with Google to generate a secure share code or import a friend's watch progress to your account.
+            </p>
+            <button type="button" class="btn-sync-google-auth" id="btn-sync-auth-trigger">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+              </svg>
+              <span>Sign in with Google</span>
+            </button>
+          </div>
+
+          <!-- Authenticated Container -->
+          <div class="sync-modal-body" id="sync-auth-content">
+            <div class="sync-nav-tabs" role="tablist">
+              <button type="button" class="sync-tab-btn active" id="tab-btn-share-pane" role="tab" aria-selected="true">
+                <i data-lucide="share-2"></i> Share My Data
+              </button>
+              <button type="button" class="sync-tab-btn" id="tab-btn-import-pane" role="tab" aria-selected="false">
+                <i data-lucide="download"></i> Enter Friend's Code
+              </button>
+            </div>
+
+            <!-- Share Pane -->
+            <div class="sync-tab-panel" id="panel-sync-share">
+              <div class="sync-stats-grid">
+                <div class="sync-stat-box">
+                  <span class="sync-stat-val" id="sync-stat-lib-count">0</span>
+                  <span class="sync-stat-title">Saved in Library</span>
+                </div>
+                <div class="sync-stat-sep"></div>
+                <div class="sync-stat-box">
+                  <span class="sync-stat-val" id="sync-stat-hist-count">0</span>
+                  <span class="sync-stat-title">Watched Episodes</span>
+                </div>
+              </div>
+
+              <!-- Generated Code Display -->
+              <div class="sync-code-section" id="sync-code-section" style="display:none">
+                <div class="sync-code-banner">
+                  <span class="sync-code-caption">Your Unique Share Code</span>
+                  <div class="sync-code-token-row">
+                    <code class="sync-code-token" id="sync-code-token-text">KURO-XXXXXX</code>
+                    <button type="button" class="btn-sync-token-copy" id="btn-copy-sync-code">
+                      <i data-lucide="copy"></i>
+                      <span id="btn-copy-code-label">Copy</span>
+                    </button>
+                  </div>
+                  <div class="sync-link-row">
+                    <input type="text" readonly class="sync-link-input" id="sync-link-input" value="" />
+                    <button type="button" class="btn-sync-link-copy" id="btn-copy-sync-link">
+                      Copy Link
+                    </button>
+                  </div>
+                  <p class="sync-code-validity">Valid for 30 days. Friends can enter this code to sync your library &amp; progress.</p>
+                </div>
+              </div>
+
+              <button type="button" class="btn-primary btn-generate-sync" id="btn-trigger-generate-code">
+                <i data-lucide="share-2"></i>
+                <span id="btn-generate-code-label">Generate 30-Day Sync Code</span>
+              </button>
+            </div>
+
+            <!-- Import Pane -->
+            <div class="sync-tab-panel" id="panel-sync-import" style="display:none">
+              <div class="sync-input-card">
+                <label for="input-sync-code" class="sync-field-label">Friend's Sync Code</label>
+                <div class="sync-input-row">
+                  <input
+                    type="text"
+                    id="input-sync-code"
+                    class="sync-code-field"
+                    placeholder="KURO-XXXXXX"
+                    maxlength="12"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button type="button" class="btn-primary btn-sync-find" id="btn-trigger-lookup-code">
+                    Find
+                  </button>
+                </div>
+                <p class="sync-field-hint">Paste the code (e.g. KURO-8N4K2P) provided by your friend.</p>
+              </div>
+
+              <!-- Preview Card -->
+              <div class="sync-preview-card" id="sync-preview-container" style="display:none">
+                <div class="sync-preview-top">
+                  <div class="sync-preview-avatar" id="sync-preview-avatar">
+                    <i data-lucide="user"></i>
+                  </div>
+                  <div class="sync-preview-meta">
+                    <div class="sync-preview-author" id="sync-preview-author">Friend's Library</div>
+                    <div class="sync-preview-details" id="sync-preview-details">0 anime &middot; 0 episodes</div>
+                  </div>
+                </div>
+                <div class="sync-preview-sample" id="sync-preview-sample-grid">
+                  <!-- Sample anime items thumbnails -->
+                </div>
+                <button type="button" class="btn-primary btn-import-confirm" id="btn-trigger-import-confirm">
+                  <i data-lucide="download"></i>
+                  <span>Sync to My Account</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

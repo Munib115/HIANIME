@@ -262,3 +262,170 @@ export async function deleteDiscussionMessageFromSupabase(commentId) {
     return false;
   }
 }
+
+/**
+ * Generate a random 6-character uppercase code (avoiding ambiguous 0, O, 1, I)
+ */
+function createRandomShareCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 6; i++) {
+    out += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `KURO-${out}`;
+}
+
+/**
+ * Generate a new sync share code in Supabase with current library and watch history
+ */
+export async function generateSyncShareCode(libraryList = [], historyList = []) {
+  if (!supabase) return { ok: false, error: 'Database service unavailable' };
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: 'auth_required' };
+
+  try {
+    const code = createRandomShareCode();
+    const cleanLibrary = Array.isArray(libraryList) ? libraryList.slice(0, 300) : [];
+    const cleanHistory = Array.isArray(historyList) ? historyList.slice(0, 300) : [];
+
+    const row = {
+      share_code: code,
+      user_id: user.id,
+      user_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Kuro Member',
+      user_avatar: user.user_metadata?.avatar_url || '',
+      library_data: cleanLibrary,
+      history_data: cleanHistory,
+      library_count: cleanLibrary.length,
+      history_count: cleanHistory.length,
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    };
+
+    const { error } = await supabase
+      .from('user_sync_shares')
+      .insert(row);
+
+    if (error) {
+      console.warn('[Supabase sync share insert error]', error);
+      return { ok: false, error: error.message || 'Could not save sync code' };
+    }
+
+    return {
+      ok: true,
+      code,
+      libraryCount: cleanLibrary.length,
+      historyCount: cleanHistory.length,
+      expiresAt: row.expires_at,
+      authorName: row.user_name
+    };
+  } catch (e) {
+    console.error('[Supabase sync share exception]', e);
+    return { ok: false, error: e.message || 'Unexpected sync error' };
+  }
+}
+
+/**
+ * Lookup a shared sync record by code
+ */
+export async function lookupSyncShareCode(rawCode) {
+  if (!supabase || !rawCode) return { ok: false, error: 'Please enter a valid code' };
+
+  let clean = String(rawCode).trim().toUpperCase();
+  if (!clean.startsWith('KURO-') && clean.length === 6) {
+    clean = `KURO-${clean}`;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('user_sync_shares')
+      .select('*')
+      .eq('share_code', clean)
+      .maybeSingle();
+
+    if (error) {
+      return { ok: false, error: error.message || 'Error looking up code' };
+    }
+    if (!data) {
+      return { ok: false, error: 'Code not found or has expired' };
+    }
+
+    if (data.expires_at && new Date(data.expires_at).getTime() < Date.now()) {
+      return { ok: false, error: 'This sync code has expired' };
+    }
+
+    return {
+      ok: true,
+      share: data
+    };
+  } catch (e) {
+    return { ok: false, error: e.message || 'Failed to lookup sync code' };
+  }
+}
+
+/**
+ * Import a friend's shared library and watch history to the signed-in user's account
+ */
+export async function importSyncShare(shareData) {
+  if (!supabase || !shareData) return { ok: false, error: 'Invalid share data' };
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: 'auth_required' };
+
+  const libItems = Array.isArray(shareData.library_data) ? shareData.library_data : [];
+  const histItems = Array.isArray(shareData.history_data) ? shareData.history_data : [];
+
+  let importedLib = 0;
+  let importedHist = 0;
+
+  try {
+    // 1. Sync library items into user's user_library table
+    for (const item of libItems) {
+      if (!item || !item.anime_id) continue;
+      const payload = {
+        user_id: user.id,
+        anime_id: Number(item.anime_id),
+        anime_title: item.title || item.anime_title || 'Anime',
+        anime_poster: item.poster || item.anime_poster || '',
+        anime_type: item.type || item.anime_type || 'TV',
+        anilist_score: item.anilist_score ? Number(item.anilist_score) : null,
+        status: item.status || 'plan_to_watch',
+        is_favorite: Boolean(item.is_favorite),
+        updated_at: new Date().toISOString()
+      };
+      const { error } = await supabase
+        .from('user_library')
+        .upsert(payload, { onConflict: 'user_id,anime_id' });
+      if (!error) importedLib++;
+    }
+
+    // 2. Sync history items into user's watch_history table
+    for (const entry of histItems) {
+      if (!entry || !entry.anime_id) continue;
+      const payload = {
+        user_id: user.id,
+        anime_id: Number(entry.anime_id),
+        anime_title: entry.title || entry.anime_title || 'Anime',
+        anime_poster: entry.poster || entry.anime_poster || '',
+        episode_id: String(entry.episode_id || ''),
+        episode_number: Math.max(1, Math.floor(Number(entry.episode_number) || 1)),
+        episode_title: entry.episode_title || '',
+        progress_seconds: Math.max(0, Math.floor(Number(entry.progress_seconds) || 0)),
+        duration_seconds: Math.max(0, Math.floor(Number(entry.duration_seconds) || 0)),
+        completed: Boolean(entry.completed),
+        updated_at: new Date().toISOString()
+      };
+      const { error } = await supabase
+        .from('watch_history')
+        .upsert(payload, { onConflict: 'user_id,anime_id' });
+      if (!error) importedHist++;
+    }
+
+    return {
+      ok: true,
+      libraryCount: importedLib,
+      historyCount: importedHist,
+      authorName: shareData.user_name || 'Friend'
+    };
+  } catch (e) {
+    return { ok: false, error: e.message || 'Failed to import share items' };
+  }
+}
