@@ -14,7 +14,8 @@ import {
   deleteDiscussionMessageFromSupabase,
   generateSyncShareCode,
   lookupSyncShareCode,
-  importSyncShare
+  importSyncShare,
+  normalizeShareCode
 } from './supabase.js';
 
 // Initialize Vercel Web Analytics
@@ -4294,9 +4295,13 @@ function initSyncModal() {
 
   // Lookup Code Handler
   async function triggerLookup(overrideCode = '') {
-    const code = (overrideCode || inputCode?.value || '').trim();
-    if (!code) {
-      showToast('Please enter a share code');
+    const rawVal = overrideCode || inputCode?.value || '';
+    const code = normalizeShareCode(rawVal);
+    if (inputCode && code) {
+      inputCode.value = code;
+    }
+    if (!code || code === 'KURO-') {
+      showToast('Please enter a share code (e.g. KURO-VD8NHB)');
       return;
     }
 
@@ -4351,6 +4356,18 @@ function initSyncModal() {
   }
 
   btnLookup?.addEventListener('click', () => triggerLookup());
+  inputCode?.addEventListener('input', () => {
+    if (inputCode) {
+      inputCode.value = inputCode.value.toUpperCase();
+    }
+  });
+  inputCode?.addEventListener('paste', () => {
+    setTimeout(() => {
+      if (inputCode) {
+        inputCode.value = normalizeShareCode(inputCode.value);
+      }
+    }, 10);
+  });
   inputCode?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();

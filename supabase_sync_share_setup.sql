@@ -1,70 +1,66 @@
 -- ============================================================================
--- KUROANIME SHARE & SYNC WATCH HISTORY & LIBRARY — SUPABASE SQL SETUP (V2)
--- Fixes: user_id text type (supports both UUID & Google Auth profile IDs)
--- Grants insert/select permissions to anon and authenticated roles
--- Paste this entire script into your Supabase SQL Editor and click "Run".
+-- KUROANIME SHARE & SYNC DATABASE SETUP (V3 - DROP & RECREATE)
+-- Fixes:
+-- 1. Changes user_id from uuid to text (supports Google logins & Otaku profiles)
+-- 2. Grants full SELECT / INSERT / UPDATE / DELETE to anon & authenticated roles
+-- 3. Enables RLS with permissive policies for sharing codes across any device / friend
+-- Paste this ENTIRE block into your Supabase Dashboard -> SQL Editor and click "Run".
 -- ============================================================================
 
--- 1. Drop existing table if created with strict uuid constraint
-drop table if exists public.user_sync_shares cascade;
+-- Step 1: Drop old table and its constraints completely
+DROP TABLE IF EXISTS public.user_sync_shares CASCADE;
 
--- 2. Create table with flexible text user_id
-create table public.user_sync_shares (
-  share_code text primary key,
-  user_id text not null,
-  user_name text not null default 'Friend',
-  user_email text default '',
-  user_avatar text default '',
-  library_data jsonb not null default '[]'::jsonb,
-  history_data jsonb not null default '[]'::jsonb,
-  library_count integer not null default 0,
-  history_count integer not null default 0,
-  created_at timestamptz not null default now(),
-  expires_at timestamptz default (now() + interval '30 days')
+-- Step 2: Create the table with text user_id
+CREATE TABLE public.user_sync_shares (
+  share_code text PRIMARY KEY,
+  user_id text NOT NULL,
+  user_name text NOT NULL DEFAULT 'Kuro Member',
+  user_email text DEFAULT '',
+  user_avatar text DEFAULT '',
+  library_data jsonb NOT NULL DEFAULT '[]'::jsonb,
+  history_data jsonb NOT NULL DEFAULT '[]'::jsonb,
+  library_count integer NOT NULL DEFAULT 0,
+  history_count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz DEFAULT (now() + interval '30 days')
 );
 
--- 3. Indexes for fast lookup by code and user
-create index if not exists idx_sync_shares_user_id on public.user_sync_shares (user_id);
-create index if not exists idx_sync_shares_expires_at on public.user_sync_shares (expires_at);
+-- Step 3: Fast lookup indexes
+CREATE INDEX IF NOT EXISTS idx_sync_shares_user_id ON public.user_sync_shares (user_id);
+CREATE INDEX IF NOT EXISTS idx_sync_shares_expires_at ON public.user_sync_shares (expires_at);
 
--- 4. Enable Row Level Security (RLS)
-alter table public.user_sync_shares enable row level security;
+-- Step 4: Enable Row Level Security (RLS)
+ALTER TABLE public.user_sync_shares ENABLE ROW LEVEL SECURITY;
 
--- 5. Grant API permissions to both anon and authenticated roles
-grant select, insert, update, delete on table public.user_sync_shares to anon, authenticated;
+-- Step 5: Grant API permissions to anon and authenticated roles
+GRANT ALL ON TABLE public.user_sync_shares TO anon, authenticated, service_role;
 
--- Policy A: Anyone with a valid unexpired share code can read it (to preview & import)
-drop policy if exists "Allow read sync shares" on public.user_sync_shares;
-create policy "Allow read sync shares"
-  on public.user_sync_shares
-  for select
-  to anon, authenticated
-  using (expires_at is null or expires_at > now());
+-- Step 6: Create permissive RLS policies so friends can generate and import codes
+DROP POLICY IF EXISTS "Public sync share select" ON public.user_sync_shares;
+CREATE POLICY "Public sync share select"
+  ON public.user_sync_shares
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
 
--- Policy B: Allow authenticated and authorized Google users to insert share codes
-drop policy if exists "Allow insert sync shares" on public.user_sync_shares;
-create policy "Allow insert sync shares"
-  on public.user_sync_shares
-  for insert
-  to anon, authenticated
-  with check (
-    char_length(share_code) >= 6
-    and char_length(user_id) > 0
-  );
+DROP POLICY IF EXISTS "Public sync share insert" ON public.user_sync_shares;
+CREATE POLICY "Public sync share insert"
+  ON public.user_sync_shares
+  FOR INSERT
+  TO anon, authenticated
+  WITH CHECK (true);
 
--- Policy C: Allow updating own share codes
-drop policy if exists "Allow update sync shares" on public.user_sync_shares;
-create policy "Allow update sync shares"
-  on public.user_sync_shares
-  for update
-  to anon, authenticated
-  using (true)
-  with check (true);
+DROP POLICY IF EXISTS "Public sync share update" ON public.user_sync_shares;
+CREATE POLICY "Public sync share update"
+  ON public.user_sync_shares
+  FOR UPDATE
+  TO anon, authenticated
+  USING (true)
+  WITH CHECK (true);
 
--- Policy D: Allow deleting share codes
-drop policy if exists "Allow delete sync shares" on public.user_sync_shares;
-create policy "Allow delete sync shares"
-  on public.user_sync_shares
-  for delete
-  to anon, authenticated
-  using (true);
+DROP POLICY IF EXISTS "Public sync share delete" ON public.user_sync_shares;
+CREATE POLICY "Public sync share delete"
+  ON public.user_sync_shares
+  FOR DELETE
+  TO anon, authenticated
+  USING (true);

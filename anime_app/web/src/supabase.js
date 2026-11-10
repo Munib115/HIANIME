@@ -291,6 +291,28 @@ export async function resolveSyncUser() {
 }
 
 /**
+ * Normalize and sanitize any user-typed or pasted sync share code
+ * Handles spaces (e.g. 'KURO - VD8NHB'), lowercase, missing prefix, or extra dashes.
+ */
+export function normalizeShareCode(rawCode) {
+  if (!rawCode) return '';
+  // 1. Strip all whitespace anywhere (spaces, tabs, newlines)
+  let clean = String(rawCode).replace(/\s+/g, '').toUpperCase();
+  // 2. Collapse consecutive dashes
+  clean = clean.replace(/-+/g, '-');
+  // 3. Ensure standard KURO- prefix format
+  if (!clean.startsWith('KURO-')) {
+    if (clean.startsWith('KURO')) {
+      const remainder = clean.slice(4).replace(/^-+/, '');
+      clean = remainder ? ('KURO-' + remainder) : 'KURO-';
+    } else {
+      clean = 'KURO-' + clean;
+    }
+  }
+  return clean;
+}
+
+/**
  * Generate a random 6-character uppercase code (avoiding ambiguous 0, O, 1, I)
  */
 function createRandomShareCode() {
@@ -299,7 +321,7 @@ function createRandomShareCode() {
   for (let i = 0; i < 6; i++) {
     out += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return `KURO-${out}`;
+  return 'KURO-' + out;
 }
 
 /**
@@ -318,6 +340,7 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
       share_code: code,
       user_id: String(user.id || user.email || 'kuro_user'),
       user_name: user.name || 'Kuro Member',
+      user_email: user.email || '',
       user_avatar: user.avatar || '',
       library_data: cleanLibrary,
       history_data: cleanHistory,
@@ -328,6 +351,7 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
     };
 
     let cloudOk = false;
+    let cloudError = null;
     if (supabase) {
       try {
         const { error } = await supabase
@@ -336,14 +360,16 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
         if (!error) {
           cloudOk = true;
         } else {
-          console.warn('[Supabase sync share insert note]', error.message);
+          cloudError = error.message;
+          console.warn('[Supabase sync share insert note]', error);
         }
       } catch (err) {
+        cloudError = err?.message || 'Network error';
         console.warn('[Supabase sync share network note]', err);
       }
     }
 
-    // Always mirror to local registry for fail-safe resolution
+    // Always mirror to local registry for fail-safe resolution and instant fallback
     try {
       const localRegistry = JSON.parse(localStorage.getItem('kuro_local_sync_shares') || '{}');
       localRegistry[code] = row;
@@ -357,7 +383,8 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
       historyCount: cleanHistory.length,
       expiresAt: row.expires_at,
       authorName: row.user_name,
-      isCloud: cloudOk
+      isCloud: cloudOk,
+      cloudError
     };
   } catch (e) {
     console.error('[Sync share generation exception]', e);
@@ -369,12 +396,12 @@ export async function generateSyncShareCode(libraryList = [], historyList = []) 
  * Lookup a shared sync record by code
  */
 export async function lookupSyncShareCode(rawCode) {
-  if (!rawCode) return { ok: false, error: 'Please enter a valid code' };
-
-  let clean = String(rawCode).trim().toUpperCase();
-  if (!clean.startsWith('KURO-') && clean.length === 6) {
-    clean = `KURO-${clean}`;
+  const clean = normalizeShareCode(rawCode);
+  if (!clean || clean.length < 6) {
+    return { ok: false, error: 'Please enter a valid sync code (e.g. KURO-VD8NHB)' };
   }
+
+  const rawSuffix = clean.replace(/^KURO-/, '');
 
   // 1. Try Supabase Cloud lookup
   if (supabase) {
@@ -382,14 +409,17 @@ export async function lookupSyncShareCode(rawCode) {
       const { data, error } = await supabase
         .from('user_sync_shares')
         .select('*')
-        .eq('share_code', clean)
+        .or('share_code.eq.' + clean + ',share_code.eq.' + rawSuffix)
         .maybeSingle();
 
       if (!error && data) {
         if (data.expires_at && new Date(data.expires_at).getTime() < Date.now()) {
-          return { ok: false, error: 'This sync code has expired' };
+          return { ok: false, error: 'This sync code has expired (valid for 30 days)' };
         }
-        return { ok: true, share: data };
+        return { ok: true, share: data, source: 'cloud' };
+      }
+      if (error) {
+        console.warn('[Supabase sync lookup note]', error.message);
       }
     } catch (e) {
       console.warn('[Supabase sync lookup error]', e);
@@ -399,16 +429,16 @@ export async function lookupSyncShareCode(rawCode) {
   // 2. Fallback to local registry
   try {
     const localRegistry = JSON.parse(localStorage.getItem('kuro_local_sync_shares') || '{}');
-    if (localRegistry[clean]) {
-      const localData = localRegistry[clean];
+    const localData = localRegistry[clean] || localRegistry[rawSuffix];
+    if (localData) {
       if (localData.expires_at && new Date(localData.expires_at).getTime() < Date.now()) {
         return { ok: false, error: 'This sync code has expired' };
       }
-      return { ok: true, share: localData };
+      return { ok: true, share: localData, source: 'local' };
     }
   } catch (e) {}
 
-  return { ok: false, error: 'Code not found or has expired' };
+  return { ok: false, error: 'Code ' + clean + ' not found. Please ensure the code is correct and was generated successfully.' };
 }
 
 /**
