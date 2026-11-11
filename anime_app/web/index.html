@@ -1,34 +1,40 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#07080b" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="referrer" content="no-referrer" />
-    
-    <title>KuroAnime — Stream Anime in Sub & Dub</title>
-    <meta name="description" content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface." />
-    <link rel="canonical" href="https://kuroanime-flax.vercel.app/" id="kuro-canonical" />
 
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" id="kuro-og-type" />
-    <meta property="og:site_name" content="KuroAnime" />
-    <meta property="og:url" content="https://kuroanime-flax.vercel.app/" id="kuro-og-url" />
-    <meta property="og:title" content="KuroAnime — Stream Anime in Sub & Dub" id="kuro-og-title" />
-    <meta property="og:description" content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface." id="kuro-og-desc" />
-    <meta property="og:image" content="https://kuroanime-flax.vercel.app/goku-banner.jpg" id="kuro-og-image" />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#07080b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
 
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:url" content="https://kuroanime-flax.vercel.app/" id="kuro-tw-url" />
-    <meta name="twitter:title" content="KuroAnime — Stream Anime in Sub & Dub" id="kuro-tw-title" />
-    <meta name="twitter:description" content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface." id="kuro-tw-desc" />
-    <meta name="twitter:image" content="https://kuroanime-flax.vercel.app/goku-banner.jpg" id="kuro-tw-image" />
+  <title>KuroAnime — Stream Anime in Sub & Dub</title>
+  <meta name="description"
+    content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface." />
+  <link rel="canonical" href="https://kuroanime-flax.vercel.app/" id="kuro-canonical" />
 
-    <!-- Schema.org Structured Data -->
-    <script type="application/ld+json" id="kuro-schema-json">
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" id="kuro-og-type" />
+  <meta property="og:site_name" content="KuroAnime" />
+  <meta property="og:url" content="https://kuroanime-flax.vercel.app/" id="kuro-og-url" />
+  <meta property="og:title" content="KuroAnime — Stream Anime in Sub & Dub" id="kuro-og-title" />
+  <meta property="og:description"
+    content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface."
+    id="kuro-og-desc" />
+  <meta property="og:image" content="https://kuroanime-flax.vercel.app/goku-banner.jpg" id="kuro-og-image" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://kuroanime-flax.vercel.app/" id="kuro-tw-url" />
+  <meta name="twitter:title" content="KuroAnime — Stream Anime in Sub & Dub" id="kuro-tw-title" />
+  <meta name="twitter:description"
+    content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface."
+    id="kuro-tw-desc" />
+  <meta name="twitter:image" content="https://kuroanime-flax.vercel.app/goku-banner.jpg" id="kuro-tw-image" />
+
+  <!-- Schema.org Structured Data -->
+  <script type="application/ld+json" id="kuro-schema-json">
     {
       "@context": "https://schema.org",
       "@type": "WebSite",
@@ -42,1061 +48,1191 @@
       }
     }
     </script>
-    
-    <!-- Typography: Satoshi, Inter, Outfit & Material Symbols Rounded (Material You) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700,800,900&display=swap" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@600;700;800;900&family=Shippori+Mincho:wght@500;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
 
-    <!-- Clean Handcrafted SVG Favicon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2311141C' stroke='%23232836' stroke-width='4'/><polygon points='40,26 74,50 40,74' fill='%23EEF0F5'/><rect x='24' y='26' width='7' height='48' rx='3.5' fill='%23E5484D'/></svg>" />
-  </head>
-  <body>
-    <div id="app" class="app-root">
-      <!-- Universal Header Bar -->
-      <header class="app-header" id="app-header">
-        <div class="header-container">
-          <div class="brand-logo" id="btn-brand-home">
-            <svg class="brand-mark" viewBox="0 0 36 36" width="28" height="28" aria-hidden="true">
-              <rect width="36" height="36" rx="8" fill="#151821" stroke="rgba(238, 240, 245, 0.1)" stroke-width="1" />
-              <rect x="9" y="10" width="2.5" height="16" rx="1.25" fill="#E5484D" />
-              <polygon points="15,10 28,18 15,26" fill="#EEF0F5" />
+  <!-- Typography: Satoshi, Inter, Outfit & Material Symbols Rounded (Material You) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700,800,900&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@600;700;800;900&family=Shippori+Mincho:wght@500;700;800&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+
+  <!-- Clean Handcrafted SVG Favicon -->
+  <link rel="icon" type="image/svg+xml"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2311141C' stroke='%23232836' stroke-width='4'/><polygon points='40,26 74,50 40,74' fill='%23EEF0F5'/><rect x='24' y='26' width='7' height='48' rx='3.5' fill='%23E5484D'/></svg>" />
+</head>
+
+<body>
+  <div id="app" class="app-root">
+    <!-- Universal Header Bar -->
+    <header class="app-header" id="app-header">
+      <div class="header-container">
+        <div class="brand-logo" id="btn-brand-home">
+          <svg class="brand-mark" viewBox="0 0 36 36" width="28" height="28" aria-hidden="true">
+            <rect width="36" height="36" rx="8" fill="#151821" stroke="rgba(238, 240, 245, 0.1)" stroke-width="1" />
+            <rect x="9" y="10" width="2.5" height="16" rx="1.25" fill="#E5484D" />
+            <polygon points="15,10 28,18 15,26" fill="#EEF0F5" />
+          </svg>
+          <div class="brand-text">
+            <span class="brand-title">Kuro<span class="brand-accent">Anime</span></span>
+          </div>
+        </div>
+
+        <!-- Desktop Navigation Menu (Centered on Desktop / Tablets) -->
+        <nav class="desktop-nav-menu" id="desktop-nav-menu">
+          <button class="nav-btn active" data-tab="home"><i data-lucide="home"></i> Home</button>
+          <button class="nav-btn" data-tab="browse"><i data-lucide="compass"></i> Browse</button>
+          <button class="nav-btn" data-tab="search"><i data-lucide="search"></i> Search</button>
+          <button class="nav-btn" data-tab="watchlist"><i data-lucide="bookmark"></i> My List</button>
+        </nav>
+
+        <div class="header-actions">
+          <button class="header-icon-btn" id="header-inbox-btn" aria-label="Server Announcement"
+            title="Server Funding Announcement">
+            <i data-lucide="bell"></i>
+            <span class="badge-dot badge-dot-alert" id="inbox-badge"></span>
+          </button>
+          <button class="header-icon-btn" id="header-search-btn" aria-label="Search anime">
+            <i data-lucide="search"></i>
+          </button>
+          <!-- User Profile & Settings Menu Trigger -->
+          <div class="user-menu-wrapper" id="user-menu-wrapper">
+            <button class="header-icon-btn user-profile-btn" id="header-user-btn" aria-label="Account & Settings"
+              aria-haspopup="true" aria-expanded="false" title="Account & Settings">
+              <i data-lucide="user"></i>
+              <span class="user-status-dot" id="user-status-dot"></span>
+            </button>
+
+            <!-- Luxury Animated User Popover Dropdown -->
+            <div class="user-dropdown-popover" id="user-dropdown-popover" role="menu" aria-hidden="true">
+              <!-- User Profile Summary Header -->
+              <div class="user-popover-header">
+                <div class="user-avatar-badge" id="user-avatar-badge">
+                  <i data-lucide="user"></i>
+                </div>
+                <div class="user-info-text">
+                  <div class="user-display-name" id="user-display-name">Guest</div>
+                  <div class="user-display-status" id="user-display-status">Ad-free streaming</div>
+                </div>
+              </div>
+
+              <div class="user-popover-divider"></div>
+
+              <!-- Primary Option 1: Sign in with Google -->
+              <button type="button" class="user-popover-item google-login-item" id="btn-user-google-login">
+                <span class="google-icon-box">
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                    <path fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                </span>
+                <div class="user-popover-text">
+                  <span class="item-primary-label" id="google-login-label">Sign in with Google</span>
+                  <span class="item-sub-label" id="google-login-sub">Sync library and watch history</span>
+                </div>
+                <i data-lucide="chevron-right" class="item-arrow"></i>
+              </button>
+
+              <!-- Primary Option 2: Share & Sync Library with Friends -->
+              <button type="button" class="user-popover-item sync-share-item" id="btn-user-sync-share">
+                <span class="settings-icon-box">
+                  <i data-lucide="share-2"></i>
+                </span>
+                <div class="user-popover-text">
+                  <span class="item-primary-label">Share &amp; Sync Library</span>
+                  <span class="item-sub-label">Share with friends via sync code</span>
+                </div>
+                <i data-lucide="chevron-right" class="item-arrow"></i>
+              </button>
+
+              <!-- Primary Option 3: Settings -->
+              <button type="button" class="user-popover-item settings-item" id="btn-user-settings">
+                <span class="settings-icon-box">
+                  <i data-lucide="settings"></i>
+                </span>
+                <div class="user-popover-text">
+                  <span class="item-primary-label">Settings</span>
+                  <span class="item-sub-label">Player & stream preferences</span>
+                </div>
+                <i data-lucide="chevron-right" class="item-arrow"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Viewport -->
+    <main class="app-main" id="main-content">
+      <!-- 1. Home View -->
+      <section class="view-screen active" id="view-home">
+        <!-- Professional Cinema Hero Spotlight -->
+        <div class="hero-section" id="hero-section" aria-roledescription="carousel" aria-label="Featured anime">
+          <div class="hero-stage" id="hero-stage">
+            <div class="hero-skeleton yt-shimmer"></div>
+          </div>
+          <div class="hero-content" id="hero-content">
+            <div class="yt-hero-skeleton" aria-hidden="true">
+              <div class="yt-hero-eyebrow-row">
+                <span class="hero-eyebrow-line"></span>
+                <span class="yt-skel-line yt-shimmer" style="width:92px;height:12px;border-radius:4px;"></span>
+              </div>
+              <div class="yt-skel-line yt-shimmer yt-hero-title-1"></div>
+              <div class="yt-skel-line yt-shimmer yt-hero-title-2"></div>
+              <div class="yt-hero-meta-row">
+                <span class="yt-skel-line yt-shimmer" style="width:48px;height:14px;border-radius:4px;"></span>
+                <span class="yt-skel-line yt-shimmer" style="width:42px;height:14px;border-radius:4px;"></span>
+                <span class="yt-skel-line yt-shimmer" style="width:74px;height:14px;border-radius:4px;"></span>
+                <span class="yt-skel-line yt-shimmer" style="width:96px;height:14px;border-radius:4px;"></span>
+              </div>
+              <div class="yt-skel-line yt-shimmer yt-hero-desc-1"></div>
+              <div class="yt-skel-line yt-shimmer yt-hero-desc-2"></div>
+              <div class="yt-hero-actions-row">
+                <span class="yt-skel-btn yt-shimmer" style="width:104px;height:40px;"></span>
+                <span class="yt-skel-btn yt-shimmer" style="width:112px;height:40px;"></span>
+              </div>
+            </div>
+          </div>
+          <div class="hero-thumbs" id="hero-thumbs">
+            <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
+            <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
+            <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
+            <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
+            <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
+            <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="hero-dots" id="hero-dots"></div>
+
+
+        <!-- Content Rails -->
+        <div class="rails-container" id="rails-container">
+          <div class="rail-section yt-rail-skeleton" aria-hidden="true">
+            <div class="rail-header">
+              <span class="rail-title"><span class="rail-title-line"></span><span
+                  class="yt-skel-line yt-skel-rail-heading yt-shimmer" style="width:136px"></span></span>
+              <span class="yt-skel-line yt-skel-rail-more yt-shimmer"></span>
+            </div>
+            <div class="rail-scroll-track">
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+            </div>
+          </div>
+          <div class="rail-section yt-rail-skeleton" aria-hidden="true">
+            <div class="rail-header">
+              <span class="rail-title"><span class="rail-title-line"></span><span
+                  class="yt-skel-line yt-skel-rail-heading yt-shimmer" style="width:112px"></span></span>
+              <span class="yt-skel-line yt-skel-rail-more yt-shimmer"></span>
+            </div>
+            <div class="rail-scroll-track">
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+            </div>
+          </div>
+          <div class="rail-section yt-rail-skeleton" aria-hidden="true">
+            <div class="rail-header">
+              <span class="rail-title"><span class="rail-title-line"></span><span
+                  class="yt-skel-line yt-skel-rail-heading yt-shimmer" style="width:148px"></span></span>
+              <span class="yt-skel-line yt-skel-rail-more yt-shimmer"></span>
+            </div>
+            <div class="rail-scroll-track">
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+              <div class="yt-card-skeleton" aria-hidden="true">
+                <div class="yt-skel-poster yt-shimmer">
+                  <span class="yt-skel-pill-top"></span>
+                  <span class="yt-skel-pill-bot"></span>
+                </div>
+                <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
+                <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Anime Airing Schedule Section (Pakistan Standard Time - PKT) -->
+        <section class="schedule-section" id="home-schedule-section"
+          aria-label="Estimated Anime Schedule in Pakistan Standard Time">
+          <div class="schedule-shell">
+            <div class="schedule-header">
+              <div class="schedule-title-group">
+                <span class="rail-title">
+                  <span class="rail-title-line"></span>
+                  Estimated Schedule
+                </span>
+                <span class="schedule-tz-pill">
+                  <span class="schedule-live-dot"></span>
+                  <span>PKT (GMT+5)</span>
+                </span>
+              </div>
+              <div class="schedule-header-controls">
+                <div class="schedule-clock-box" id="schedule-pkt-clock" aria-live="off">
+                  Loading Pakistan Time...
+                </div>
+              </div>
+            </div>
+
+            <!-- Day Selector Skeleton -->
+            <div class="schedule-days-track" id="schedule-days-track">
+              <div class="schedule-day-skel yt-shimmer"></div>
+              <div class="schedule-day-skel yt-shimmer"></div>
+              <div class="schedule-day-skel yt-shimmer"></div>
+              <div class="schedule-day-skel yt-shimmer"></div>
+              <div class="schedule-day-skel yt-shimmer"></div>
+              <div class="schedule-day-skel yt-shimmer"></div>
+              <div class="schedule-day-skel yt-shimmer"></div>
+            </div>
+
+            <!-- Schedule List Skeleton -->
+            <div class="schedule-list-grid" id="schedule-list-grid">
+              <div class="schedule-row-skel yt-shimmer"></div>
+              <div class="schedule-row-skel yt-shimmer"></div>
+              <div class="schedule-row-skel yt-shimmer"></div>
+              <div class="schedule-row-skel yt-shimmer"></div>
+              <div class="schedule-row-skel yt-shimmer"></div>
+              <div class="schedule-row-skel yt-shimmer"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Editorial Catalog Footer -->
+        <footer class="app-footer">
+          <div class="footer-container">
+            <div class="footer-brand">
+              <span class="footer-title">Kuro<span class="brand-accent">Anime</span></span>
+              <span class="footer-tagline">Ad-free anime streaming in Sub &amp; Dub</span>
+            </div>
+            <div class="footer-meta">
+              <span class="footer-stat" id="footer-catalog-stats">Stream thousands of anime in Sub & Dub with fast
+                verified servers</span>
+              <span class="footer-copy">© 2026 KuroAnime</span>
+            </div>
+          </div>
+        </footer>
+      </section>
+
+      <!-- 2. Browse View -->
+      <section class="view-screen" id="view-browse">
+        <div class="browse-header">
+          <h1 class="page-title">Explore Catalog</h1>
+          <p class="page-subtitle">Filter anime by genres, format, and popularity</p>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="filter-bar">
+          <div class="filter-chips-scroll" id="browse-genres-list">
+            <button class="chip-btn active" data-genre="">All Genres</button>
+          </div>
+
+          <div class="filter-controls-row">
+            <div class="custom-select-wrapper" id="wrap-status-select">
+              <button type="button" class="custom-select-trigger" id="trigger-status-select" aria-haspopup="listbox"
+                aria-expanded="false">
+                <span class="custom-select-label">All Status</span>
+                <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor"
+                  stroke-width="2.5" fill="none">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <div class="custom-select-dropdown" role="listbox">
+                <div class="custom-select-option active" data-value="">All Status</div>
+                <div class="custom-select-option" data-value="airing">Currently Airing</div>
+                <div class="custom-select-option" data-value="completed">Finished Airing</div>
+              </div>
+              <select class="filter-select sr-only" id="browse-status-select" tabindex="-1">
+                <option value="">All Status</option>
+                <option value="airing">Currently Airing</option>
+                <option value="completed">Finished Airing</option>
+              </select>
+            </div>
+
+            <div class="custom-select-wrapper" id="wrap-type-select">
+              <button type="button" class="custom-select-trigger" id="trigger-type-select" aria-haspopup="listbox"
+                aria-expanded="false">
+                <span class="custom-select-label">All Formats</span>
+                <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor"
+                  stroke-width="2.5" fill="none">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <div class="custom-select-dropdown" role="listbox">
+                <div class="custom-select-option active" data-value="">All Formats</div>
+                <div class="custom-select-option" data-value="TV">TV Series</div>
+                <div class="custom-select-option" data-value="Movie">Movies</div>
+                <div class="custom-select-option" data-value="OVA">OVAs</div>
+                <div class="custom-select-option" data-value="Special">Specials</div>
+              </div>
+              <select class="filter-select sr-only" id="browse-type-select" tabindex="-1">
+                <option value="">All Formats</option>
+                <option value="TV">TV Series</option>
+                <option value="Movie">Movies</option>
+                <option value="OVA">OVAs</option>
+                <option value="Special">Specials</option>
+              </select>
+            </div>
+
+            <div class="custom-select-wrapper" id="wrap-sort-select">
+              <button type="button" class="custom-select-trigger" id="trigger-sort-select" aria-haspopup="listbox"
+                aria-expanded="false">
+                <span class="custom-select-label">Most Popular</span>
+                <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor"
+                  stroke-width="2.5" fill="none">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <div class="custom-select-dropdown" role="listbox">
+                <div class="custom-select-option active" data-value="popular">Most Popular</div>
+                <div class="custom-select-option" data-value="score">Highest Rated</div>
+                <div class="custom-select-option" data-value="az">A to Z</div>
+                <div class="custom-select-option" data-value="new">Newest Releases</div>
+              </div>
+              <select class="filter-select sr-only" id="browse-sort-select" tabindex="-1">
+                <option value="popular">Most Popular</option>
+                <option value="score">Highest Rated</option>
+                <option value="az">A to Z</option>
+                <option value="new">Newest Releases</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Browse Grid -->
+        <div class="anime-grid" id="browse-grid"></div>
+
+        <div class="pagination-row" id="browse-pagination" style="display:none">
+          <button class="btn-pagination" id="browse-prev-page">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none">
+              <polyline points="15 18 9 12 15 6" />
             </svg>
-            <div class="brand-text">
-              <span class="brand-title">Kuro<span class="brand-accent">Anime</span></span>
-            </div>
+            <span>Previous</span>
+          </button>
+          <div class="page-indicator-pill">
+            <span class="page-indicator-dot"></span>
+            <span class="page-indicator" id="browse-page-indicator">Page 1</span>
           </div>
+          <button class="btn-pagination" id="browse-next-page">
+            <span>Next</span>
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        </div>
+      </section>
 
-          <!-- Desktop Navigation Menu (Centered on Desktop / Tablets) -->
-          <nav class="desktop-nav-menu" id="desktop-nav-menu">
-            <button class="nav-btn active" data-tab="home"><i data-lucide="home"></i> Home</button>
-            <button class="nav-btn" data-tab="browse"><i data-lucide="compass"></i> Browse</button>
-            <button class="nav-btn" data-tab="search"><i data-lucide="search"></i> Search</button>
-            <button class="nav-btn" data-tab="watchlist"><i data-lucide="bookmark"></i> My List</button>
-          </nav>
+      <!-- 3. Search View -->
+      <section class="view-screen" id="view-search">
+        <div class="search-input-wrapper">
+          <i data-lucide="search" class="search-input-icon"></i>
+          <input type="search" class="search-input" id="search-input-field" placeholder="Search anime..."
+            autocomplete="off" />
+          <button class="search-clear-btn" id="search-clear-btn" style="display:none">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
 
-          <div class="header-actions">
-            <button class="header-icon-btn" id="header-inbox-btn" aria-label="Server Announcement" title="Server Funding Announcement">
-              <i data-lucide="bell"></i>
-              <span class="badge-dot badge-dot-alert" id="inbox-badge"></span>
-            </button>
-            <button class="header-icon-btn" id="header-search-btn" aria-label="Search anime">
-              <i data-lucide="search"></i>
-            </button>
-            <!-- User Profile & Settings Menu Trigger -->
-            <div class="user-menu-wrapper" id="user-menu-wrapper">
-              <button class="header-icon-btn user-profile-btn" id="header-user-btn" aria-label="Account & Settings" aria-haspopup="true" aria-expanded="false" title="Account & Settings">
-                <i data-lucide="user"></i>
-                <span class="user-status-dot" id="user-status-dot"></span>
-              </button>
-
-              <!-- Luxury Animated User Popover Dropdown -->
-              <div class="user-dropdown-popover" id="user-dropdown-popover" role="menu" aria-hidden="true">
-                <!-- User Profile Summary Header -->
-                <div class="user-popover-header">
-                  <div class="user-avatar-badge" id="user-avatar-badge">
-                    <i data-lucide="user"></i>
-                  </div>
-                  <div class="user-info-text">
-                    <div class="user-display-name" id="user-display-name">Guest</div>
-                    <div class="user-display-status" id="user-display-status">Ad-free streaming</div>
-                  </div>
-                </div>
-
-                <div class="user-popover-divider"></div>
-
-                <!-- Primary Option 1: Sign in with Google -->
-                <button type="button" class="user-popover-item google-login-item" id="btn-user-google-login">
-                  <span class="google-icon-box">
-                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                    </svg>
-                  </span>
-                  <div class="user-popover-text">
-                    <span class="item-primary-label" id="google-login-label">Sign in with Google</span>
-                    <span class="item-sub-label" id="google-login-sub">Sync library and watch history</span>
-                  </div>
-                  <i data-lucide="chevron-right" class="item-arrow"></i>
-                </button>
-
-                <!-- Primary Option 2: Share & Sync Library with Friends -->
-                <button type="button" class="user-popover-item sync-share-item" id="btn-user-sync-share">
-                  <span class="settings-icon-box">
-                    <i data-lucide="share-2"></i>
-                  </span>
-                  <div class="user-popover-text">
-                    <span class="item-primary-label">Share &amp; Sync Library</span>
-                    <span class="item-sub-label">Share with friends via sync code</span>
-                  </div>
-                  <i data-lucide="chevron-right" class="item-arrow"></i>
-                </button>
-
-                <!-- Primary Option 3: Settings -->
-                <button type="button" class="user-popover-item settings-item" id="btn-user-settings">
-                  <span class="settings-icon-box">
-                    <i data-lucide="settings"></i>
-                  </span>
-                  <div class="user-popover-text">
-                    <span class="item-primary-label">Settings</span>
-                    <span class="item-sub-label">Player & stream preferences</span>
-                  </div>
-                  <i data-lucide="chevron-right" class="item-arrow"></i>
-                </button>
-              </div>
-            </div>
+        <div class="search-suggestions" id="search-recent-box">
+          <div class="section-label-row">
+            <span class="section-label">Popular Searches</span>
+          </div>
+          <div class="tags-cloud" id="search-popular-tags">
+            <button class="tag-chip">Attack on Titan</button>
+            <button class="tag-chip">One Piece</button>
+            <button class="tag-chip">Demon Slayer</button>
+            <button class="tag-chip">Jujutsu Kaisen</button>
+            <button class="tag-chip">Solo Leveling</button>
+            <button class="tag-chip">Bleach</button>
+            <button class="tag-chip">Naruto</button>
           </div>
         </div>
-      </header>
 
-      <!-- Main Content Viewport -->
-      <main class="app-main" id="main-content">
-        <!-- 1. Home View -->
-        <section class="view-screen active" id="view-home">
-          <!-- Professional Cinema Hero Spotlight -->
-          <div class="hero-section" id="hero-section" aria-roledescription="carousel" aria-label="Featured anime">
-            <div class="hero-stage" id="hero-stage">
-              <div class="hero-skeleton yt-shimmer"></div>
+        <div class="search-results-area" id="search-results-area">
+          <div class="anime-grid" id="search-results-grid"></div>
+        </div>
+      </section>
+
+      <!-- 4. Watchlist & History View -->
+      <section class="view-screen" id="view-watchlist">
+        <div class="browse-header">
+          <div class="collection-header-row">
+            <div>
+              <h1 class="page-title">My Collection</h1>
+              <p class="page-subtitle">Your saved watchlist and continue-watching history</p>
             </div>
-            <div class="hero-content" id="hero-content">
-              <div class="yt-hero-skeleton" aria-hidden="true">
-                <div class="yt-hero-eyebrow-row">
-                  <span class="hero-eyebrow-line"></span>
-                  <span class="yt-skel-line yt-shimmer" style="width:92px;height:12px;border-radius:4px;"></span>
-                </div>
-                <div class="yt-skel-line yt-shimmer yt-hero-title-1"></div>
-                <div class="yt-skel-line yt-shimmer yt-hero-title-2"></div>
-                <div class="yt-hero-meta-row">
-                  <span class="yt-skel-line yt-shimmer" style="width:48px;height:14px;border-radius:4px;"></span>
-                  <span class="yt-skel-line yt-shimmer" style="width:42px;height:14px;border-radius:4px;"></span>
-                  <span class="yt-skel-line yt-shimmer" style="width:74px;height:14px;border-radius:4px;"></span>
-                  <span class="yt-skel-line yt-shimmer" style="width:96px;height:14px;border-radius:4px;"></span>
-                </div>
-                <div class="yt-skel-line yt-shimmer yt-hero-desc-1"></div>
-                <div class="yt-skel-line yt-shimmer yt-hero-desc-2"></div>
-                <div class="yt-hero-actions-row">
-                  <span class="yt-skel-btn yt-shimmer" style="width:104px;height:40px;"></span>
-                  <span class="yt-skel-btn yt-shimmer" style="width:112px;height:40px;"></span>
-                </div>
-              </div>
-            </div>
-            <div class="hero-thumbs" id="hero-thumbs">
-              <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
-              <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
-              <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
-              <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
-              <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
-              <div class="yt-thumb-skel yt-shimmer" aria-hidden="true"></div>
-            </div>
-          </div>
-          <div class="hero-dots" id="hero-dots"></div>
-
-
-          <!-- Content Rails -->
-          <div class="rails-container" id="rails-container">
-            <div class="rail-section yt-rail-skeleton" aria-hidden="true">
-              <div class="rail-header">
-                <span class="rail-title"><span class="rail-title-line"></span><span class="yt-skel-line yt-skel-rail-heading yt-shimmer" style="width:136px"></span></span>
-                <span class="yt-skel-line yt-skel-rail-more yt-shimmer"></span>
-              </div>
-              <div class="rail-scroll-track">
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-              </div>
-            </div>
-            <div class="rail-section yt-rail-skeleton" aria-hidden="true">
-              <div class="rail-header">
-                <span class="rail-title"><span class="rail-title-line"></span><span class="yt-skel-line yt-skel-rail-heading yt-shimmer" style="width:112px"></span></span>
-                <span class="yt-skel-line yt-skel-rail-more yt-shimmer"></span>
-              </div>
-              <div class="rail-scroll-track">
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-              </div>
-            </div>
-            <div class="rail-section yt-rail-skeleton" aria-hidden="true">
-              <div class="rail-header">
-                <span class="rail-title"><span class="rail-title-line"></span><span class="yt-skel-line yt-skel-rail-heading yt-shimmer" style="width:148px"></span></span>
-                <span class="yt-skel-line yt-skel-rail-more yt-shimmer"></span>
-              </div>
-              <div class="rail-scroll-track">
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-                <div class="yt-card-skeleton" aria-hidden="true">
-                  <div class="yt-skel-poster yt-shimmer">
-                    <span class="yt-skel-pill-top"></span>
-                    <span class="yt-skel-pill-bot"></span>
-                  </div>
-                  <div class="yt-skel-line yt-skel-title yt-shimmer"></div>
-                  <div class="yt-skel-line yt-skel-sub yt-shimmer"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Anime Airing Schedule Section (Pakistan Standard Time - PKT) -->
-          <section class="schedule-section" id="home-schedule-section" aria-label="Estimated Anime Schedule in Pakistan Standard Time">
-            <div class="schedule-shell">
-              <div class="schedule-header">
-                <div class="schedule-title-group">
-                  <span class="rail-title">
-                    <span class="rail-title-line"></span>
-                    Estimated Schedule
-                  </span>
-                  <span class="schedule-tz-pill">
-                    <span class="schedule-live-dot"></span>
-                    <span>PKT (GMT+5)</span>
-                  </span>
-                </div>
-                <div class="schedule-header-controls">
-                  <div class="schedule-clock-box" id="schedule-pkt-clock" aria-live="off">
-                    Loading Pakistan Time...
-                  </div>
-                </div>
-              </div>
-
-              <!-- Day Selector Skeleton -->
-              <div class="schedule-days-track" id="schedule-days-track">
-                <div class="schedule-day-skel yt-shimmer"></div>
-                <div class="schedule-day-skel yt-shimmer"></div>
-                <div class="schedule-day-skel yt-shimmer"></div>
-                <div class="schedule-day-skel yt-shimmer"></div>
-                <div class="schedule-day-skel yt-shimmer"></div>
-                <div class="schedule-day-skel yt-shimmer"></div>
-                <div class="schedule-day-skel yt-shimmer"></div>
-              </div>
-
-              <!-- Schedule List Skeleton -->
-              <div class="schedule-list-grid" id="schedule-list-grid">
-                <div class="schedule-row-skel yt-shimmer"></div>
-                <div class="schedule-row-skel yt-shimmer"></div>
-                <div class="schedule-row-skel yt-shimmer"></div>
-                <div class="schedule-row-skel yt-shimmer"></div>
-                <div class="schedule-row-skel yt-shimmer"></div>
-                <div class="schedule-row-skel yt-shimmer"></div>
-              </div>
-            </div>
-          </section>
-
-          <!-- Editorial Catalog Footer -->
-          <footer class="app-footer">
-            <div class="footer-container">
-              <div class="footer-brand">
-                <span class="footer-title">Kuro<span class="brand-accent">Anime</span></span>
-                <span class="footer-tagline">Ad-free anime streaming in Sub &amp; Dub</span>
-              </div>
-              <div class="footer-meta">
-                <span class="footer-stat" id="footer-catalog-stats">Stream thousands of anime in Sub & Dub with fast verified servers</span>
-                <span class="footer-copy">© 2026 KuroAnime</span>
-              </div>
-            </div>
-          </footer>
-        </section>
-
-        <!-- 2. Browse View -->
-        <section class="view-screen" id="view-browse">
-          <div class="browse-header">
-            <h1 class="page-title">Explore Catalog</h1>
-            <p class="page-subtitle">Filter anime by genres, format, and popularity</p>
-          </div>
-
-          <!-- Filter Controls -->
-          <div class="filter-bar">
-            <div class="filter-chips-scroll" id="browse-genres-list">
-              <button class="chip-btn active" data-genre="">All Genres</button>
-            </div>
-            
-            <div class="filter-controls-row">
-              <div class="custom-select-wrapper" id="wrap-status-select">
-                <button type="button" class="custom-select-trigger" id="trigger-status-select" aria-haspopup="listbox" aria-expanded="false">
-                  <span class="custom-select-label">All Status</span>
-                  <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="6 9 12 15 18 9"/></svg>
-                </button>
-                <div class="custom-select-dropdown" role="listbox">
-                  <div class="custom-select-option active" data-value="">All Status</div>
-                  <div class="custom-select-option" data-value="airing">Currently Airing</div>
-                  <div class="custom-select-option" data-value="completed">Finished Airing</div>
-                </div>
-                <select class="filter-select sr-only" id="browse-status-select" tabindex="-1">
-                  <option value="">All Status</option>
-                  <option value="airing">Currently Airing</option>
-                  <option value="completed">Finished Airing</option>
-                </select>
-              </div>
-
-              <div class="custom-select-wrapper" id="wrap-type-select">
-                <button type="button" class="custom-select-trigger" id="trigger-type-select" aria-haspopup="listbox" aria-expanded="false">
-                  <span class="custom-select-label">All Formats</span>
-                  <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="6 9 12 15 18 9"/></svg>
-                </button>
-                <div class="custom-select-dropdown" role="listbox">
-                  <div class="custom-select-option active" data-value="">All Formats</div>
-                  <div class="custom-select-option" data-value="TV">TV Series</div>
-                  <div class="custom-select-option" data-value="Movie">Movies</div>
-                  <div class="custom-select-option" data-value="OVA">OVAs</div>
-                  <div class="custom-select-option" data-value="Special">Specials</div>
-                </div>
-                <select class="filter-select sr-only" id="browse-type-select" tabindex="-1">
-                  <option value="">All Formats</option>
-                  <option value="TV">TV Series</option>
-                  <option value="Movie">Movies</option>
-                  <option value="OVA">OVAs</option>
-                  <option value="Special">Specials</option>
-                </select>
-              </div>
-
-              <div class="custom-select-wrapper" id="wrap-sort-select">
-                <button type="button" class="custom-select-trigger" id="trigger-sort-select" aria-haspopup="listbox" aria-expanded="false">
-                  <span class="custom-select-label">Most Popular</span>
-                  <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="6 9 12 15 18 9"/></svg>
-                </button>
-                <div class="custom-select-dropdown" role="listbox">
-                  <div class="custom-select-option active" data-value="popular">Most Popular</div>
-                  <div class="custom-select-option" data-value="score">Highest Rated</div>
-                  <div class="custom-select-option" data-value="az">A to Z</div>
-                  <div class="custom-select-option" data-value="new">Newest Releases</div>
-                </div>
-                <select class="filter-select sr-only" id="browse-sort-select" tabindex="-1">
-                  <option value="popular">Most Popular</option>
-                  <option value="score">Highest Rated</option>
-                  <option value="az">A to Z</option>
-                  <option value="new">Newest Releases</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <!-- Browse Grid -->
-          <div class="anime-grid" id="browse-grid"></div>
-          
-          <div class="pagination-row" id="browse-pagination" style="display:none">
-            <button class="btn-pagination" id="browse-prev-page">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="15 18 9 12 15 6"/></svg>
-              <span>Previous</span>
-            </button>
-            <div class="page-indicator-pill">
-              <span class="page-indicator-dot"></span>
-              <span class="page-indicator" id="browse-page-indicator">Page 1</span>
-            </div>
-            <button class="btn-pagination" id="browse-next-page">
-              <span>Next</span>
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="9 18 15 12 9 6"/></svg>
+            <button type="button" class="btn-collection-sync" id="btn-open-sync-modal"
+              title="Share with friends or enter a sync code">
+              <i data-lucide="share-2"></i>
+              <span>Share &amp; Sync</span>
             </button>
           </div>
-        </section>
+        </div>
 
-        <!-- 3. Search View -->
-        <section class="view-screen" id="view-search">
-          <div class="search-input-wrapper">
-            <i data-lucide="search" class="search-input-icon"></i>
-            <input type="search" class="search-input" id="search-input-field" placeholder="Search anime..." autocomplete="off" />
-            <button class="search-clear-btn" id="search-clear-btn" style="display:none">
-              <i data-lucide="x"></i>
+        <div class="tab-pill-bar">
+          <button class="tab-pill active" id="tab-btn-watching">Continue Watching</button>
+          <button class="tab-pill" id="tab-btn-saved">Saved List</button>
+        </div>
+
+        <div class="collection-content" id="watchlist-content">
+          <div class="anime-grid" id="watchlist-grid"></div>
+        </div>
+      </section>
+
+      <!-- 5. Anime Detail View -->
+      <section class="view-screen view-screen-detail" id="view-detail">
+        <div class="detail-container" id="detail-container"></div>
+      </section>
+
+      <!-- 6. Watch Player View -->
+      <section class="view-screen view-screen-player" id="view-watch">
+        <div class="player-page-container" id="player-page-container"></div>
+      </section>
+    </main>
+
+    <!-- Bottom Mobile Tab Bar (Visible only on mobile <= 768px) -->
+    <nav class="app-tab-bar" id="app-tab-bar">
+      <button class="tab-item active" data-tab="home" id="tab-nav-home">
+        <i data-lucide="home"></i>
+        <span>Home</span>
+      </button>
+      <button class="tab-item" data-tab="browse" id="tab-nav-browse">
+        <i data-lucide="compass"></i>
+        <span>Browse</span>
+      </button>
+      <button class="tab-item" data-tab="search" id="tab-nav-search">
+        <i data-lucide="search"></i>
+        <span>Search</span>
+      </button>
+      <button class="tab-item" data-tab="watchlist" id="tab-nav-watchlist">
+        <i data-lucide="bookmark"></i>
+        <span>My List</span>
+      </button>
+    </nav>
+
+    <!-- Anime Goku Announcement Modal (Refined, Compact, 120fps GPU-Accelerated) -->
+    <div class="inbox-modal-backdrop goku-promo-backdrop" id="brave-inbox-modal" aria-hidden="true">
+      <div class="inbox-modal-card goku-promo-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
+        <!-- Hero Visual: Unobstructed Goku Key Art with Seamless Fade -->
+        <div class="goku-hero-stage">
+          <div class="goku-aura-glow" aria-hidden="true"></div>
+          <div class="goku-art-wrap">
+            <img src="/goku-banner.jpg" alt="Son Goku" class="goku-hero-img" decoding="async" fetchpriority="high" />
+          </div>
+          <div class="goku-stage-fade" aria-hidden="true"></div>
+        </div>
+
+        <!-- Compact Editorial Body (Zero Icons / Zero Emojis) -->
+        <div class="goku-promo-body">
+          <div class="goku-meta-row">
+            <span class="goku-meta-label">Server Announcement</span>
+            <button type="button" class="goku-close-link" id="btn-close-inbox-modal"
+              aria-label="Close announcement">Close</button>
+          </div>
+
+          <h2 class="goku-promo-title" id="inbox-modal-title">Keep KuroAnime Ad-Free</h2>
+
+          <p class="goku-promo-desc">
+            KuroAnime is free of ads and popups. Our servers need <strong>$20</strong> this month to stay online &mdash;
+            even <strong>$1</strong> helps keep every episode playing for everyone.
+          </p>
+
+          <!-- Minimal Progress Bar -->
+          <div class="goku-ki-gauge">
+            <div class="goku-ki-header">
+              <span class="goku-ki-label">Monthly Server Fund</span>
+              <span class="goku-ki-goal">$20 goal</span>
+            </div>
+            <div class="goku-ki-track">
+              <div class="goku-ki-fill"></div>
+            </div>
+          </div>
+
+          <!-- Clean Wallet Address Box -->
+          <div class="goku-wallet-box" id="wallet-card-box" role="button" tabindex="0" title="Click to copy address">
+            <span class="goku-wallet-chain">BNB Smart Chain (BEP20) &middot; BNB, USDT, USDC</span>
+            <code class="goku-wallet-code" id="bnb-wallet-address">0x1Df63Bbf9fb1b9f1BfabD66C1c37450237454d93</code>
+          </div>
+
+          <!-- Clean Text-Only Action Buttons -->
+          <div class="goku-promo-actions">
+            <button type="button" class="goku-btn goku-btn-later" id="btn-continue-site">Maybe later</button>
+            <button type="button" class="goku-btn goku-btn-energy" id="btn-copy-wallet">
+              <span id="copy-wallet-text">Copy address</span>
             </button>
-          </div>
-
-          <div class="search-suggestions" id="search-recent-box">
-            <div class="section-label-row">
-              <span class="section-label">Popular Searches</span>
-            </div>
-            <div class="tags-cloud" id="search-popular-tags">
-              <button class="tag-chip">Attack on Titan</button>
-              <button class="tag-chip">One Piece</button>
-              <button class="tag-chip">Demon Slayer</button>
-              <button class="tag-chip">Jujutsu Kaisen</button>
-              <button class="tag-chip">Solo Leveling</button>
-              <button class="tag-chip">Bleach</button>
-              <button class="tag-chip">Naruto</button>
-            </div>
-          </div>
-
-          <div class="search-results-area" id="search-results-area">
-            <div class="anime-grid" id="search-results-grid"></div>
-          </div>
-        </section>
-
-        <!-- 4. Watchlist & History View -->
-        <section class="view-screen" id="view-watchlist">
-          <div class="browse-header">
-            <div class="collection-header-row">
-              <div>
-                <h1 class="page-title">My Collection</h1>
-                <p class="page-subtitle">Your saved watchlist and continue-watching history</p>
-              </div>
-              <button type="button" class="btn-collection-sync" id="btn-open-sync-modal" title="Share with friends or enter a sync code">
-                <i data-lucide="share-2"></i>
-                <span>Share &amp; Sync</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="tab-pill-bar">
-            <button class="tab-pill active" id="tab-btn-watching">Continue Watching</button>
-            <button class="tab-pill" id="tab-btn-saved">Saved List</button>
-          </div>
-
-          <div class="collection-content" id="watchlist-content">
-            <div class="anime-grid" id="watchlist-grid"></div>
-          </div>
-        </section>
-
-        <!-- 5. Anime Detail View -->
-        <section class="view-screen view-screen-detail" id="view-detail">
-          <div class="detail-container" id="detail-container"></div>
-        </section>
-
-        <!-- 6. Watch Player View -->
-        <section class="view-screen view-screen-player" id="view-watch">
-          <div class="player-page-container" id="player-page-container"></div>
-        </section>
-      </main>
-
-      <!-- Bottom Mobile Tab Bar (Visible only on mobile <= 768px) -->
-      <nav class="app-tab-bar" id="app-tab-bar">
-        <button class="tab-item active" data-tab="home" id="tab-nav-home">
-          <i data-lucide="home"></i>
-          <span>Home</span>
-        </button>
-        <button class="tab-item" data-tab="browse" id="tab-nav-browse">
-          <i data-lucide="compass"></i>
-          <span>Browse</span>
-        </button>
-        <button class="tab-item" data-tab="search" id="tab-nav-search">
-          <i data-lucide="search"></i>
-          <span>Search</span>
-        </button>
-        <button class="tab-item" data-tab="watchlist" id="tab-nav-watchlist">
-          <i data-lucide="bookmark"></i>
-          <span>My List</span>
-        </button>
-      </nav>
-
-      <!-- Anime Goku Announcement Modal (Refined, Compact, 120fps GPU-Accelerated) -->
-      <div class="inbox-modal-backdrop goku-promo-backdrop" id="brave-inbox-modal" aria-hidden="true">
-        <div class="inbox-modal-card goku-promo-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
-          <!-- Hero Visual: Unobstructed Goku Key Art with Seamless Fade -->
-          <div class="goku-hero-stage">
-            <div class="goku-aura-glow" aria-hidden="true"></div>
-            <div class="goku-art-wrap">
-              <img src="/goku-banner.jpg" alt="Son Goku" class="goku-hero-img" decoding="async" fetchpriority="high" />
-            </div>
-            <div class="goku-stage-fade" aria-hidden="true"></div>
-          </div>
-
-          <!-- Compact Editorial Body (Zero Icons / Zero Emojis) -->
-          <div class="goku-promo-body">
-            <div class="goku-meta-row">
-              <span class="goku-meta-label">Server Announcement</span>
-              <button type="button" class="goku-close-link" id="btn-close-inbox-modal" aria-label="Close announcement">Close</button>
-            </div>
-
-            <h2 class="goku-promo-title" id="inbox-modal-title">Keep KuroAnime Ad-Free</h2>
-
-            <p class="goku-promo-desc">
-              KuroAnime is free of ads and popups. Our servers need <strong>$20</strong> this month to stay online &mdash; even <strong>$1</strong> helps keep every episode playing for everyone.
-            </p>
-
-            <!-- Minimal Progress Bar -->
-            <div class="goku-ki-gauge">
-              <div class="goku-ki-header">
-                <span class="goku-ki-label">Monthly Server Fund</span>
-                <span class="goku-ki-goal">$20 goal</span>
-              </div>
-              <div class="goku-ki-track">
-                <div class="goku-ki-fill"></div>
-              </div>
-            </div>
-
-            <!-- Clean Wallet Address Box -->
-            <div class="goku-wallet-box" id="wallet-card-box" role="button" tabindex="0" title="Click to copy address">
-              <span class="goku-wallet-chain">BNB Smart Chain (BEP20) &middot; BNB, USDT, USDC</span>
-              <code class="goku-wallet-code" id="bnb-wallet-address">0x1Df63Bbf9fb1b9f1BfabD66C1c37450237454d93</code>
-            </div>
-
-            <!-- Clean Text-Only Action Buttons -->
-            <div class="goku-promo-actions">
-              <button type="button" class="goku-btn goku-btn-later" id="btn-continue-site">Maybe later</button>
-              <button type="button" class="goku-btn goku-btn-energy" id="btn-copy-wallet">
-                <span id="copy-wallet-text">Copy address</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- Settings & Preferences Modal -->
-      <div class="settings-modal-backdrop" id="kuro-settings-modal" aria-hidden="true">
-        <div class="settings-modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
-          <div class="settings-modal-glow"></div>
-          
-          <!-- Header -->
-          <div class="settings-modal-header">
-            <div class="settings-title-group">
-              <span class="settings-title-icon"><i data-lucide="settings"></i></span>
-              <div>
-                <h2 class="settings-modal-title" id="settings-modal-title">Settings & Preferences</h2>
-                <span class="settings-modal-subtitle">Customize playback, audio and app experience</span>
-              </div>
-            </div>
-            <button type="button" class="settings-modal-close" id="btn-close-settings-modal" aria-label="Close Settings">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
-          </div>
+    <!-- Settings & Preferences Modal -->
+    <div class="settings-modal-backdrop" id="kuro-settings-modal" aria-hidden="true">
+      <div class="settings-modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+        <div class="settings-modal-glow"></div>
 
-          <!-- Body -->
-          <div class="settings-modal-body">
-            <!-- Section 1: Playback Preferences -->
-            <div class="settings-group">
-              <div class="settings-group-title">
-                <span>Playback & Streaming</span>
-              </div>
-
-              <!-- Setting 1: Autoplay Next Episode -->
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-name">Autoplay Next Episode</div>
-                  <div class="setting-desc">Automatically transition to the next episode when current ends</div>
-                </div>
-                <label class="setting-switch" for="setting-toggle-autoplay">
-                  <input type="checkbox" id="setting-toggle-autoplay" checked />
-                  <span class="switch-slider"></span>
-                </label>
-              </div>
-
-              <!-- Setting 2: Preferred Audio -->
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-name">Default Audio Language</div>
-                  <div class="setting-desc">Preferred language track loaded by default in player</div>
-                </div>
-                <div class="setting-segmented-control" id="setting-audio-control">
-                  <button type="button" class="segment-btn active" data-audio="sub">SUB</button>
-                  <button type="button" class="segment-btn" data-audio="dub">DUB</button>
-                </div>
-              </div>
-
-              <!-- Setting 3: Auto Skip Intro -->
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-name">Auto Skip Intro / Outro</div>
-                  <div class="setting-desc">Jump straight to anime content and skip opening credits</div>
-                </div>
-                <label class="setting-switch" for="setting-toggle-skip">
-                  <input type="checkbox" id="setting-toggle-skip" checked />
-                  <span class="switch-slider"></span>
-                </label>
-              </div>
-
-              <!-- Setting 4: Default Streaming Quality -->
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-name">Preferred Quality</div>
-                  <div class="setting-desc">Target stream resolution for video playback</div>
-                </div>
-                <div class="setting-segmented-control" id="setting-quality-control">
-                  <button type="button" class="segment-btn active" data-quality="1080p">1080p</button>
-                  <button type="button" class="segment-btn" data-quality="720p">720p</button>
-                  <button type="button" class="segment-btn" data-quality="auto">Auto</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Section 2: Visual Experience -->
-            <div class="settings-group">
-              <div class="settings-group-title">
-                <span>Visual Experience</span>
-              </div>
-
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-name">Cinematic Ambient Glow</div>
-                  <div class="setting-desc">Soft immersive edge glow around the video player</div>
-                </div>
-                <label class="setting-switch" for="setting-toggle-ambient">
-                  <input type="checkbox" id="setting-toggle-ambient" checked />
-                  <span class="switch-slider"></span>
-                </label>
-              </div>
-
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-name">Fluid Spring Animations</div>
-                  <div class="setting-desc">High-framerate smooth UI physics and micro-interactions</div>
-                </div>
-                <label class="setting-switch" for="setting-toggle-physics">
-                  <input type="checkbox" id="setting-toggle-physics" checked />
-                  <span class="switch-slider"></span>
-                </label>
-              </div>
-            </div>
-
-            <!-- Section 3: Data & Storage -->
-            <div class="settings-group">
-              <div class="settings-group-title">
-                <span>Data & Storage</span>
-              </div>
-
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-name">Watch History</div>
-                  <div class="setting-desc">Reset episode watch time and continue watching progress</div>
-                </div>
-                <button type="button" class="btn-setting-danger" id="btn-clear-watch-history">
-                  <i data-lucide="trash-2"></i>
-                  <span>Clear History</span>
-                </button>
-              </div>
+        <!-- Header -->
+        <div class="settings-modal-header">
+          <div class="settings-title-group">
+            <span class="settings-title-icon"><i data-lucide="settings"></i></span>
+            <div>
+              <h2 class="settings-modal-title" id="settings-modal-title">Settings & Preferences</h2>
+              <span class="settings-modal-subtitle">Customize playback, audio and app experience</span>
             </div>
           </div>
-
-          <!-- Footer -->
-          <div class="settings-modal-footer">
-            <span class="settings-version">KuroAnime <strong>v2.4</strong></span>
-            <button type="button" class="btn-settings-done" id="btn-done-settings">Done</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Google Sign-In Interactive Modal -->
-      <div class="google-auth-backdrop" id="kuro-google-auth-modal" aria-hidden="true">
-        <div class="google-auth-card" role="dialog" aria-modal="true" aria-labelledby="google-auth-title">
-          <button type="button" class="google-auth-close" id="btn-close-google-auth" aria-label="Close">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <button type="button" class="settings-modal-close" id="btn-close-settings-modal" aria-label="Close Settings">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
           </button>
-          <div class="google-auth-header">
-            <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-            </svg>
-            <h3 class="google-auth-title" id="google-auth-title">Sign in with Google</h3>
-            <p class="google-auth-subtitle">to continue to <strong class="text-crimson-accent">KuroAnime</strong></p>
+        </div>
+
+        <!-- Body -->
+        <div class="settings-modal-body">
+          <!-- Section 1: Playback Preferences -->
+          <div class="settings-group">
+            <div class="settings-group-title">
+              <span>Playback & Streaming</span>
+            </div>
+
+            <!-- Setting 1: Autoplay Next Episode -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-name">Autoplay Next Episode</div>
+                <div class="setting-desc">Automatically transition to the next episode when current ends</div>
+              </div>
+              <label class="setting-switch" for="setting-toggle-autoplay">
+                <input type="checkbox" id="setting-toggle-autoplay" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+
+            <!-- Setting 2: Preferred Audio -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-name">Default Audio Language</div>
+                <div class="setting-desc">Preferred language track loaded by default in player</div>
+              </div>
+              <div class="setting-segmented-control" id="setting-audio-control">
+                <button type="button" class="segment-btn active" data-audio="sub">SUB</button>
+                <button type="button" class="segment-btn" data-audio="dub">DUB</button>
+              </div>
+            </div>
+
+            <!-- Setting 3: Auto Skip Intro -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-name">Auto Skip Intro / Outro</div>
+                <div class="setting-desc">Jump straight to anime content and skip opening credits</div>
+              </div>
+              <label class="setting-switch" for="setting-toggle-skip">
+                <input type="checkbox" id="setting-toggle-skip" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+
+            <!-- Setting 4: Default Streaming Quality -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-name">Preferred Quality</div>
+                <div class="setting-desc">Target stream resolution for video playback</div>
+              </div>
+              <div class="setting-segmented-control" id="setting-quality-control">
+                <button type="button" class="segment-btn active" data-quality="1080p">1080p</button>
+                <button type="button" class="segment-btn" data-quality="720p">720p</button>
+                <button type="button" class="segment-btn" data-quality="auto">Auto</button>
+              </div>
+            </div>
           </div>
 
-          <div class="google-account-list">
-            <button type="button" class="google-account-card" id="btn-google-account-select">
-              <div class="google-account-avatar">
-                <span>K</span>
+          <!-- Section 2: Visual Experience -->
+          <div class="settings-group">
+            <div class="settings-group-title">
+              <span>Visual Experience</span>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-name">Cinematic Ambient Glow</div>
+                <div class="setting-desc">Soft immersive edge glow around the video player</div>
               </div>
-              <div class="google-account-info">
-                <span class="google-account-name">Kuro Otaku</span>
-                <span class="google-account-email">otaku.member@gmail.com</span>
+              <label class="setting-switch" for="setting-toggle-ambient">
+                <input type="checkbox" id="setting-toggle-ambient" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-name">Fluid Spring Animations</div>
+                <div class="setting-desc">High-framerate smooth UI physics and micro-interactions</div>
               </div>
-              <i data-lucide="check" class="google-account-check"></i>
-            </button>
+              <label class="setting-switch" for="setting-toggle-physics">
+                <input type="checkbox" id="setting-toggle-physics" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
           </div>
 
-          <div class="google-auth-footer">
-            <p class="google-terms-note">To continue, Google will share your name and email address with KuroAnime.</p>
-            <button type="button" class="btn-google-confirm" id="btn-google-confirm-signin">
-              Continue as Kuro Otaku
-            </button>
+          <!-- Section 3: Data & Storage -->
+          <div class="settings-group">
+            <div class="settings-group-title">
+              <span>Data & Storage</span>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-name">Watch History</div>
+                <div class="setting-desc">Reset episode watch time and continue watching progress</div>
+              </div>
+              <button type="button" class="btn-setting-danger" id="btn-clear-watch-history">
+                <i data-lucide="trash-2"></i>
+                <span>Clear History</span>
+              </button>
+            </div>
           </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="settings-modal-footer">
+          <span class="settings-version">KuroAnime <strong>v2.4</strong></span>
+          <button type="button" class="btn-settings-done" id="btn-done-settings">Done</button>
         </div>
       </div>
-
-      <!-- Library & Watch History Sync Modal -->
-      <div class="sync-modal-backdrop" id="kuro-sync-share-modal" aria-hidden="true">
-        <div class="sync-modal-card" role="dialog" aria-modal="true" aria-labelledby="sync-modal-title">
-          <button type="button" class="sync-modal-close" id="btn-close-sync-modal" aria-label="Close modal">
-            <i data-lucide="x"></i>
-          </button>
-
-          <div class="sync-modal-header">
-            <div class="sync-modal-icon-badge">
-              <i data-lucide="share-2"></i>
-            </div>
-            <div>
-              <h3 class="sync-modal-title" id="sync-modal-title">Share &amp; Sync Library</h3>
-              <p class="sync-modal-sub">Sync watch history and anime lists with friends</p>
-            </div>
-          </div>
-
-          <!-- Auth Gate for Guests -->
-          <div class="sync-auth-gate" id="sync-auth-gate" style="display:none">
-            <div class="sync-gate-badge">
-              <i data-lucide="shield"></i>
-            </div>
-            <h4 class="sync-gate-heading">Google Account Required</h4>
-            <p class="sync-gate-desc">
-              Sign in with Google to generate a secure share code or import a friend's watch progress to your account.
-            </p>
-            <button type="button" class="btn-sync-google-auth" id="btn-sync-auth-trigger">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-              </svg>
-              <span>Sign in with Google</span>
-            </button>
-          </div>
-
-          <!-- Authenticated Container -->
-          <div class="sync-modal-body" id="sync-auth-content">
-            <div class="sync-nav-tabs" role="tablist">
-              <button type="button" class="sync-tab-btn active" id="tab-btn-share-pane" role="tab" aria-selected="true">
-                <i data-lucide="share-2"></i> Share My Data
-              </button>
-              <button type="button" class="sync-tab-btn" id="tab-btn-import-pane" role="tab" aria-selected="false">
-                <i data-lucide="download"></i> Enter Friend's Code
-              </button>
-            </div>
-
-            <!-- Share Pane -->
-            <div class="sync-tab-panel" id="panel-sync-share">
-              <div class="sync-stats-grid">
-                <div class="sync-stat-box">
-                  <span class="sync-stat-val" id="sync-stat-lib-count">0</span>
-                  <span class="sync-stat-title">Saved in Library</span>
-                </div>
-                <div class="sync-stat-sep"></div>
-                <div class="sync-stat-box">
-                  <span class="sync-stat-val" id="sync-stat-hist-count">0</span>
-                  <span class="sync-stat-title">Watched Episodes</span>
-                </div>
-              </div>
-
-              <!-- Generated Code Display -->
-              <div class="sync-code-section" id="sync-code-section" style="display:none">
-                <div class="sync-code-banner">
-                  <span class="sync-code-caption">Your Unique Share Code</span>
-                  <div class="sync-code-token-row">
-                    <code class="sync-code-token" id="sync-code-token-text">KURO-XXXXXX</code>
-                    <button type="button" class="btn-sync-token-copy" id="btn-copy-sync-code">
-                      <i data-lucide="copy"></i>
-                      <span id="btn-copy-code-label">Copy</span>
-                    </button>
-                  </div>
-                  <div class="sync-link-row">
-                    <input type="text" readonly class="sync-link-input" id="sync-link-input" value="" />
-                    <button type="button" class="btn-sync-link-copy" id="btn-copy-sync-link">
-                      Copy Link
-                    </button>
-                  </div>
-                  <p class="sync-code-validity">Valid for 30 days. Friends can enter this code to sync your library &amp; progress.</p>
-                </div>
-              </div>
-
-              <button type="button" class="btn-primary btn-generate-sync" id="btn-trigger-generate-code">
-                <i data-lucide="share-2"></i>
-                <span id="btn-generate-code-label">Generate 30-Day Sync Code</span>
-              </button>
-            </div>
-
-            <!-- Import Pane -->
-            <div class="sync-tab-panel" id="panel-sync-import" style="display:none">
-              <div class="sync-input-card">
-                <label for="input-sync-code" class="sync-field-label">Friend's Sync Code</label>
-                <div class="sync-input-row">
-                  <input
-                    type="text"
-                    id="input-sync-code"
-                    class="sync-code-field"
-                    placeholder="KURO-XXXXXX"
-                    maxlength="12"
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
-                  <button type="button" class="btn-primary btn-sync-find" id="btn-trigger-lookup-code">
-                    Find
-                  </button>
-                </div>
-                <p class="sync-field-hint">Paste the code (e.g. KURO-8N4K2P) provided by your friend.</p>
-              </div>
-
-              <!-- Preview Card -->
-              <div class="sync-preview-card" id="sync-preview-container" style="display:none">
-                <div class="sync-preview-top">
-                  <div class="sync-preview-avatar" id="sync-preview-avatar">
-                    <i data-lucide="user"></i>
-                  </div>
-                  <div class="sync-preview-meta">
-                    <div class="sync-preview-author" id="sync-preview-author">Friend's Library</div>
-                    <div class="sync-preview-details" id="sync-preview-details">0 anime &middot; 0 episodes</div>
-                  </div>
-                </div>
-                <div class="sync-preview-sample" id="sync-preview-sample-grid">
-                  <!-- Sample anime items thumbnails -->
-                </div>
-                <button type="button" class="btn-primary btn-import-confirm" id="btn-trigger-import-confirm">
-                  <i data-lucide="download"></i>
-                  <span>Sync to My Account</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Floating Vegeta AI Anime Advisor Widget -->
-      <aside class="vegeta-ai-root" id="vegeta-ai-root" aria-label="Vegeta Anime Advisor">
-        <!-- Floating Trigger Button -->
-        <button type="button" class="vegeta-trigger-btn" id="btn-vegeta-toggle" aria-label="Open Vegeta Anime Advisor" title="Ask Prince Vegeta for Anime Recommendations">
-          <div class="vegeta-avatar-wrapper">
-            <img src="/vegeta.gif?v=2" alt="Prince Vegeta" class="vegeta-avatar-img" />
-            <span class="saiyan-aura-ring"></span>
-          </div>
-          <span class="vegeta-trigger-label">
-            <span class="vegeta-label-title">Prince Vegeta</span>
-            <span class="vegeta-label-sub">Anime Advisor</span>
-          </span>
-        </button>
-
-        <!-- Floating Chat Card -->
-        <div class="vegeta-chat-card" id="vegeta-chat-card" aria-hidden="true">
-          <!-- Top Saiyan Aura Line -->
-          <div class="vegeta-card-header-bar">
-            <div class="vegeta-header-left">
-              <div class="vegeta-header-avatar">
-                <img src="/vegeta.gif?v=2" alt="Vegeta" />
-              </div>
-              <div class="vegeta-header-text">
-                <h3 class="vegeta-name">Prince Vegeta</h3>
-                <span class="vegeta-subtitle">KuroAnime Official Advisor</span>
-              </div>
-            </div>
-            <div class="vegeta-header-actions">
-              <button type="button" class="vegeta-icon-btn" id="btn-vegeta-close" title="Minimize Advisor" aria-label="Close">
-                <span class="material-symbols-rounded">close</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Chat Messages Area -->
-          <div class="vegeta-messages-box" id="vegeta-messages-box">
-            <!-- Initial Greeting -->
-            <div class="vegeta-msg-row vegeta-bot">
-              <div class="vegeta-msg-avatar">
-                <img src="/vegeta.gif?v=2" alt="Vegeta" />
-              </div>
-              <div class="vegeta-msg-bubble">
-                <p><strong>Hmph!</strong> So you dare ask the Prince of all Saiyans for anime guidance? Listen well, warrior.</p>
-                <p>I have surveyed all <strong>5,500+ anime</strong> in KuroAnime's archives. Tell me what genres or battles you hunger for, or select a category below:</p>
-                <div class="vegeta-quick-chips">
-                  <button type="button" class="quick-chip" data-prompt="Recommend peak action and shounen anime with top tier fights">Peak Shounen &amp; Fights</button>
-                  <button type="button" class="quick-chip" data-prompt="Recommend dark fantasy anime with high stakes and grit">Dark Fantasy</button>
-                  <button type="button" class="quick-chip" data-prompt="Recommend psychological thrillers with mind-bending plot twists">Psychological Thrillers</button>
-                  <button type="button" class="quick-chip" data-prompt="What are the highest rated anime masterpieces in our catalog?">Elite Masterpieces (9.0+)</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Typing Indicator -->
-          <div class="vegeta-typing-indicator" id="vegeta-typing-indicator" style="display:none">
-            <span class="vegeta-typing-avatar"><img src="/vegeta.gif?v=2" alt="Vegeta" /></span>
-            <div class="typing-bubble">
-              <span class="typing-text">Vegeta is judging the catalog...</span>
-              <div class="typing-dots">
-                <span></span><span></span><span></span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Input Bar -->
-          <form class="vegeta-input-bar" id="vegeta-chat-form">
-            <input type="text" id="vegeta-chat-input" class="vegeta-text-input" placeholder="Ask Vegeta (e.g. Action with dark twists)..." autocomplete="off" />
-            <button type="submit" class="vegeta-send-btn" id="btn-vegeta-send" aria-label="Send message">
-              <span class="material-symbols-rounded">send</span>
-            </button>
-          </form>
-        </div>
-      </aside>
-
-      <!-- Global Toast Notification -->
-      <div class="toast-notification" id="toast-notification"></div>
     </div>
 
-    <script type="module" src="/src/main.js"></script>
-  </body>
+    <!-- Google Sign-In Interactive Modal -->
+    <div class="google-auth-backdrop" id="kuro-google-auth-modal" aria-hidden="true">
+      <div class="google-auth-card" role="dialog" aria-modal="true" aria-labelledby="google-auth-title">
+        <button type="button" class="google-auth-close" id="btn-close-google-auth" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+        <div class="google-auth-header">
+          <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
+            <path fill="#4285F4"
+              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+            <path fill="#34A853"
+              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+            <path fill="#FBBC05"
+              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+            <path fill="#EA4335"
+              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+          </svg>
+          <h3 class="google-auth-title" id="google-auth-title">Sign in with Google</h3>
+          <p class="google-auth-subtitle">to continue to <strong class="text-crimson-accent">KuroAnime</strong></p>
+        </div>
+
+        <div class="google-account-list">
+          <button type="button" class="google-account-card" id="btn-google-account-select">
+            <div class="google-account-avatar">
+              <span>K</span>
+            </div>
+            <div class="google-account-info">
+              <span class="google-account-name">Kuro Otaku</span>
+              <span class="google-account-email">otaku.member@gmail.com</span>
+            </div>
+            <i data-lucide="check" class="google-account-check"></i>
+          </button>
+        </div>
+
+        <div class="google-auth-footer">
+          <p class="google-terms-note">To continue, Google will share your name and email address with KuroAnime.</p>
+          <button type="button" class="btn-google-confirm" id="btn-google-confirm-signin">
+            Continue as Kuro Otaku
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-App New Episode Release Alert Banner (Unslop Standard, 100% Screen Safe) -->
+    <div class="kuro-new-ep-banner" id="kuro-new-ep-banner" role="alert" aria-live="polite">
+      <div class="kuro-new-ep-left">
+        <img class="kuro-new-ep-thumb" id="kuro-new-ep-thumb" src="/favicon.svg" alt="Anime thumbnail" onerror="this.onerror=null;this.src='/favicon.svg';" />
+        <div class="kuro-new-ep-text">
+          <span class="kuro-new-ep-tag">NEW EPISODE RELEASED</span>
+          <h4 class="kuro-new-ep-title" id="kuro-new-ep-title">Attack on Titan · Ep 26</h4>
+        </div>
+      </div>
+      <div class="kuro-new-ep-actions">
+        <button type="button" class="btn-primary kuro-new-ep-play-btn" id="btn-play-new-ep">
+          <i data-lucide="play"></i> <span>Play</span>
+        </button>
+        <button type="button" class="kuro-new-ep-close-btn" id="btn-close-new-ep" aria-label="Dismiss alert">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Universal Anime & Episode Share Modal (Unslop Design, 100% Screen Bound Safe) -->
+    <div class="kuro-share-backdrop" id="kuro-share-modal" aria-hidden="true">
+      <div class="kuro-share-card" role="dialog" aria-modal="true" aria-labelledby="kuro-share-title">
+        <button type="button" class="kuro-share-close" id="btn-close-share-modal" aria-label="Close share modal">
+          <i data-lucide="x"></i>
+        </button>
+
+        <div class="kuro-share-header">
+          <div class="kuro-share-thumb-box">
+            <img class="kuro-share-thumb" id="kuro-share-thumb" src="/favicon.svg" alt="Anime poster"
+              onerror="this.onerror=null;this.src='/favicon.svg';" />
+          </div>
+          <div class="kuro-share-meta">
+            <span class="kuro-share-badge" id="kuro-share-caption">SHARE ANIME</span>
+            <h3 class="kuro-share-title" id="kuro-share-title">Anime Title</h3>
+            <p class="kuro-share-sub" id="kuro-share-sub">Stream in Sub &amp; Dub</p>
+          </div>
+        </div>
+
+        <!-- Timestamp Option (Shown when sharing an episode) -->
+        <div class="kuro-share-time-panel" id="kuro-share-time-panel" style="display:none">
+          <label class="kuro-share-time-toggle" for="kuro-share-time-check">
+            <input type="checkbox" id="kuro-share-time-check" checked />
+            <span class="kuro-share-toggle-knob"></span>
+            <span class="kuro-share-time-desc">
+              <span>Include timestamp</span>
+              <strong class="kuro-share-time-badge" id="kuro-share-time-display">0:00</strong>
+            </span>
+          </label>
+        </div>
+
+        <!-- Generated Link Row -->
+        <div class="kuro-share-link-box">
+          <span class="kuro-share-field-label">Shareable Link</span>
+          <div class="kuro-share-input-row">
+            <input type="text" readonly class="kuro-share-input" id="kuro-share-input" value="" spellcheck="false"
+              autocomplete="off" />
+            <button type="button" class="kuro-share-copy-btn" id="btn-copy-kuro-share">
+              <i data-lucide="copy"></i>
+              <span id="btn-copy-share-label">Copy</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Share Actions (Mobile Web Share + Copy Info) -->
+        <div class="kuro-share-actions">
+          <button type="button" class="btn-primary kuro-share-native-btn" id="btn-trigger-native-share">
+            <i data-lucide="share-2"></i>
+            <span>Share to Apps</span>
+          </button>
+          <button type="button" class="btn-secondary kuro-share-info-btn" id="btn-copy-formatted-text">
+            <i data-lucide="copy"></i>
+            <span id="btn-copy-info-label">Copy Info</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Library & Watch History Sync Modal -->
+    <div class="sync-modal-backdrop" id="kuro-sync-share-modal" aria-hidden="true">
+      <div class="sync-modal-card" role="dialog" aria-modal="true" aria-labelledby="sync-modal-title">
+        <button type="button" class="sync-modal-close" id="btn-close-sync-modal" aria-label="Close modal">
+          <i data-lucide="x"></i>
+        </button>
+
+        <div class="sync-modal-header">
+          <div class="sync-modal-icon-badge">
+            <i data-lucide="share-2"></i>
+          </div>
+          <div>
+            <h3 class="sync-modal-title" id="sync-modal-title">Share &amp; Sync Library</h3>
+            <p class="sync-modal-sub">Sync watch history and anime lists with friends</p>
+          </div>
+        </div>
+
+        <!-- Auth Gate for Guests -->
+        <div class="sync-auth-gate" id="sync-auth-gate" style="display:none">
+          <div class="sync-gate-badge">
+            <i data-lucide="shield"></i>
+          </div>
+          <h4 class="sync-gate-heading">Google Account Required</h4>
+          <p class="sync-gate-desc">
+            Sign in with Google to generate a secure share code or import a friend's watch progress to your account.
+          </p>
+          <button type="button" class="btn-sync-google-auth" id="btn-sync-auth-trigger">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+              <path fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+            </svg>
+            <span>Sign in with Google</span>
+          </button>
+        </div>
+
+        <!-- Authenticated Container -->
+        <div class="sync-modal-body" id="sync-auth-content">
+          <div class="sync-nav-tabs" role="tablist">
+            <button type="button" class="sync-tab-btn active" id="tab-btn-share-pane" role="tab" aria-selected="true">
+              <i data-lucide="share-2"></i> Share My Data
+            </button>
+            <button type="button" class="sync-tab-btn" id="tab-btn-import-pane" role="tab" aria-selected="false">
+              <i data-lucide="download"></i> Enter Friend's Code
+            </button>
+          </div>
+
+          <!-- Share Pane -->
+          <div class="sync-tab-panel" id="panel-sync-share">
+            <div class="sync-stats-grid">
+              <div class="sync-stat-box">
+                <span class="sync-stat-val" id="sync-stat-lib-count">0</span>
+                <span class="sync-stat-title">Saved in Library</span>
+              </div>
+              <div class="sync-stat-sep"></div>
+              <div class="sync-stat-box">
+                <span class="sync-stat-val" id="sync-stat-hist-count">0</span>
+                <span class="sync-stat-title">Watched Episodes</span>
+              </div>
+            </div>
+
+            <!-- Generated Code Display -->
+            <div class="sync-code-section" id="sync-code-section" style="display:none">
+              <div class="sync-code-banner">
+                <span class="sync-code-caption">Your Unique Share Code</span>
+                <div class="sync-code-token-row">
+                  <code class="sync-code-token" id="sync-code-token-text">KURO-XXXXXX</code>
+                  <button type="button" class="btn-sync-token-copy" id="btn-copy-sync-code">
+                    <i data-lucide="copy"></i>
+                    <span id="btn-copy-code-label">Copy</span>
+                  </button>
+                </div>
+                <div class="sync-link-row">
+                  <input type="text" readonly class="sync-link-input" id="sync-link-input" value="" />
+                  <button type="button" class="btn-sync-link-copy" id="btn-copy-sync-link">
+                    Copy Link
+                  </button>
+                </div>
+                <p class="sync-code-validity">Valid for 30 days. Friends can enter this code to sync your library &amp;
+                  progress.</p>
+              </div>
+            </div>
+
+            <button type="button" class="btn-primary btn-generate-sync" id="btn-trigger-generate-code">
+              <i data-lucide="share-2"></i>
+              <span id="btn-generate-code-label">Generate 30-Day Sync Code</span>
+            </button>
+          </div>
+
+          <!-- Import Pane -->
+          <div class="sync-tab-panel" id="panel-sync-import" style="display:none">
+            <div class="sync-input-card">
+              <label for="input-sync-code" class="sync-field-label">Friend's Sync Code</label>
+              <div class="sync-input-row">
+                <input type="text" id="input-sync-code" class="sync-code-field" placeholder="KURO-XXXXXX" maxlength="12"
+                  autocomplete="off" spellcheck="false" />
+                <button type="button" class="btn-primary btn-sync-find" id="btn-trigger-lookup-code">
+                  Find
+                </button>
+              </div>
+              <p class="sync-field-hint">Paste the code (e.g. KURO-8N4K2P) provided by your friend.</p>
+            </div>
+
+            <!-- Preview Card -->
+            <div class="sync-preview-card" id="sync-preview-container" style="display:none">
+              <div class="sync-preview-top">
+                <div class="sync-preview-avatar" id="sync-preview-avatar">
+                  <i data-lucide="user"></i>
+                </div>
+                <div class="sync-preview-meta">
+                  <div class="sync-preview-author" id="sync-preview-author">Friend's Library</div>
+                  <div class="sync-preview-details" id="sync-preview-details">0 anime &middot; 0 episodes</div>
+                </div>
+              </div>
+              <div class="sync-preview-sample" id="sync-preview-sample-grid">
+                <!-- Sample anime items thumbnails -->
+              </div>
+              <button type="button" class="btn-primary btn-import-confirm" id="btn-trigger-import-confirm">
+                <i data-lucide="download"></i>
+                <span>Sync to My Account</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Vegeta AI Anime Advisor Widget -->
+    <aside class="vegeta-ai-root" id="vegeta-ai-root" aria-label="Vegeta Anime Advisor">
+      <!-- Floating Trigger Button -->
+      <button type="button" class="vegeta-trigger-btn" id="btn-vegeta-toggle" aria-label="Open Vegeta Anime Advisor"
+        title="Ask Prince Vegeta for Anime Recommendations">
+        <div class="vegeta-avatar-wrapper">
+          <img src="/vegeta.gif?v=2" alt="Prince Vegeta" class="vegeta-avatar-img" />
+          <span class="saiyan-aura-ring"></span>
+        </div>
+        <span class="vegeta-trigger-label">
+          <span class="vegeta-label-title">Prince Vegeta</span>
+          <span class="vegeta-label-sub">Anime Advisor</span>
+        </span>
+      </button>
+
+      <!-- Floating Chat Card -->
+      <div class="vegeta-chat-card" id="vegeta-chat-card" aria-hidden="true">
+        <!-- Top Saiyan Aura Line -->
+        <div class="vegeta-card-header-bar">
+          <div class="vegeta-header-left">
+            <div class="vegeta-header-avatar">
+              <img src="/vegeta.gif?v=2" alt="Vegeta" />
+            </div>
+            <div class="vegeta-header-text">
+              <h3 class="vegeta-name">Prince Vegeta</h3>
+              <span class="vegeta-subtitle">KuroAnime Official Advisor</span>
+            </div>
+          </div>
+          <div class="vegeta-header-actions">
+            <button type="button" class="vegeta-icon-btn" id="btn-vegeta-close" title="Minimize Advisor"
+              aria-label="Close">
+              <span class="material-symbols-rounded">close</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Chat Messages Area -->
+        <div class="vegeta-messages-box" id="vegeta-messages-box">
+          <!-- Initial Greeting -->
+          <div class="vegeta-msg-row vegeta-bot">
+            <div class="vegeta-msg-avatar">
+              <img src="/vegeta.gif?v=2" alt="Vegeta" />
+            </div>
+            <div class="vegeta-msg-bubble">
+              <p><strong>Hmph!</strong> So you dare ask the Prince of all Saiyans for anime guidance? Listen well,
+                warrior.</p>
+              <p>I have surveyed all <strong>5,500+ anime</strong> in KuroAnime's archives. Tell me what genres or
+                battles you hunger for, or select a category below:</p>
+              <div class="vegeta-quick-chips">
+                <button type="button" class="quick-chip"
+                  data-prompt="Recommend peak action and shounen anime with top tier fights">Peak Shounen &amp;
+                  Fights</button>
+                <button type="button" class="quick-chip"
+                  data-prompt="Recommend dark fantasy anime with high stakes and grit">Dark Fantasy</button>
+                <button type="button" class="quick-chip"
+                  data-prompt="Recommend psychological thrillers with mind-bending plot twists">Psychological
+                  Thrillers</button>
+                <button type="button" class="quick-chip"
+                  data-prompt="What are the highest rated anime masterpieces in our catalog?">Elite Masterpieces
+                  (9.0+)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Typing Indicator -->
+        <div class="vegeta-typing-indicator" id="vegeta-typing-indicator" style="display:none">
+          <span class="vegeta-typing-avatar"><img src="/vegeta.gif?v=2" alt="Vegeta" /></span>
+          <div class="typing-bubble">
+            <span class="typing-text">Vegeta is judging the catalog...</span>
+            <div class="typing-dots">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Bar -->
+        <form class="vegeta-input-bar" id="vegeta-chat-form">
+          <input type="text" id="vegeta-chat-input" class="vegeta-text-input"
+            placeholder="Ask Vegeta (e.g. Action with dark twists)..." autocomplete="off" />
+          <button type="submit" class="vegeta-send-btn" id="btn-vegeta-send" aria-label="Send message">
+            <span class="material-symbols-rounded">send</span>
+          </button>
+        </form>
+      </div>
+    </aside>
+
+    <!-- Global Toast Notification -->
+    <div class="toast-notification" id="toast-notification"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+
 </html>

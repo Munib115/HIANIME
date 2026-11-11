@@ -81,6 +81,8 @@ export class NetflixPlayer {
     this.hasNextEp = Boolean(options.hasNextEp);
     this.hasPrevEp = Boolean(options.hasPrevEp);
     this.poster = options.poster || '';
+    this.initialTime = Number(options.initialTime || 0);
+    this.onShare = options.onShare || null;
     this.onBack = options.onBack || (() => {});
     this.onNextEpisode = options.onNextEpisode || (() => {});
     this.onPrevEpisode = options.onPrevEpisode || (() => {});
@@ -339,6 +341,10 @@ export class NetflixPlayer {
               <button type="button" class="nf-ctrl-btn nf-badge-trigger" id="nf-btn-settings" title="Quality & Speed">
                 <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 <span class="nf-mini-tag" id="nf-quality-tag">HD</span>
+              </button>
+
+              <button type="button" class="nf-ctrl-btn" id="nf-btn-share" title="Share Episode with Timestamp" aria-label="Share">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
               </button>
 
               <button type="button" class="nf-ctrl-btn" id="nf-btn-download" title="Download Episode">
@@ -724,6 +730,20 @@ export class NetflixPlayer {
       }
     });
 
+    // Share Episode & Timestamp Trigger
+    this.root.querySelector('#nf-btn-share')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeAllPopovers();
+      if (typeof this.onShare === 'function') {
+        this.onShare({
+          currentTime: this.getCurrentTime(),
+          duration: this.getDuration(),
+          episodeNumber: this.episodeNumber,
+          episodeTitle: this.episodeTitle,
+        });
+      }
+    });
+
     // Fallback to Embed Server Button
     this.root.querySelector('#nf-fallback-embed-btn')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -848,8 +868,14 @@ export class NetflixPlayer {
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (this.isDestroyed) return;
-        if (seekTime !== null && seekTime > 0) {
-          this.video.currentTime = seekTime;
+        const targetSeek = (seekTime !== null && seekTime > 0) ? seekTime : (this.initialTime > 0 ? this.initialTime : null);
+        if (targetSeek !== null && targetSeek > 0) {
+          this.video.currentTime = targetSeek;
+          this.initialTime = 0;
+          this.updateTimeUI();
+          if (typeof this.onToast === 'function') this.onToast(`Resumed at ${formatTime(targetSeek)}`);
+        } else {
+          this.restoreSavedPosition();
         }
         this.video.playbackRate = this.playbackSpeed;
         this.video.play().catch(() => {
@@ -872,8 +898,14 @@ export class NetflixPlayer {
     } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
       this.video.src = playlistUrl;
       this.video.addEventListener('loadedmetadata', () => {
-        if (seekTime !== null && seekTime > 0) {
-          this.video.currentTime = seekTime;
+        const targetSeek = (seekTime !== null && seekTime > 0) ? seekTime : (this.initialTime > 0 ? this.initialTime : null);
+        if (targetSeek !== null && targetSeek > 0) {
+          this.video.currentTime = targetSeek;
+          this.initialTime = 0;
+          this.updateTimeUI();
+          if (typeof this.onToast === 'function') this.onToast(`Resumed at ${formatTime(targetSeek)}`);
+        } else {
+          this.restoreSavedPosition();
         }
         this.video.play().catch(() => {
           this.setLoader(false);
@@ -1594,6 +1626,21 @@ export class NetflixPlayer {
         scrolling="no"
       ></iframe>
     `;
+  }
+
+  getCurrentTime() {
+    return this.video && Number.isFinite(this.video.currentTime) ? Math.floor(this.video.currentTime) : 0;
+  }
+
+  getDuration() {
+    return this.video && Number.isFinite(this.video.duration) ? Math.floor(this.video.duration) : 0;
+  }
+
+  seekTo(seconds) {
+    if (this.video && Number.isFinite(seconds) && seconds >= 0) {
+      this.video.currentTime = seconds;
+      this.updateTimeUI();
+    }
   }
 
   destroy() {

@@ -180,6 +180,11 @@ function showView(viewId, { pushHistory = true } = {}) {
     stopVideoPlayback();
   }
 
+  // If moving away from detail or into player, stop any running trailer
+  if (prevViewId === 'view-detail' && viewId !== 'view-detail') {
+    stopAnimeTrailer();
+  }
+
   // Ensure body scroll lock is cleared unless an overlay modal is open
   const anyModalOpen = document.querySelector('.inbox-modal-backdrop.active, .kuro-modal-backdrop.active');
   if (!anyModalOpen) {
@@ -264,12 +269,26 @@ window.addEventListener('popstate', (e) => {
 
     if (animeMatch) {
       const id = parseInt(animeMatch[1], 10);
-      openAnimeDetail(id, false);
+      const searchParams = new URLSearchParams(window.location.search);
+      const epParam = searchParams.get('ep') || searchParams.get('episode');
+      const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
+      const targetTime = tParam ? parseFloat(tParam) : 0;
+      if (epParam !== null) {
+        const epNum = parseInt(epParam, 10);
+        openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum, targetTime);
+      } else if (targetTime > 0) {
+        openAnimeDetail(id, true, 0, null, targetTime);
+      } else {
+        openAnimeDetail(id, false);
+      }
     } else if (watchMatch) {
       const id = parseInt(watchMatch[1], 10);
       const searchParams = new URLSearchParams(window.location.search);
-      const epNum = parseInt(searchParams.get('ep') || '1', 10);
-      openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum);
+      const epParam = searchParams.get('ep') || searchParams.get('episode');
+      const epNum = parseInt(epParam || '1', 10);
+      const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
+      const targetTime = tParam ? parseFloat(tParam) : 0;
+      openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum, targetTime);
     } else if (path === '/browse') {
       switchTab('browse');
     } else if (path === '/search') {
@@ -1820,8 +1839,660 @@ async function performSearch(query) {
   refreshIcons();
 }
 
+// ─── Bulletproof Cross-Platform Clipboard Copy ───────────────────────
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+
+  // 1. Modern Async Clipboard API
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (err) {
+      console.warn('[Clipboard API failed, trying fallback]:', err);
+    }
+  }
+
+  // 2. Fallback: Hidden off-screen textarea with execCommand
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    textArea.style.left = '-9999px';
+    textArea.style.opacity = '0';
+    textArea.style.pointerEvents = 'none';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    textArea.setSelectionRange(0, text.length);
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    if (successful) return true;
+  } catch (err) {
+    console.warn('[Hidden textarea copy failed]:', err);
+  }
+
+  // 3. Fallback: try share input if present
+  try {
+    const input = document.getElementById('kuro-share-input');
+    if (input) {
+      input.focus();
+      input.select();
+      input.setSelectionRange(0, input.value.length);
+      const successful = document.execCommand('copy');
+      if (successful) return true;
+    }
+  } catch (err) {}
+
+  return false;
+}
+window.copyTextToClipboard = copyTextToClipboard;
+
+// ─── Universal Anime & Episode Share Engine (Unslop Standard) ────────
+let activeShareContext = {
+  anime: null,
+  episode: null,
+  currentTime: 0,
+};
+
+function formatTimestamp(sec) {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const total = Math.floor(sec);
+  const hrs = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hrs > 0) {
+    return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function getShareBaseUrl() {
+  if (typeof window !== 'undefined' && window.location?.origin && window.location.protocol.startsWith('http')) {
+    return window.location.origin;
+  }
+  return 'https://kuroanime-flax.vercel.app';
+}
+
+function computeShareUrl(includeTimestamp = true) {
+  const { anime, episode, currentTime } = activeShareContext;
+  const targetAnime = anime || state.activeAnimeData;
+  const baseUrl = getShareBaseUrl();
+  const aid = targetAnime?.anime_id || targetAnime?.id || state.activeAnimeId || '';
+  let url = `${baseUrl}/anime/${aid}`;
+
+  const epNum = episode?.episode_number !== undefined
+    ? episode.episode_number
+    : (episode?.number !== undefined ? episode.number : null);
+
+  if (epNum !== null && epNum !== undefined) {
+    const params = new URLSearchParams();
+    params.set('ep', String(epNum));
+    if (includeTimestamp && currentTime > 0) {
+      params.set('t', String(Math.floor(currentTime)));
+    }
+    url += `?${params.toString()}`;
+  }
+
+  return url;
+}
+
+async function openShareModal({ anime, episode = null, currentTime = 0, autoCopy = true }) {
+  if (!anime) anime = state.activeAnimeData;
+  if (!anime) return;
+  const validCurrentTime = Number(currentTime || 0);
+  activeShareContext = { anime, episode, currentTime: validCurrentTime };
+
+  const modal = document.getElementById('kuro-share-modal');
+  if (!modal) return;
+
+  const thumbImg = document.getElementById('kuro-share-thumb');
+  const captionEl = document.getElementById('kuro-share-caption');
+  const titleEl = document.getElementById('kuro-share-title');
+  const subEl = document.getElementById('kuro-share-sub');
+  const timePanel = document.getElementById('kuro-share-time-panel');
+  const timeCheck = document.getElementById('kuro-share-time-check');
+  const timeDisplay = document.getElementById('kuro-share-time-display');
+  const urlInput = document.getElementById('kuro-share-input');
+  const copyBtn = document.getElementById('btn-copy-kuro-share');
+
+  const posterSrc = anime.poster || anime.banner_image || '/favicon.svg';
+  if (thumbImg) thumbImg.src = posterSrc;
+
+  const animeTitle = anime.title_english || anime.title || 'Anime';
+  if (titleEl) titleEl.textContent = animeTitle;
+
+  const hasEp = episode && (episode.episode_number !== undefined || episode.number !== undefined);
+  if (hasEp) {
+    const epNum = episode.episode_number !== undefined ? episode.episode_number : episode.number;
+    if (captionEl) captionEl.textContent = 'SHARE EPISODE';
+    if (subEl) subEl.textContent = `Episode ${epNum}${episode.title ? `: ${episode.title}` : ''}`;
+    
+    if (timePanel) {
+      if (validCurrentTime > 0) {
+        timePanel.style.display = 'block';
+        if (timeCheck) timeCheck.checked = true;
+        if (timeDisplay) timeDisplay.textContent = formatTimestamp(validCurrentTime);
+      } else {
+        timePanel.style.display = 'none';
+        if (timeCheck) timeCheck.checked = false;
+      }
+    }
+  } else {
+    if (captionEl) captionEl.textContent = 'SHARE ANIME';
+    const epCount = anime.episode_count || anime.al_episodes || (state.activeEpisodes && state.activeEpisodes.length) || 0;
+    if (subEl) subEl.textContent = `${anime.type || 'TV'}${epCount ? ` · ${epCount} Episodes` : ''} · Sub & Dub`;
+    if (timePanel) timePanel.style.display = 'none';
+    if (timeCheck) timeCheck.checked = false;
+  }
+
+  const isTimeIncluded = Boolean(timeCheck && timeCheck.checked && validCurrentTime > 0);
+  const shareUrl = computeShareUrl(isTimeIncluded);
+  if (urlInput) urlInput.value = shareUrl;
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  refreshIcons();
+
+  // Instant 1-Click Copy on Share Trigger
+  if (autoCopy && shareUrl) {
+    const copied = await copyTextToClipboard(shareUrl);
+    if (copied) {
+      if (copyBtn) {
+        copyBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+        refreshIcons();
+        setTimeout(() => {
+          if (copyBtn) {
+            copyBtn.innerHTML = '<i data-lucide="copy"></i> <span id="btn-copy-share-label">Copy</span>';
+            refreshIcons();
+          }
+        }, 2500);
+      }
+      showToast(isTimeIncluded ? `Link copied with timestamp (${formatTimestamp(validCurrentTime)})!` : 'Link copied to clipboard!');
+    }
+  }
+}
+window.openShareModal = openShareModal;
+
+function closeShareModal() {
+  const modal = document.getElementById('kuro-share-modal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function initShareModalListeners() {
+  const modal = document.getElementById('kuro-share-modal');
+  if (!modal) return;
+
+  const closeBtn = document.getElementById('btn-close-share-modal');
+  closeBtn?.addEventListener('click', closeShareModal);
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeShareModal();
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.classList.contains('open')) {
+      closeShareModal();
+    }
+  });
+
+  const timeCheck = document.getElementById('kuro-share-time-check');
+  const urlInput = document.getElementById('kuro-share-input');
+  timeCheck?.addEventListener('change', () => {
+    const isChecked = Boolean(timeCheck.checked);
+    if (urlInput) urlInput.value = computeShareUrl(isChecked);
+  });
+
+  // Clicking directly on input automatically selects and copies
+  urlInput?.addEventListener('click', async () => {
+    urlInput.select();
+    const ok = await copyTextToClipboard(urlInput.value);
+    if (ok) showToast('Link copied to clipboard!');
+  });
+
+  // Copy Link Button
+  const copyBtn = document.getElementById('btn-copy-kuro-share');
+  copyBtn?.addEventListener('click', async () => {
+    const isChecked = Boolean(timeCheck?.checked);
+    const url = computeShareUrl(isChecked);
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      copyBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+      refreshIcons();
+      showToast('Link copied to clipboard!');
+      setTimeout(() => {
+        if (copyBtn) {
+          copyBtn.innerHTML = '<i data-lucide="copy"></i> <span id="btn-copy-share-label">Copy</span>';
+          refreshIcons();
+        }
+      }, 2000);
+    } else {
+      urlInput?.select();
+      showToast('Please copy link manually');
+    }
+  });
+
+  // Copy with Formatted Info
+  const copyInfoBtn = document.getElementById('btn-copy-formatted-text');
+  copyInfoBtn?.addEventListener('click', async () => {
+    const { anime, episode, currentTime } = activeShareContext;
+    const isChecked = Boolean(timeCheck?.checked && currentTime > 0);
+    const url = computeShareUrl(isChecked);
+    const animeTitle = anime?.title_english || anime?.title || 'Anime';
+    
+    let text = '';
+    const hasEp = episode && (episode.episode_number !== undefined || episode.number !== undefined);
+    if (hasEp) {
+      const epNum = episode.episode_number !== undefined ? episode.episode_number : episode.number;
+      const timeStr = isChecked ? ` at ${formatTimestamp(currentTime)}` : '';
+      text = `Watch ${animeTitle} Episode ${epNum}${timeStr} on KuroAnime:
+${url}`;
+    } else {
+      text = `Watch ${animeTitle} in English Sub & Dub on KuroAnime:
+${url}`;
+    }
+
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      copyInfoBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+      refreshIcons();
+      showToast('Share info copied to clipboard!');
+      setTimeout(() => {
+        if (copyInfoBtn) {
+          copyInfoBtn.innerHTML = '<i data-lucide="copy"></i> <span id="btn-copy-info-label">Copy Info</span>';
+          refreshIcons();
+        }
+      }, 2000);
+    }
+  });
+
+  // Native Share / Share to Apps
+  const nativeBtn = document.getElementById('btn-trigger-native-share');
+  nativeBtn?.addEventListener('click', async () => {
+    const { anime, episode, currentTime } = activeShareContext;
+    const isChecked = Boolean(timeCheck?.checked && currentTime > 0);
+    const url = computeShareUrl(isChecked);
+    const animeTitle = anime?.title_english || anime?.title || 'Anime';
+
+    let shareTitle = `${animeTitle} | KuroAnime`;
+    let shareText = `Watch ${animeTitle} in Sub & Dub`;
+    if (episode && episode.episode_number !== undefined) {
+      shareTitle = `${animeTitle} - Episode ${episode.episode_number} | KuroAnime`;
+      const timeStr = isChecked ? ` at ${formatTimestamp(currentTime)}` : '';
+      shareText = `Watch ${animeTitle} Episode ${episode.episode_number}${timeStr} on KuroAnime`;
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: url
+        });
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          await copyTextToClipboard(url);
+          showToast('Link copied to clipboard!');
+        }
+      }
+    } else {
+      await copyTextToClipboard(url);
+      showToast('Link copied to clipboard!');
+    }
+  });
+}
+
+// ─── Real-Time Episode Release Notification Engine (Unslop Standard) ──
+function getKnownEpisodesMap() {
+  try {
+    const raw = localStorage.getItem('kuro_known_episodes');
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveKnownEpisodesMap(map) {
+  try {
+    localStorage.setItem('kuro_known_episodes', JSON.stringify(map));
+  } catch (e) {}
+}
+
+function isEpisodeNotificationEnabled() {
+  return localStorage.getItem('kuro_episode_notifications') === 'true';
+}
+
+async function requestNotificationPermission() {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
+    showToast('Browser notifications are not supported on this browser/device');
+    return false;
+  }
+
+  if (Notification.permission === 'granted') {
+    localStorage.setItem('kuro_episode_notifications', 'true');
+    showToast('✓ Episode notifications are active');
+    updateNotificationUI();
+    return true;
+  }
+
+  if (Notification.permission === 'denied') {
+    showToast('Notifications are blocked in your browser settings. Please enable them to get episode alerts.');
+    return false;
+  }
+
+  try {
+    const result = await Notification.requestPermission();
+    if (result === 'granted') {
+      localStorage.setItem('kuro_episode_notifications', 'true');
+      showToast('✓ Browser alerts enabled for new episodes!');
+      updateNotificationUI();
+
+      try {
+        const notif = new Notification('KuroAnime Alerts Enabled 🎬', {
+          body: 'You will receive desktop alerts right here whenever new episodes drop!',
+          icon: '/favicon.svg',
+          badge: '/favicon.svg',
+          tag: 'kuro-welcome-notif'
+        });
+        setTimeout(() => notif.close(), 6000);
+      } catch (e) {}
+      return true;
+    } else {
+      showToast('Notification permission was not granted');
+      return false;
+    }
+  } catch (err) {
+    console.error('Error requesting notification permission:', err);
+    return false;
+  }
+}
+
+async function toggleEpisodeNotifications() {
+  const current = isEpisodeNotificationEnabled();
+  if (current) {
+    localStorage.setItem('kuro_episode_notifications', 'false');
+    showToast('Episode alerts disabled');
+    updateNotificationUI();
+  } else {
+    await requestNotificationPermission();
+  }
+}
+window.toggleEpisodeNotifications = toggleEpisodeNotifications;
+
+function updateNotificationUI() {
+  const active = isEpisodeNotificationEnabled();
+  
+  const continueBtn = document.getElementById('btn-toggle-continue-notifs');
+  if (continueBtn) {
+    continueBtn.classList.toggle('active', active);
+    continueBtn.innerHTML = `<i data-lucide="${active ? 'bell' : 'bell-off'}"></i><span>${active ? 'Alerts Active' : 'Episode Alerts'}</span>`;
+  }
+
+  const detailBtn = document.getElementById('detail-notify-btn');
+  if (detailBtn) {
+    detailBtn.classList.toggle('active', active);
+    detailBtn.innerHTML = `<i data-lucide="${active ? 'bell' : 'bell-off'}"></i><span>${active ? 'Alerts On' : 'Alerts'}</span>`;
+  }
+
+  const playerBtn = document.getElementById('player-notify-btn');
+  if (playerBtn) {
+    playerBtn.classList.toggle('active', active);
+    playerBtn.innerHTML = `<i data-lucide="${active ? 'bell' : 'bell-off'}"></i>`;
+    playerBtn.setAttribute('title', active ? 'Episode alerts are active' : 'Notify me when new episode drops');
+  }
+
+  refreshIcons();
+}
+
+function showInAppNewEpisodeBanner({ animeId, animeTitle, episodeNumber, posterUrl }) {
+  const banner = document.getElementById('kuro-new-ep-banner');
+  if (!banner) return;
+
+  const thumb = document.getElementById('kuro-new-ep-thumb');
+  const titleEl = document.getElementById('kuro-new-ep-title');
+  const playBtn = document.getElementById('btn-play-new-ep');
+
+  if (thumb) thumb.src = posterUrl || '/favicon.svg';
+  if (titleEl) titleEl.textContent = `${animeTitle} · Episode ${episodeNumber}`;
+
+  if (playBtn) {
+    playBtn.onclick = () => {
+      banner.classList.remove('show');
+      setTimeout(() => { banner.style.display = 'none'; }, 350);
+      openAnimeDetail(animeId, true, Math.max(0, episodeNumber - 1), episodeNumber);
+    };
+  }
+
+  banner.style.display = 'flex';
+  void banner.offsetWidth;
+  banner.classList.add('show');
+  refreshIcons();
+
+  setTimeout(() => {
+    banner.classList.remove('show');
+    setTimeout(() => { banner.style.display = 'none'; }, 350);
+  }, 10000);
+}
+
+function notifyNewEpisode({ animeId, animeTitle, episodeNumber, posterUrl }) {
+  if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' && isEpisodeNotificationEnabled()) {
+    try {
+      const notif = new Notification(`New Episode Available! 🎬`, {
+        body: `${animeTitle} Episode ${episodeNumber} is now streaming on KuroAnime. Click to watch now!`,
+        icon: posterUrl || '/favicon.svg',
+        badge: '/favicon.svg',
+        tag: `kuro-ep-release-${animeId}-${episodeNumber}`,
+        renotify: true
+      });
+
+      notif.onclick = () => {
+        window.focus();
+        openAnimeDetail(animeId, true, Math.max(0, episodeNumber - 1), episodeNumber);
+        notif.close();
+      };
+    } catch (e) {
+      console.warn('Native notification dispatch failed:', e);
+    }
+  }
+
+  showInAppNewEpisodeBanner({ animeId, animeTitle, episodeNumber, posterUrl });
+  renderContinueWatchingRail();
+}
+
+let isCheckingNewEpisodes = false;
+async function checkNewEpisodesForContinueWatching() {
+  if (isCheckingNewEpisodes) return;
+  isCheckingNewEpisodes = true;
+
+  try {
+    const knownMap = getKnownEpisodesMap();
+    let hasChanges = false;
+
+    const candidates = [];
+    if (state.activeAnimeId) {
+      candidates.push({
+        anime_id: Number(state.activeAnimeId),
+        title: state.activeAnimeData?.title || 'Anime',
+        poster: state.activeAnimeData?.poster || '/favicon.svg'
+      });
+    }
+
+    if (Array.isArray(state.history)) {
+      state.history.slice(0, 6).forEach(h => {
+        const aid = Number(h.anime_id);
+        if (!candidates.some(c => c.anime_id === aid)) {
+          candidates.push({
+            anime_id: aid,
+            title: h.title,
+            poster: h.poster,
+            watchedEp: Number(h.episode_number) || 1
+          });
+        }
+      });
+    }
+
+    for (const item of candidates) {
+      try {
+        const res = await fetchApi(`/anime/${item.anime_id}/episodes`);
+        const eps = res?.episodes;
+        if (Array.isArray(eps) && eps.length > 0) {
+          const maxEp = Math.max(...eps.map(e => Number(e.episode_number) || 0));
+          const prevKnown = knownMap[item.anime_id] || item.watchedEp || 0;
+
+          if (prevKnown > 0 && maxEp > prevKnown) {
+            knownMap[item.anime_id] = maxEp;
+            hasChanges = true;
+            notifyNewEpisode({
+              animeId: item.anime_id,
+              animeTitle: item.title,
+              episodeNumber: maxEp,
+              posterUrl: item.poster
+            });
+          } else if (!knownMap[item.anime_id]) {
+            knownMap[item.anime_id] = maxEp;
+            hasChanges = true;
+          }
+        }
+      } catch (err) {}
+    }
+
+    if (hasChanges) {
+      saveKnownEpisodesMap(knownMap);
+    }
+  } finally {
+    isCheckingNewEpisodes = false;
+  }
+}
+
+function initEpisodeNotificationManager() {
+  document.getElementById('btn-close-new-ep')?.addEventListener('click', () => {
+    const banner = document.getElementById('kuro-new-ep-banner');
+    if (banner) {
+      banner.classList.remove('show');
+      setTimeout(() => { banner.style.display = 'none'; }, 350);
+    }
+  });
+
+  setInterval(() => {
+    checkNewEpisodesForContinueWatching();
+  }, 240000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkNewEpisodesForContinueWatching();
+    }
+  });
+
+  setTimeout(() => {
+    checkNewEpisodesForContinueWatching();
+  }, 8000);
+}
+
+// ─── Anime Detail Banner Trailer ─────────────────────────────────────
+function stopAnimeTrailer() {
+  const banner = document.getElementById('detail-banner-root');
+  const wrapper = document.getElementById('detail-trailer-wrapper');
+  const iframeBox = document.getElementById('detail-trailer-iframe-box');
+  const detailBody = document.querySelector('.detail-body');
+  const trailerBtn = document.getElementById('detail-trailer-btn');
+  const bannerTrailerBtn = document.getElementById('btn-banner-trailer');
+
+  if (iframeBox) iframeBox.innerHTML = '';
+  if (wrapper) wrapper.style.display = 'none';
+  if (banner) {
+    banner.classList.remove('has-trailer-active');
+    const origBg = banner.dataset.bannerUrl;
+    if (origBg) banner.style.backgroundImage = `url('${origBg}')`;
+  }
+  if (detailBody) detailBody.classList.remove('has-trailer-active');
+  if (trailerBtn) {
+    trailerBtn.classList.remove('active');
+    trailerBtn.innerHTML = `<i data-lucide="film"></i><span>Trailer</span>`;
+  }
+  if (bannerTrailerBtn) bannerTrailerBtn.style.display = '';
+  refreshIcons();
+}
+
+async function startAnimeTrailer(anime, triggerBtn) {
+  const banner = document.getElementById('detail-banner-root');
+  const wrapper = document.getElementById('detail-trailer-wrapper');
+  const iframeBox = document.getElementById('detail-trailer-iframe-box');
+  const detailBody = document.querySelector('.detail-body');
+  const trailerBtn = document.getElementById('detail-trailer-btn');
+  const bannerTrailerBtn = document.getElementById('btn-banner-trailer');
+
+  if (!banner || !wrapper || !iframeBox) return;
+
+  if (banner.classList.contains('has-trailer-active')) {
+    stopAnimeTrailer();
+    return;
+  }
+
+  const originalTriggerHtml = triggerBtn ? triggerBtn.innerHTML : '';
+  if (triggerBtn) {
+    triggerBtn.innerHTML = `<span class="yt-skel-spinner" style="width:13px;height:13px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin 0.8s linear infinite;margin-right:6px;"></span><span>Loading...</span>`;
+    triggerBtn.disabled = true;
+  }
+
+  let trailerId = anime?.trailer_id;
+  if (!trailerId) {
+    try {
+      const res = await fetchApi(`/anime/${anime.id || anime.anime_id}/trailer`);
+      if (res && res.ok && res.trailer_id) {
+        trailerId = res.trailer_id;
+        anime.trailer_id = trailerId;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch anime trailer:', e);
+    }
+  }
+
+  if (triggerBtn) {
+    triggerBtn.disabled = false;
+    triggerBtn.innerHTML = originalTriggerHtml;
+    refreshIcons();
+  }
+
+  if (!trailerId) {
+    showToast('Official trailer not found for this anime');
+    return;
+  }
+
+  banner.classList.add('has-trailer-active');
+  banner.style.backgroundImage = 'none';
+  if (detailBody) detailBody.classList.add('has-trailer-active');
+  if (bannerTrailerBtn) bannerTrailerBtn.style.display = 'none';
+  wrapper.style.display = 'block';
+
+  if (trailerBtn) {
+    trailerBtn.classList.add('active');
+    trailerBtn.innerHTML = `<i data-lucide="x"></i><span>Close Trailer</span>`;
+    refreshIcons();
+  }
+
+  const iframe = document.createElement('iframe');
+  iframe.className = 'detail-trailer-iframe';
+  iframe.src = `https://www.youtube.com/embed/${trailerId}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
+  iframe.title = `${escapeHtmlText(anime.title || 'Anime')} Trailer`;
+  iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+  iframe.allowFullscreen = true;
+  iframe.setAttribute('playsinline', '1');
+  iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+  iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+
+  iframeBox.innerHTML = '';
+  iframeBox.appendChild(iframe);
+
+  banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 // ─── Anime Detail View ──────────────────────────────────────────────
-async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0, targetEpisodeNumber = null) {
+async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0, targetEpisodeNumber = null, targetTime = 0) {
+  stopAnimeTrailer();
   state.activeAnimeId = animeId;
   state.isFetchingDetail = true;
 
@@ -2003,11 +2674,26 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
 
   if (container) {
     container.innerHTML = `
-      <div class="detail-banner" style="background-image: url('${banner}')">
-        <div class="detail-banner-overlay"></div>
-        <button class="detail-back-btn" id="detail-back-home-btn">
+      <div class="detail-banner" id="detail-banner-root" style="background-image: url('${banner}')" data-banner-url="${escapeHtmlText(banner)}">
+        <div class="detail-banner-overlay" id="detail-banner-scrim"></div>
+        <button class="detail-back-btn" id="detail-back-home-btn" aria-label="Back">
           <i data-lucide="arrow-left"></i> Back
         </button>
+        <button type="button" class="btn-banner-trailer" id="btn-banner-trailer" title="Watch official trailer">
+          <span class="trailer-play-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+          </span>
+          <span class="trailer-btn-label">Watch Trailer</span>
+        </button>
+        <div class="detail-trailer-wrapper" id="detail-trailer-wrapper" style="display:none;">
+          <div class="detail-trailer-scrim-top"></div>
+          <div class="detail-trailer-scrim-bottom"></div>
+          <button type="button" class="btn-close-trailer" id="btn-close-trailer" aria-label="Close trailer and restore background image">
+            <i data-lucide="x"></i>
+            <span>Close Trailer</span>
+          </button>
+          <div class="detail-trailer-iframe-box" id="detail-trailer-iframe-box"></div>
+        </div>
       </div>
 
       <div class="detail-body">
@@ -2048,6 +2734,14 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
           <button class="btn-secondary ${watchlisted ? 'active' : ''}" id="detail-bookmark-btn">
             <i data-lucide="bookmark"></i>
             <span>${watchlisted ? 'In Library' : 'Add to Library'}</span>
+          </button>
+          <button class="btn-secondary" id="detail-trailer-btn" title="Watch trailer">
+            <i data-lucide="film"></i>
+            <span>Trailer</span>
+          </button>
+          <button class="btn-secondary" id="detail-share-btn" title="Share anime">
+            <i data-lucide="share-2"></i>
+            <span>Share</span>
           </button>
         </div>
 
@@ -2164,11 +2858,32 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
       });
     });
 
+    const triggerTrailer = (triggerBtn) => {
+      startAnimeTrailer(anime, triggerBtn);
+    };
+
+    document.getElementById('btn-banner-trailer')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerTrailer(e.currentTarget);
+    });
+
+    document.getElementById('detail-trailer-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerTrailer(e.currentTarget);
+    });
+
+    document.getElementById('btn-close-trailer')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      stopAnimeTrailer();
+    });
+
     document.getElementById('detail-back-home-btn')?.addEventListener('click', () => {
+      stopAnimeTrailer();
       switchTab(state.currentTab || 'home');
     });
 
     document.getElementById('detail-start-watch-btn')?.addEventListener('click', () => {
+      stopAnimeTrailer();
       if (state.activeEpisodes.length > 0) {
         const latestHist = state.history.find(h => Number(h.anime_id) === Number(animeId));
         let targetIdx = resolvedEpIdx;
@@ -2190,9 +2905,31 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
       refreshIcons();
     });
 
+    document.getElementById('detail-share-btn')?.addEventListener('click', async (e) => {
+      const shareBtn = e.currentTarget;
+      const originalHtml = shareBtn ? shareBtn.innerHTML : '';
+      if (shareBtn) {
+        shareBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+        refreshIcons();
+        setTimeout(() => {
+          if (shareBtn) {
+            shareBtn.innerHTML = originalHtml;
+            refreshIcons();
+          }
+        }, 2000);
+      }
+      openShareModal({
+        anime,
+        episode: null,
+        currentTime: 0,
+        autoCopy: true
+      });
+    });
+
     // Season switcher cards
     container.querySelectorAll('.season-card').forEach(sc => {
       sc.addEventListener('click', () => {
+        stopAnimeTrailer();
         const targetId = Number(sc.dataset.seasonId);
         if (targetId && targetId !== animeId) {
           openAnimeDetail(targetId);
@@ -2211,7 +2948,7 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
   }
 
   if (autoPlayFirst && state.activeEpisodes.length > 0) {
-    openWatchPlayer(resolvedEpIdx);
+    openWatchPlayer(resolvedEpIdx, targetTime);
     return;
   }
 
@@ -2248,7 +2985,9 @@ function renderEpisodeChunk(start, end) {
 }
 
 // ─── Watch Player View ──────────────────────────────────────────────
-async function openWatchPlayer(episodeIndex) {
+async function openWatchPlayer(episodeIndex, targetTime = 0) {
+  stopAnimeTrailer();
+  state.targetSeekTime = targetTime;
   state.activeEpisodeIndex = episodeIndex;
   const anime = state.activeAnimeData;
   const ep = state.activeEpisodes[episodeIndex];
@@ -2328,7 +3067,7 @@ async function openWatchPlayer(episodeIndex) {
         hasDub: (state.currentStreams.dub || []).length > 0,
       });
     } else {
-      loadStreamIntoPlayer();
+      loadStreamIntoPlayer(targetTime);
     }
 
     refreshIcons();
@@ -2344,9 +3083,14 @@ async function openWatchPlayer(episodeIndex) {
         <div class="player-anime-title">${anime.title}</div>
         <div class="player-ep-title">Episode ${ep.episode_number}${ep.title ? `: ${ep.title}` : ''}</div>
       </div>
-      <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="${isWatchlisted(anime.anime_id) ? 'In Library' : 'Add to Library'}" title="${isWatchlisted(anime.anime_id) ? 'In Library' : 'Add to Library'}">
-        <i data-lucide="bookmark"></i>
-      </button>
+      <div class="player-header-actions" style="display:flex;align-items:center;gap:8px;">
+        <button class="header-icon-btn" id="player-share-btn" aria-label="Share episode with timestamp" title="Share anime or episode with timestamp">
+          <i data-lucide="share-2"></i>
+        </button>
+        <button class="header-icon-btn ${isWatchlisted(anime.anime_id) ? 'active' : ''}" id="player-bookmark-btn" aria-label="${isWatchlisted(anime.anime_id) ? 'In Library' : 'Add to Library'}" title="${isWatchlisted(anime.anime_id) ? 'In Library' : 'Add to Library'}">
+          <i data-lucide="bookmark"></i>
+        </button>
+      </div>
     </div>
 
     <!-- Video Container -->
@@ -2452,6 +3196,28 @@ async function openWatchPlayer(episodeIndex) {
     playerBookmarkBtn.setAttribute('title', nowSaved ? 'In Library' : 'Add to Library');
     playerBookmarkBtn.innerHTML = `<i data-lucide="bookmark"></i>`;
     refreshIcons();
+  });
+
+  document.getElementById('player-share-btn')?.addEventListener('click', (e) => {
+    const shareBtn = e.currentTarget;
+    const originalHtml = shareBtn ? shareBtn.innerHTML : '';
+    if (shareBtn) {
+      shareBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+      refreshIcons();
+      setTimeout(() => {
+        if (shareBtn) {
+          shareBtn.innerHTML = originalHtml;
+          refreshIcons();
+        }
+      }, 2000);
+    }
+    const curTime = activePlayerInstance?.getCurrentTime ? activePlayerInstance.getCurrentTime() : 0;
+    openShareModal({
+      anime: state.activeAnimeData || anime,
+      episode: state.activeEpisodes[state.activeEpisodeIndex] || ep,
+      currentTime: curTime,
+      autoCopy: true
+    });
   });
 
   document.getElementById('player-prev-ep-btn')?.addEventListener('click', () => {
@@ -2602,7 +3368,7 @@ function renderServerChips() {
   refreshIcons();
 }
 
-function loadStreamIntoPlayer() {
+function loadStreamIntoPlayer(targetTime = 0) {
   const frameContainer = document.getElementById('video-frame-container');
   if (!frameContainer) return;
 
@@ -2646,7 +3412,11 @@ function loadStreamIntoPlayer() {
       hasDub: (state.currentStreams.dub || []).length > 0,
       hasNextEp: state.activeEpisodeIndex < state.activeEpisodes.length - 1,
       hasPrevEp: state.activeEpisodeIndex > 0,
+      initialTime: targetTime > 0 ? targetTime : undefined,
     });
+    if (targetTime > 0 && activePlayerInstance.video) {
+      activePlayerInstance.seekTo(targetTime);
+    }
     refreshIcons();
     return;
   }
@@ -2671,6 +3441,18 @@ function loadStreamIntoPlayer() {
     hasNextEp: state.activeEpisodeIndex < state.activeEpisodes.length - 1,
     hasPrevEp: state.activeEpisodeIndex > 0,
     poster: anime.banner_image || anime.poster_large || anime.poster || '',
+    initialTime: targetTime > 0 ? targetTime : (state.targetSeekTime || 0),
+    onShare: (p) => {
+      openShareModal({
+        anime: state.activeAnimeData || anime,
+        episode: state.activeEpisodes[state.activeEpisodeIndex] || {
+          episode_number: p.episodeNumber,
+          title: p.episodeTitle
+        },
+        currentTime: p.currentTime,
+        autoCopy: true
+      });
+    },
     onProgress: (p) => {
       const curAnime = state.activeAnimeData || anime;
       const curEp = state.activeEpisodes[state.activeEpisodeIndex] || {
@@ -2714,6 +3496,7 @@ function loadStreamIntoPlayer() {
     onToast: (msg) => showToast(msg),
   });
 
+  state.targetSeekTime = 0;
   refreshIcons();
 }
 
@@ -4667,14 +5450,14 @@ function initSyncModal() {
   btnCopyCode?.addEventListener('click', async () => {
     const code = codeTokenText?.textContent?.trim();
     if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code);
+    const ok = await copyTextToClipboard(code);
+    if (ok) {
       if (btnCopyCodeLabel) btnCopyCodeLabel.textContent = 'Copied!';
       showToast(`Code ${code} copied to clipboard`);
       setTimeout(() => {
         if (btnCopyCodeLabel) btnCopyCodeLabel.textContent = 'Copy';
       }, 2000);
-    } catch (e) {
+    } else {
       showToast('Could not copy to clipboard');
     }
   });
@@ -4683,14 +5466,14 @@ function initSyncModal() {
   btnCopyLink?.addEventListener('click', async () => {
     const url = linkInput?.value?.trim();
     if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
       btnCopyLink.textContent = 'Copied!';
       showToast('Direct sync link copied to clipboard');
       setTimeout(() => {
         btnCopyLink.textContent = 'Copy Link';
       }, 2000);
-    } catch (e) {
+    } else {
       showToast('Could not copy link');
     }
   });
@@ -4865,12 +5648,26 @@ function handleInitialRoute() {
 
   if (animeMatch) {
     const id = parseInt(animeMatch[1], 10);
-    openAnimeDetail(id, false);
+    const searchParams = new URLSearchParams(window.location.search);
+    const epParam = searchParams.get('ep') || searchParams.get('episode');
+    const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
+    const targetTime = tParam ? parseFloat(tParam) : 0;
+    if (epParam !== null) {
+      const epNum = parseInt(epParam, 10);
+      openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum, targetTime);
+    } else if (targetTime > 0) {
+      openAnimeDetail(id, true, 0, null, targetTime);
+    } else {
+      openAnimeDetail(id, false);
+    }
   } else if (watchMatch) {
     const id = parseInt(watchMatch[1], 10);
     const searchParams = new URLSearchParams(window.location.search);
-    const epNum = parseInt(searchParams.get('ep') || '1', 10);
-    openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum);
+    const epParam = searchParams.get('ep') || searchParams.get('episode');
+    const epNum = parseInt(epParam || '1', 10);
+    const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
+    const targetTime = tParam ? parseFloat(tParam) : 0;
+    openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum, targetTime);
   } else if (path === '/browse') {
     switchTab('browse');
     const searchParams = new URLSearchParams(window.location.search);
@@ -4901,12 +5698,17 @@ function handleInitialRoute() {
   }
 }
 
+
+
+
   // Init App
   initCustomSelects();
   applyVisualSettings();
   initUserMenuAndSettings();
   updateWatchlistBadge();
   syncModalInstance = initSyncModal();
+  initShareModalListeners();
+  initEpisodeNotificationManager();
   handleInitialRoute();
   refreshIcons();
 });
