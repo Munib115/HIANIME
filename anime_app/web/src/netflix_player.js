@@ -878,9 +878,19 @@ export class NetflixPlayer {
           this.restoreSavedPosition();
         }
         this.video.playbackRate = this.playbackSpeed;
-        this.video.play().catch(() => {
-          this.setLoader(false);
-          this.updatePlayUI();
+        this.video.play().catch(async (playErr) => {
+          // Modern browser autoplay policy safeguard: retry muted if audio playback was blocked
+          try {
+            this.video.muted = true;
+            await this.video.play();
+            this.updatePlayUI();
+            if (typeof this.onToast === 'function') {
+              this.onToast('Playing muted (tap anywhere to unmute)');
+            }
+          } catch (mutedErr) {
+            this.setLoader(false);
+            this.updatePlayUI();
+          }
         });
       });
 
@@ -907,8 +917,18 @@ export class NetflixPlayer {
         } else {
           this.restoreSavedPosition();
         }
-        this.video.play().catch(() => {
-          this.setLoader(false);
+        this.video.play().catch(async () => {
+          try {
+            this.video.muted = true;
+            await this.video.play();
+            this.updatePlayUI();
+            if (typeof this.onToast === 'function') {
+              this.onToast('Playing muted (tap anywhere to unmute)');
+            }
+          } catch (e) {
+            this.setLoader(false);
+            this.updatePlayUI();
+          }
         });
       }, { once: true });
     } else {
@@ -935,6 +955,12 @@ export class NetflixPlayer {
     }
 
     this.embedUrl = options.embedUrl;
+    if (options.animeTitle) {
+      this.animeTitle = options.animeTitle;
+    }
+    if (options.animeId) {
+      this.animeId = options.animeId;
+    }
     this.episodeNumber = options.episodeNumber || this.episodeNumber;
     this.episodeTitle = options.episodeTitle || '';
     this.episodeId = options.episodeId || '';
@@ -951,8 +977,10 @@ export class NetflixPlayer {
       this.bindEvents();
     }
 
-    // Update Top bar UI
+    // Update Top bar UI (both anime title and episode label)
     const epLabel = `E${this.episodeNumber}${this.episodeTitle ? ` • ${this.episodeTitle}` : ''}`;
+    const topAnime = this.root?.querySelector('.nf-top-anime');
+    if (topAnime && this.animeTitle) topAnime.textContent = this.animeTitle;
     const topEp = this.root?.querySelector('.nf-top-ep');
     if (topEp) topEp.textContent = epLabel;
 

@@ -609,11 +609,16 @@
       <section class="view-screen" id="view-search">
         <div class="search-input-wrapper">
           <i data-lucide="search" class="search-input-icon"></i>
-          <input type="search" class="search-input" id="search-input-field" placeholder="Search anime..."
+          <input type="text" inputmode="search" class="search-input" id="search-input-field" placeholder="Search anime..."
             autocomplete="off" />
-          <button class="search-clear-btn" id="search-clear-btn" style="display:none">
-            <i data-lucide="x"></i>
-          </button>
+          <div class="search-input-actions">
+            <button type="button" class="search-clear-btn" id="search-clear-btn" style="display:none" title="Clear search" aria-label="Clear search">
+              <i data-lucide="x"></i>
+            </button>
+            <button type="button" class="search-mic-btn" id="search-mic-btn" title="Search with your voice" aria-label="Search with voice">
+              <i data-lucide="mic"></i>
+            </button>
+          </div>
         </div>
 
         <div class="search-suggestions" id="search-recent-box">
@@ -1009,6 +1014,37 @@
       </div>
     </div>
 
+    <!-- YouTube-Inspired Voice Search Modal (Unslop Design, Mobile Safe) -->
+    <div class="voice-search-backdrop" id="kuro-voice-search-modal" aria-hidden="true">
+      <div class="voice-search-card" role="dialog" aria-modal="true" aria-labelledby="voice-search-status">
+        <div class="voice-search-header">
+          <h2 class="voice-search-title" id="voice-search-status">Listening...</h2>
+          <button type="button" class="voice-search-close" id="btn-close-voice-modal" aria-label="Close voice search">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <div class="voice-search-body">
+          <div class="voice-transcript-wrapper">
+            <p class="voice-transcript-text" id="voice-transcript-text">
+              <span class="voice-transcript-placeholder">Say an anime title...</span>
+            </p>
+          </div>
+
+          <div class="voice-mic-stage" id="voice-mic-stage">
+            <div class="voice-ripple-ring ring-1"></div>
+            <div class="voice-ripple-ring ring-2"></div>
+            <div class="voice-ripple-ring ring-3"></div>
+            <button type="button" class="voice-mic-circle" id="btn-voice-mic-action" title="Tap to listen or pause" aria-label="Voice input">
+              <i data-lucide="mic"></i>
+            </button>
+          </div>
+
+          <p class="voice-search-tip" id="voice-search-tip">Tap microphone to cancel</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Library & Watch History Sync Modal -->
     <div class="sync-modal-backdrop" id="kuro-sync-share-modal" aria-hidden="true">
       <div class="sync-modal-card" role="dialog" aria-modal="true" aria-labelledby="sync-modal-title">
@@ -1166,10 +1202,18 @@
             </div>
             <div class="vegeta-header-text">
               <h3 class="vegeta-name">Prince Vegeta</h3>
-              <span class="vegeta-subtitle">KuroAnime Official Advisor</span>
+              <div class="vegeta-sub-row">
+                <span class="vegeta-subtitle">KuroAnime Official Advisor</span>
+                <span class="vegeta-voice-wave" id="vegeta-voice-wave" title="Speaking..." style="display:none">
+                  <span></span><span></span><span></span><span></span>
+                </span>
+              </div>
             </div>
           </div>
           <div class="vegeta-header-actions">
+            <button type="button" class="vegeta-icon-btn vegeta-voice-btn" id="btn-vegeta-voice" title="Vegeta Voice (Mute/Unmute)" aria-label="Toggle Voice">
+              <span class="material-symbols-rounded">volume_up</span>
+            </button>
             <button type="button" class="vegeta-icon-btn" id="btn-vegeta-close" title="Minimize Advisor"
               aria-label="Close">
               <span class="material-symbols-rounded">close</span>
@@ -1185,22 +1229,14 @@
               <img src="/vegeta.gif?v=2" alt="Vegeta" />
             </div>
             <div class="vegeta-msg-bubble">
-              <p><strong>Hmph!</strong> So you dare ask the Prince of all Saiyans for anime guidance? Listen well,
-                warrior.</p>
-              <p>I have surveyed all <strong>5,500+ anime</strong> in KuroAnime's archives. Tell me what genres or
-                battles you hunger for, or select a category below:</p>
+              <p><strong>Hmph.</strong> What anime are you looking for, warrior?</p>
               <div class="vegeta-quick-chips">
-                <button type="button" class="quick-chip"
-                  data-prompt="Recommend peak action and shounen anime with top tier fights">Peak Shounen &amp;
-                  Fights</button>
-                <button type="button" class="quick-chip"
-                  data-prompt="Recommend dark fantasy anime with high stakes and grit">Dark Fantasy</button>
-                <button type="button" class="quick-chip"
-                  data-prompt="Recommend psychological thrillers with mind-bending plot twists">Psychological
-                  Thrillers</button>
-                <button type="button" class="quick-chip"
-                  data-prompt="What are the highest rated anime masterpieces in our catalog?">Elite Masterpieces
-                  (9.0+)</button>
+                <button type="button" class="quick-chip" data-prompt="Recommend peak action and shounen anime with top tier fights">Peak Shounen</button>
+                <button type="button" class="quick-chip" data-prompt="Surprise me with an action anime">Surprise Me</button>
+                <button type="button" class="quick-chip" data-prompt="What is that anime where a guy dies and gets reincarnated as a slime?">Identify by Plot</button>
+                <button type="button" class="quick-chip" data-prompt="What are the highest rated anime masterpieces in our catalog?">Top Masterpieces</button>
+                <button type="button" class="quick-chip" data-prompt="Anime like Jujutsu Kaisen">Like Jujutsu Kaisen</button>
+                <button type="button" class="quick-chip" data-prompt="Play Attack on Titan Season 1 Episode 1">Auto-Play AoT</button>
               </div>
             </div>
           </div>
@@ -1217,10 +1253,25 @@
           </div>
         </div>
 
+        <!-- Image Preview Bar (Shown when anime screenshot attached or pasted) -->
+        <div class="vegeta-image-preview-bar" id="vegeta-image-preview-bar" style="display:none">
+          <div class="vegeta-preview-thumbnail-wrap">
+            <img id="vegeta-preview-img" src="" alt="Screenshot preview" />
+            <button type="button" class="vegeta-preview-remove-btn" id="btn-vegeta-remove-img" title="Remove screenshot">
+              <span class="material-symbols-rounded">close</span>
+            </button>
+          </div>
+          <span class="vegeta-preview-text">Screenshot attached • Vegeta will identify episode &amp; scene</span>
+        </div>
+
         <!-- Input Bar -->
         <form class="vegeta-input-bar" id="vegeta-chat-form">
+          <input type="file" id="vegeta-image-input" accept="image/*" style="display:none;" />
+          <button type="button" class="vegeta-input-action-btn" id="btn-vegeta-image-upload" title="Upload anime screenshot (or paste with Ctrl+V)" aria-label="Upload screenshot">
+            <span class="material-symbols-rounded">add_photo_alternate</span>
+          </button>
           <input type="text" id="vegeta-chat-input" class="vegeta-text-input"
-            placeholder="Ask Vegeta (e.g. Action with dark twists)..." autocomplete="off" />
+            placeholder="Ask or paste screenshot (Ctrl+V)..." autocomplete="off" />
           <button type="submit" class="vegeta-send-btn" id="btn-vegeta-send" aria-label="Send message">
             <span class="material-symbols-rounded">send</span>
           </button>

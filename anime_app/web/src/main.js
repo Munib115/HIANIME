@@ -55,7 +55,8 @@ import {
   Share2,
   Copy,
   ChevronDown,
-  Info
+  Info,
+  Mic
 } from 'lucide';
 
 // ─── Global State & Storage ─────────────────────────────────────────
@@ -104,7 +105,7 @@ function refreshIcons() {
       Home, Compass, Search, Bookmark, Play, Star, ArrowLeft,
       Layers, Volume2, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
       ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download, Plus,
-      User, Settings, LogOut, Trash2, Share2, Copy, ChevronDown, Info
+      User, Settings, LogOut, Trash2, Share2, Copy, ChevronDown, Info, Mic
     }
   });
 }
@@ -2496,6 +2497,13 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
   state.activeAnimeId = animeId;
   state.isFetchingDetail = true;
 
+  if (autoPlayFirst && activePlayerInstance && Number(activePlayerInstance.animeId) !== Number(animeId)) {
+    try {
+      activePlayerInstance.setLoader(true, 'Summoning stream archives...');
+      if (activePlayerInstance.video) activePlayerInstance.video.pause();
+    } catch (e) {}
+  }
+
   const container = document.getElementById('detail-container');
   if (!autoPlayFirst) {
     state.playerEnteredFrom = 'detail';
@@ -3001,10 +3009,22 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
 
   const frameContainer = document.getElementById('video-frame-container');
 
-  // If the player is already mounted and active for this anime:
+  // If the player is already mounted and active FOR THIS SAME ANIME:
   // Seamlessly transition in-place without wiping container.innerHTML
   // This preserves Fullscreen mode & Landscape orientation on mobile!
-  if (frameContainer && activePlayerInstance && !activePlayerInstance.isDestroyed) {
+  const isSameAnime = activePlayerInstance &&
+                      Number(activePlayerInstance.animeId) === Number(anime.anime_id) &&
+                      Number(container.dataset.renderedAnimeId) === Number(anime.anime_id);
+
+  if (frameContainer && isSameAnime && !activePlayerInstance.isDestroyed) {
+    // 0. Update Anime Title in header & document title
+    const animeTitleEl = container.querySelector('.player-anime-title');
+    if (animeTitleEl) {
+      animeTitleEl.textContent = anime.title || anime.title_english || '';
+    }
+    const epDisplayNum = ep.episode_number || (episodeIndex + 1);
+    document.title = `Watch ${anime.title_english || anime.title} Episode ${epDisplayNum} | KuroAnime`;
+
     // 1. Update Episode Title in header
     const epTitleEl = container.querySelector('.player-ep-title');
     if (epTitleEl) {
@@ -3057,6 +3077,8 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
     if (server && server.embed_url) {
       await activePlayerInstance.updateEpisode({
         embedUrl: server.embed_url,
+        animeTitle: anime.title || anime.title_english || 'Anime',
+        animeId: anime.anime_id,
         episodeNumber: ep.episode_number || (episodeIndex + 1),
         episodeTitle: ep.title || '',
         episodeId: ep.episode_id || '',
@@ -3073,6 +3095,15 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
     refreshIcons();
     return;
   }
+
+  // Switching to a DIFFERENT anime: teardown old player & rebuild complete watch container
+  if (activePlayerInstance) {
+    try { activePlayerInstance.destroy(); } catch (e) {}
+    activePlayerInstance = null;
+  }
+  container.dataset.renderedAnimeId = String(anime.anime_id);
+  const epDisplayNum = ep.episode_number || (episodeIndex + 1);
+  document.title = `Watch ${anime.title_english || anime.title} Episode ${epDisplayNum} | KuroAnime`;
 
   container.innerHTML = `
     <div class="player-header">
@@ -3400,10 +3431,14 @@ function loadStreamIntoPlayer(targetTime = 0) {
   const anime = state.activeAnimeData || {};
   const ep = state.activeEpisodes[state.activeEpisodeIndex] || {};
 
-  // If player already mounted, update stream in-place (keeps fullscreen & landscape!)
-  if (activePlayerInstance && !activePlayerInstance.isDestroyed && activePlayerInstance.root) {
+  // If player already mounted FOR THE SAME ANIME, update stream in-place (keeps fullscreen & landscape!)
+  const isSameAnime = activePlayerInstance &&
+                      Number(activePlayerInstance.animeId) === Number(anime.anime_id);
+  if (isSameAnime && !activePlayerInstance.isDestroyed && activePlayerInstance.root) {
     activePlayerInstance.updateEpisode({
       embedUrl: server.embed_url,
+      animeTitle: anime.title || anime.title_english || 'Anime',
+      animeId: anime.anime_id,
       episodeNumber: ep.episode_number || (state.activeEpisodeIndex + 1),
       episodeTitle: ep.title || '',
       episodeId: ep.episode_id || '',
@@ -4521,9 +4556,196 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('search-clear-btn')?.addEventListener('click', () => {
-    if (searchInput) searchInput.value = '';
+    if (searchInput) {
+      searchInput.value = '';
+      searchInput.focus();
+    }
     performSearch('');
   });
+
+  // ─── YouTube-Inspired Voice Search Engine (Web Speech Recognition) ─
+  const VoiceSearch = {
+    recognition: null,
+    isListening: false,
+    modal: document.getElementById('kuro-voice-search-modal'),
+    statusEl: document.getElementById('voice-search-status'),
+    transcriptEl: document.getElementById('voice-transcript-text'),
+    micStage: document.getElementById('voice-mic-stage'),
+    micBtn: document.getElementById('btn-voice-mic-action'),
+    tipEl: document.getElementById('voice-search-tip'),
+    closeBtn: document.getElementById('btn-close-voice-modal'),
+    triggerBtn: document.getElementById('search-mic-btn'),
+    searchInput: document.getElementById('search-input-field'),
+    finishTimeout: null,
+
+    init() {
+      if (!this.triggerBtn) return;
+
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        this.triggerBtn.addEventListener('click', () => {
+          showToast('Voice search is not supported in this browser. Try Chrome or Edge.');
+        });
+        return;
+      }
+
+      this.triggerBtn.addEventListener('click', () => this.open());
+      this.closeBtn?.addEventListener('click', () => this.close());
+      this.modal?.addEventListener('click', (e) => {
+        if (e.target === this.modal) this.close();
+      });
+
+      this.micBtn?.addEventListener('click', () => {
+        if (this.isListening) {
+          this.stop(true);
+          if (this.statusEl) this.statusEl.textContent = 'Voice Search Paused';
+          if (this.tipEl) this.tipEl.textContent = 'Tap microphone to resume listening';
+        } else {
+          this.start();
+        }
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && this.modal?.classList.contains('open')) {
+          this.close();
+        }
+      });
+    },
+
+    open() {
+      if (!this.modal) return;
+      this.modal.classList.add('open');
+      this.modal.setAttribute('aria-hidden', 'false');
+      refreshIcons();
+      this.start();
+    },
+
+    close() {
+      if (!this.modal) return;
+      this.stop(false);
+      clearTimeout(this.finishTimeout);
+      this.modal.classList.remove('open');
+      this.modal.setAttribute('aria-hidden', 'true');
+    },
+
+    start() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
+
+      this.stop(false);
+
+      try {
+        const rec = new SpeechRecognition();
+        rec.continuous = false;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        this.recognition = rec;
+        this.isListening = true;
+
+        if (this.statusEl) this.statusEl.textContent = 'Listening...';
+        if (this.transcriptEl) {
+          this.transcriptEl.innerHTML = '<span class="voice-transcript-placeholder">Say an anime title...</span>';
+        }
+        if (this.micStage) this.micStage.classList.add('listening');
+        if (this.micBtn) {
+          this.micBtn.classList.remove('paused');
+          this.micBtn.title = 'Listening (tap to pause)';
+        }
+        if (this.tipEl) this.tipEl.textContent = 'Tap microphone to cancel';
+
+        rec.onresult = (event) => {
+          let interim = '';
+          let final = '';
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              final += transcript;
+            } else {
+              interim += transcript;
+            }
+          }
+
+          const currentText = (final || interim).trim();
+          if (currentText && this.transcriptEl) {
+            this.transcriptEl.textContent = currentText;
+          }
+
+          if (final.trim()) {
+            this.handleFinalResult(final.trim());
+          }
+        };
+
+        rec.onerror = (event) => {
+          console.warn('Voice recognition error:', event.error);
+          this.isListening = false;
+          if (this.micStage) this.micStage.classList.remove('listening');
+          if (this.micBtn) this.micBtn.classList.add('paused');
+
+          if (event.error === 'not-allowed') {
+            if (this.statusEl) this.statusEl.textContent = 'Mic Permission Needed';
+            if (this.transcriptEl) {
+              this.transcriptEl.innerHTML = '<span style="color:#F87171;">Microphone blocked. Please allow access in browser.</span>';
+            }
+            if (this.tipEl) this.tipEl.textContent = 'Tap microphone to retry';
+          } else if (event.error === 'no-speech') {
+            if (this.statusEl) this.statusEl.textContent = "Didn't hear anything";
+            if (this.tipEl) this.tipEl.textContent = 'Tap microphone to try again';
+          } else {
+            if (this.statusEl) this.statusEl.textContent = 'Voice Search Paused';
+            if (this.tipEl) this.tipEl.textContent = 'Tap microphone to try again';
+          }
+        };
+
+        rec.onend = () => {
+          if (this.isListening) {
+            this.isListening = false;
+            if (this.micStage) this.micStage.classList.remove('listening');
+            if (this.micBtn) this.micBtn.classList.add('paused');
+            if (this.tipEl) this.tipEl.textContent = 'Tap microphone to speak again';
+          }
+        };
+
+        rec.start();
+      } catch (err) {
+        console.warn('Could not start speech recognition:', err);
+        this.isListening = false;
+        if (this.statusEl) this.statusEl.textContent = 'Voice Search Unavailable';
+        if (this.tipEl) this.tipEl.textContent = 'Tap microphone to retry';
+      }
+    },
+
+    stop(markPaused = true) {
+      if (this.recognition) {
+        try {
+          this.recognition.abort();
+        } catch (_) {}
+        this.recognition = null;
+      }
+      this.isListening = false;
+      if (this.micStage) this.micStage.classList.remove('listening');
+      if (this.micBtn && markPaused) this.micBtn.classList.add('paused');
+    },
+
+    handleFinalResult(query) {
+      if (!query) return;
+      this.stop(false);
+      if (this.statusEl) this.statusEl.textContent = `Searching...`;
+      if (this.tipEl) this.tipEl.textContent = `Searching for "${query}"`;
+
+      this.finishTimeout = setTimeout(() => {
+        this.close();
+        if (this.searchInput) {
+          this.searchInput.value = query;
+          this.searchInput.focus();
+        }
+        performSearch(query);
+      }, 420);
+    }
+  };
+
+  VoiceSearch.init();
 
   document.querySelectorAll('.tag-chip').forEach(chip => {
     chip.addEventListener('click', () => {
@@ -4710,10 +4932,171 @@ document.addEventListener('DOMContentLoaded', () => {
   const vegetaToggleBtn = document.getElementById('btn-vegeta-toggle');
   const vegetaChatCard = document.getElementById('vegeta-chat-card');
   const vegetaCloseBtn = document.getElementById('btn-vegeta-close');
+  const vegetaVoiceBtn = document.getElementById('btn-vegeta-voice');
   const vegetaMessagesBox = document.getElementById('vegeta-messages-box');
   const vegetaTypingIndicator = document.getElementById('vegeta-typing-indicator');
   const vegetaChatForm = document.getElementById('vegeta-chat-form');
   const vegetaChatInput = document.getElementById('vegeta-chat-input');
+
+  // ─── Prince Vegeta Voice Engine (Web Speech Synthesis) ─────────────
+  const VegetaVoice = {
+    synth: typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null,
+    currentUtterance: null,
+    isSpeaking: false,
+    enabled: localStorage.getItem('kuro_vegeta_voice_enabled') !== 'false',
+
+    init() {
+      if (!this.synth) return;
+      if (this.synth.onvoiceschanged !== undefined) {
+        this.synth.onvoiceschanged = () => this.getVoice();
+      }
+      this.updateVoiceToggleUI();
+    },
+
+    getVoice() {
+      if (!this.synth) return null;
+      const voices = this.synth.getVoices();
+      if (!voices || !voices.length) return null;
+
+      // Prefer authoritative, deep male English voices
+      const preferredKeywords = [
+        'guy', 'christopher', 'david', 'ryan', 'mark', 'daniel', 'george', 'uk english male', 'us english male'
+      ];
+      for (const kw of preferredKeywords) {
+        const match = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(kw));
+        if (match) return match;
+      }
+      return voices.find(v => v.lang === 'en-US') || voices.find(v => v.lang.startsWith('en')) || voices[0];
+    },
+
+    cleanForSpeech(rawText) {
+      if (!rawText) return '';
+      let text = rawText;
+      text = text.replace(/^#{1,6}\s+/gm, '');
+      text = text.replace(/\*\*(.*?)\*\*/g, '$1');
+      text = text.replace(/\*(.*?)\*/g, '$1');
+      text = text.replace(/`([^`]+)`/g, '$1');
+      text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, '');
+      text = text.replace(/^\s*[-*•>]\s+/gm, '');
+      text = text.replace(/★\s*([\d\.]+)(?:\/10)?/g, 'rated $1 out of 10');
+      text = text.replace(/[-─=_]{2,}/g, '');
+      text = text.replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim();
+
+      // If text is a long multi-anime catalog list, keep dialogue punchy and memorable
+      if (text.length > 340) {
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        text = sentences.slice(0, 3).join(' ');
+      }
+      return text;
+    },
+
+    speak(rawText, onDone) {
+      if (!this.synth || !this.enabled) {
+        if (onDone) onDone();
+        return;
+      }
+
+      this.stop();
+      const spoken = this.cleanForSpeech(rawText);
+      if (!spoken) {
+        if (onDone) onDone();
+        return;
+      }
+
+      try {
+        const utter = new SpeechSynthesisUtterance(spoken);
+        const voice = this.getVoice();
+        if (voice) utter.voice = voice;
+
+        // Prince Vegeta Saiyan audio profile
+        utter.pitch = 0.82;
+        utter.rate = 1.05;
+        utter.volume = 1.0;
+
+        this.currentUtterance = utter;
+        this.isSpeaking = true;
+        this.setWaveActive(true);
+
+        utter.onend = () => {
+          this.isSpeaking = false;
+          this.currentUtterance = null;
+          this.setWaveActive(false);
+          if (onDone) onDone();
+        };
+
+        utter.onerror = (e) => {
+          this.isSpeaking = false;
+          this.currentUtterance = null;
+          this.setWaveActive(false);
+          if (onDone) onDone();
+        };
+
+        this.synth.speak(utter);
+      } catch (err) {
+        this.setWaveActive(false);
+        this.isSpeaking = false;
+        if (onDone) onDone();
+      }
+    },
+
+    stop() {
+      if (!this.synth) return;
+      try {
+        this.synth.cancel();
+      } catch (_) {}
+      this.isSpeaking = false;
+      this.currentUtterance = null;
+      this.setWaveActive(false);
+    },
+
+    toggle() {
+      this.enabled = !this.enabled;
+      localStorage.setItem('kuro_vegeta_voice_enabled', this.enabled ? 'true' : 'false');
+      if (!this.enabled) {
+        this.stop();
+      }
+      this.updateVoiceToggleUI();
+      return this.enabled;
+    },
+
+    setWaveActive(active) {
+      const wave = document.getElementById('vegeta-voice-wave');
+      if (wave) {
+        wave.style.display = active ? 'inline-flex' : 'none';
+        if (active) wave.classList.add('pulse');
+        else wave.classList.remove('pulse');
+      }
+      if (!active) {
+        document.querySelectorAll('.vegeta-bubble-speak-btn.speaking').forEach(btn => {
+          btn.classList.remove('speaking');
+          const icon = btn.querySelector('.material-symbols-rounded');
+          if (icon) icon.textContent = 'volume_up';
+        });
+      }
+    },
+
+    updateVoiceToggleUI() {
+      if (!vegetaVoiceBtn) return;
+      const icon = vegetaVoiceBtn.querySelector('.material-symbols-rounded');
+      if (this.enabled) {
+        vegetaVoiceBtn.classList.add('active');
+        vegetaVoiceBtn.title = 'Vegeta Voice: ON (Click to Mute)';
+        if (icon) icon.textContent = 'volume_up';
+      } else {
+        vegetaVoiceBtn.classList.remove('active');
+        vegetaVoiceBtn.title = 'Vegeta Voice: MUTED (Click to Enable)';
+        if (icon) icon.textContent = 'volume_off';
+      }
+    }
+  };
+
+  VegetaVoice.init();
+
+  vegetaVoiceBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isNowOn = VegetaVoice.toggle();
+    showToast(isNowOn ? 'Vegeta Voice: Enabled' : 'Vegeta Voice: Muted');
+  });
 
   function toggleVegetaChat(forceOpen) {
     if (!vegetaChatCard) return;
@@ -4723,6 +5106,7 @@ document.addEventListener('DOMContentLoaded', () => {
       vegetaChatCard.setAttribute('aria-hidden', 'false');
       setTimeout(() => vegetaChatInput?.focus(), 150);
     } else {
+      VegetaVoice.stop();
       vegetaChatCard.classList.remove('open');
       vegetaChatCard.setAttribute('aria-hidden', 'true');
     }
@@ -4738,7 +5122,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleVegetaChat(false);
   });
 
-  // Markdown renderer for Vegeta's formatted output with Material You icons
+  // Markdown renderer for Vegeta's formatted output with Material You icons & Action Cards
   function renderVegetaMarkdown(raw) {
     if (!raw) return '';
     let text = raw
@@ -4758,10 +5142,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // Star rating highlight: ★ [Score]
     text = text.replace(/★\s*([\d\.]+(?:\/10)?(?:\s*\([^\)]+\))?)/g, '<span class="vegeta-star-pill">★ $1</span>');
 
-    // Watch Links: [▶ Watch on KuroAnime](#anime/123) or [Watch on KuroAnime](#anime/123)
-    text = text.replace(/\[([^\]]+)\]\(#anime\/(\d+)\)/g, (match, label, animeId) => {
-      const cleanLabel = label.replace(/^[▶\s]+/, '');
-      return `<button type="button" class="vegeta-watch-link" data-anime-id="${animeId}">${cleanLabel}</button>`;
+    // Watch Links & Action Cards: [▶ Watch on KuroAnime](#anime/123) or [Watch on KuroAnime](#anime/123?ep=5)
+    text = text.replace(/\[([^\]]+)\]\(#anime\/(\d+)(?:\?ep=(\d+))?\)/g, (match, label, animeId, epParam) => {
+      const numId = Number(animeId);
+      const epNum = epParam ? Number(epParam) : null;
+      const savedHist = (state.history || []).find(h => Number(h.anime_id) === numId);
+      let resumeLabel;
+      if (epNum) {
+        resumeLabel = `Play Ep ${epNum}`;
+      } else if (savedHist) {
+        resumeLabel = `Resume Ep ${savedHist.episode_number}`;
+      } else {
+        resumeLabel = 'Play Ep 1';
+      }
+      const dataEpAttr = epNum ? ` data-episode="${epNum}"` : '';
+      return `
+        <div class="vegeta-action-card" data-anime-id="${animeId}">
+          <button type="button" class="vegeta-action-btn-play" data-anime-id="${animeId}"${dataEpAttr} title="Play on KuroAnime">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg> ${resumeLabel}
+          </button>
+          <button type="button" class="vegeta-action-btn-detail" data-anime-id="${animeId}" title="Show Details">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg> Details
+          </button>
+        </div>
+      `;
     });
 
     // Handle quote blocks: > Quote
@@ -4778,7 +5182,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return paragraphs.join('');
   }
 
-  function appendVegetaMessage(role, content) {
+  function appendVegetaMessage(role, content, attachedImg = null) {
     if (!vegetaMessagesBox) return;
     const row = document.createElement('div');
     row.className = `vegeta-msg-row vegeta-${role}`;
@@ -4794,17 +5198,93 @@ document.addEventListener('DOMContentLoaded', () => {
     bubble.className = 'vegeta-msg-bubble';
 
     if (role === 'user') {
-      const p = document.createElement('p');
-      p.textContent = content;
-      bubble.appendChild(p);
+      if (attachedImg) {
+        const imgWrap = document.createElement('div');
+        imgWrap.className = 'vegeta-user-img-attachment';
+        imgWrap.innerHTML = `<img src="${attachedImg}" class="vegeta-bubble-screenshot" alt="Attached screenshot" />`;
+        bubble.appendChild(imgWrap);
+      }
+      if (content) {
+        const p = document.createElement('p');
+        p.textContent = content;
+        bubble.appendChild(p);
+      }
     } else {
       bubble.innerHTML = renderVegetaMarkdown(content);
-      bubble.querySelectorAll('.vegeta-watch-link').forEach(btn => {
+
+      // Add Replay Voice Speaker in bubble footer
+      const footer = document.createElement('div');
+      footer.className = 'vegeta-bubble-footer';
+      footer.innerHTML = `
+        <button type="button" class="vegeta-bubble-speak-btn" title="Hear Prince Vegeta speak">
+          <span class="material-symbols-rounded">volume_up</span> Hear Vegeta
+        </button>
+      `;
+      bubble.appendChild(footer);
+
+      const speakBtn = footer.querySelector('.vegeta-bubble-speak-btn');
+      speakBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (VegetaVoice.isSpeaking && speakBtn.classList.contains('speaking')) {
+          VegetaVoice.stop();
+          speakBtn.classList.remove('speaking');
+          const icon = speakBtn.querySelector('.material-symbols-rounded');
+          if (icon) icon.textContent = 'volume_up';
+        } else {
+          document.querySelectorAll('.vegeta-bubble-speak-btn.speaking').forEach(b => {
+            b.classList.remove('speaking');
+            const icon = b.querySelector('.material-symbols-rounded');
+            if (icon) icon.textContent = 'volume_up';
+          });
+          speakBtn.classList.add('speaking');
+          const icon = speakBtn.querySelector('.material-symbols-rounded');
+          if (icon) icon.textContent = 'stop';
+          VegetaVoice.speak(content, () => {
+            speakBtn.classList.remove('speaking');
+            if (icon) icon.textContent = 'volume_up';
+          });
+        }
+      });
+
+      // Wire Action Card buttons
+      bubble.querySelectorAll('.vegeta-action-btn-play').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const animeId = Number(btn.getAttribute('data-anime-id'));
+          const targetEp = Number(btn.getAttribute('data-episode')) || null;
+          if (animeId) {
+            VegetaVoice.stop();
+            toggleVegetaChat(false);
+            showToast(targetEp ? `Launching episode ${targetEp}...` : 'Launching anime playback...');
+            openAnimeDetail(animeId, true, 0, targetEp);
+          }
+        });
+      });
+
+      bubble.querySelectorAll('.vegeta-action-btn-detail').forEach(btn => {
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           const animeId = Number(btn.getAttribute('data-anime-id'));
           if (animeId) {
-            openAnimeDetail(animeId, true);
+            VegetaVoice.stop();
+            toggleVegetaChat(false);
+            openAnimeDetail(animeId, false);
+          }
+        });
+      });
+
+      // Backward compatibility for legacy watch links
+      bubble.querySelectorAll('.vegeta-watch-link').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const animeId = Number(btn.getAttribute('data-anime-id'));
+          const targetEp = Number(btn.getAttribute('data-episode')) || null;
+          if (animeId) {
+            VegetaVoice.stop();
+            toggleVegetaChat(false);
+            showToast(targetEp ? `Launching episode ${targetEp}...` : 'Launching anime playback...');
+            openAnimeDetail(animeId, true, 0, targetEp);
           }
         });
       });
@@ -4813,17 +5293,310 @@ document.addEventListener('DOMContentLoaded', () => {
     row.appendChild(bubble);
     vegetaMessagesBox.appendChild(row);
     vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
+
+    // Automatically speak bot replies if Vegeta voice is enabled
+    if (role === 'bot' && VegetaVoice.enabled) {
+      VegetaVoice.speak(content);
+    }
+  }
+
+  let vegetaAttachedImageBase64 = null;
+  let activeAgentActionTimer = null;
+
+  // Screenshot Attachment & Reverse Search Controls
+  const vegetaImageInput = document.getElementById('vegeta-image-input');
+  const vegetaImageUploadBtn = document.getElementById('btn-vegeta-image-upload');
+  const vegetaImagePreviewBar = document.getElementById('vegeta-image-preview-bar');
+  const vegetaPreviewImg = document.getElementById('vegeta-preview-img');
+  const vegetaRemoveImgBtn = document.getElementById('btn-vegeta-remove-img');
+
+  vegetaImageUploadBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    vegetaImageInput?.click();
+  });
+
+  vegetaImageInput?.addEventListener('change', () => {
+    const file = vegetaImageInput.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        showToast('Please select a valid anime image/screenshot');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        vegetaAttachedImageBase64 = ev.target.result;
+        if (vegetaPreviewImg) vegetaPreviewImg.src = vegetaAttachedImageBase64;
+        if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'flex';
+        vegetaChatInput?.focus();
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+
+  vegetaRemoveImgBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    vegetaAttachedImageBase64 = null;
+    if (vegetaImageInput) vegetaImageInput.value = '';
+    if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'none';
+    if (vegetaPreviewImg) vegetaPreviewImg.src = '';
+  });
+
+  // Clipboard Paste Support (Ctrl+V screenshot directly into chat)
+  function handleVegetaPaste(e) {
+    const items = (e.clipboardData || window.clipboardData)?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type && item.type.indexOf('image') !== -1) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            vegetaAttachedImageBase64 = ev.target.result;
+            if (vegetaPreviewImg) vegetaPreviewImg.src = vegetaAttachedImageBase64;
+            if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'flex';
+            showToast('Anime screenshot attached from clipboard!');
+          };
+          reader.readAsDataURL(file);
+          break;
+        }
+      }
+    }
+  }
+  vegetaChatCard?.addEventListener('paste', handleVegetaPaste);
+
+  // Drag & Drop Screenshot Support
+  vegetaChatCard?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  vegetaChatCard?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer?.files;
+    if (files && files[0] && files[0].type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        vegetaAttachedImageBase64 = ev.target.result;
+        if (vegetaPreviewImg) vegetaPreviewImg.src = vegetaAttachedImageBase64;
+        if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'flex';
+        showToast('Anime screenshot attached!');
+      };
+      reader.readAsDataURL(files[0]);
+    }
+  });
+
+  function handleAgenticPlayAction(action) {
+    const animeId = Number(action.anime_id);
+    if (!animeId) return;
+    const epNum = Number(action.episode) || 1;
+    const seekTime = Number(action.time) || 0;
+    const title = action.title || 'Anime';
+    const audio = action.audio || null;
+
+    if (activeAgentActionTimer) {
+      clearInterval(activeAgentActionTimer);
+      activeAgentActionTimer = null;
+    }
+
+    if (audio === 'dub' || audio === 'sub') {
+      state.activeAudioType = audio;
+    }
+
+    const botRows = vegetaMessagesBox?.querySelectorAll('.vegeta-msg-row.vegeta-bot');
+    const lastBotBubble = botRows && botRows.length > 0 ? botRows[botRows.length - 1].querySelector('.vegeta-msg-bubble') : null;
+
+    const executeLaunch = () => {
+      if (activeAgentActionTimer) {
+        clearInterval(activeAgentActionTimer);
+        activeAgentActionTimer = null;
+      }
+      VegetaVoice.stop();
+      toggleVegetaChat(false);
+      showToast(`Auto-playing ${title} (Episode ${epNum})...`);
+      openAnimeDetail(animeId, true, 0, epNum, seekTime);
+    };
+
+    let secondsLeft = 2;
+    let isCancelled = false;
+
+    if (lastBotBubble) {
+      let actionPill = lastBotBubble.querySelector('.vegeta-agent-action-pill');
+      if (!actionPill) {
+        actionPill = document.createElement('div');
+        actionPill.className = 'vegeta-agent-action-pill';
+        const audioLabel = audio === 'dub' ? ' (Dub)' : (audio === 'sub' ? ' (Sub)' : '');
+        actionPill.innerHTML = `
+          <div class="action-left" title="Auto-launching ${escapeHtmlText(title)} (Ep ${epNum})">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" style="flex-shrink:0"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+            <span class="vegeta-agent-ep-pill">Ep ${epNum}</span>
+            <span class="action-text">${escapeHtmlText(title)}${audioLabel}</span>
+          </div>
+          <div class="vegeta-agent-actions-group">
+            <span class="vegeta-countdown-badge" id="vegeta-countdown-badge">${secondsLeft}s</span>
+            <button type="button" class="vegeta-agent-playnow-btn">Play Now</button>
+            <button type="button" class="vegeta-agent-cancel-btn">Cancel</button>
+          </div>
+        `;
+        lastBotBubble.appendChild(actionPill);
+        vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
+      }
+
+      const cancelBtn = actionPill.querySelector('.vegeta-agent-cancel-btn');
+      const playNowBtn = actionPill.querySelector('.vegeta-agent-playnow-btn');
+      const countBadge = actionPill.querySelector('#vegeta-countdown-badge');
+      const actionText = actionPill.querySelector('.action-text');
+
+      cancelBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isCancelled = true;
+        if (activeAgentActionTimer) {
+          clearInterval(activeAgentActionTimer);
+          activeAgentActionTimer = null;
+        }
+        actionPill.style.animation = 'none';
+        actionPill.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+        actionPill.style.background = 'rgba(255, 255, 255, 0.05)';
+        if (actionText) actionText.innerHTML = `Launch cancelled for <strong>${escapeHtmlText(title)}</strong>`;
+        const group = actionPill.querySelector('.vegeta-agent-actions-group');
+        if (group) group.style.display = 'none';
+        showToast('Auto-launch cancelled');
+      });
+
+      playNowBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        executeLaunch();
+      });
+
+      activeAgentActionTimer = setInterval(() => {
+        if (isCancelled) {
+          clearInterval(activeAgentActionTimer);
+          activeAgentActionTimer = null;
+          return;
+        }
+        secondsLeft--;
+        if (countBadge) countBadge.textContent = `${secondsLeft}s`;
+        if (secondsLeft <= 0) {
+          clearInterval(activeAgentActionTimer);
+          activeAgentActionTimer = null;
+          executeLaunch();
+        }
+      }, 1000);
+    } else {
+      // Fallback if message bubble isn't mounted: launch after 1s
+      activeAgentActionTimer = setTimeout(() => {
+        executeLaunch();
+      }, 1000);
+    }
+  }
+
+  async function handleAgenticActions(actionsList) {
+    if (!Array.isArray(actionsList) || actionsList.length === 0) return;
+
+    for (const a of actionsList) {
+      if (!a || !a.type) continue;
+
+      if (a.type === 'add_to_list') {
+        const aid = Number(a.anime_id);
+        if (aid) {
+          const item = {
+            anime_id: aid,
+            title: a.title || 'Anime',
+            poster: a.poster || '',
+            type: a.type || 'TV',
+            added_at: Date.now()
+          };
+          if (!isWatchlisted(aid)) {
+            toggleWatchlist(item);
+          } else {
+            showToast(`${a.title || 'Anime'} is already in your list!`);
+          }
+        }
+      } else if (a.type === 'remove_from_list') {
+        const aid = Number(a.anime_id);
+        if (aid) {
+          if (isWatchlisted(aid)) {
+            toggleWatchlist({ anime_id: aid, title: a.title });
+          } else {
+            showToast(`${a.title || 'Anime'} was not in your list.`);
+          }
+        }
+      } else if (a.type === 'player') {
+        if (a.command === 'next') {
+          const nextBtn = document.getElementById('player-next-ep-btn');
+          if (nextBtn && !nextBtn.disabled) {
+            nextBtn.click();
+            showToast('Skipping to next episode...');
+          } else if (state.activeEpisodes && state.activeEpisodeIndex < state.activeEpisodes.length - 1) {
+            openWatchPlayer(state.activeEpisodeIndex + 1);
+          }
+        } else if (a.command === 'previous') {
+          if (state.activeEpisodes && state.activeEpisodeIndex > 0) {
+            openWatchPlayer(state.activeEpisodeIndex - 1);
+            showToast('Going back one episode...');
+          }
+        } else if (a.command === 'dub') {
+          const dubBtn = document.getElementById('btn-audio-dub');
+          if (dubBtn) dubBtn.click();
+          else state.activeAudioType = 'dub';
+        } else if (a.command === 'sub') {
+          const subBtn = document.getElementById('btn-audio-sub');
+          if (subBtn) subBtn.click();
+          else state.activeAudioType = 'sub';
+        }
+      } else if (a.type === 'navigate') {
+        if (a.view === 'home') switchTab('home');
+        else if (a.view === 'watchlist') switchTab('watchlist');
+        else if (a.view === 'browse') {
+          switchTab('browse');
+          if (a.genre) {
+            state.browseGenre = a.genre;
+            const chip = document.querySelector(`.chip-btn[data-genre="${a.genre}"]`);
+            if (chip) chip.click();
+            else fetchBrowseResults();
+          }
+        } else if (a.view === 'search') {
+          switchTab('search');
+          if (a.query) {
+            const input = document.getElementById('search-input-field');
+            if (input) input.value = a.query;
+            performSearch(a.query);
+          }
+        }
+      } else if (a.type === 'open') {
+        const aid = Number(a.anime_id);
+        if (aid) {
+          VegetaVoice.stop();
+          toggleVegetaChat(false);
+          openAnimeDetail(aid, false);
+        }
+      }
+    }
+
+    const playAct = actionsList.find(a => a && a.type === 'play' && a.anime_id);
+    if (playAct) {
+      handleAgenticPlayAction(playAct);
+    }
   }
 
   const vegetaConversation = [];
 
   async function sendVegetaMessage(promptText) {
     const text = (promptText || vegetaChatInput?.value || '').trim();
-    if (!text) return;
+    const currentImg = vegetaAttachedImageBase64;
+    if (!text && !currentImg) return;
 
     if (vegetaChatInput) vegetaChatInput.value = '';
 
-    appendVegetaMessage('user', text);
+    // Clear attachment state
+    vegetaAttachedImageBase64 = null;
+    if (vegetaImageInput) vegetaImageInput.value = '';
+    if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'none';
+    if (vegetaPreviewImg) vegetaPreviewImg.src = '';
+
+    appendVegetaMessage('user', text, currentImg);
 
     if (vegetaTypingIndicator) {
       vegetaTypingIndicator.style.display = 'flex';
@@ -4831,9 +5604,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     localStorage.removeItem('kuro_gemini_api_key');
-    // Send the last 12 turns so Vegeta remembers the conversation like a real person
-    const payload = { message: text, history: vegetaConversation.slice(-12) };
-    vegetaConversation.push({ role: 'user', text });
+
+    // Rich user watch context for Vegeta Advisor
+    const currentAnime = state.activeAnimeData ? {
+      anime_id: state.activeAnimeData.anime_id,
+      title: state.activeAnimeData.title_english || state.activeAnimeData.title,
+      current_episode: (state.activeEpisodes && state.activeEpisodes[state.activeEpisodeIndex])
+        ? state.activeEpisodes[state.activeEpisodeIndex].episode_number
+        : (state.activeEpisodeIndex + 1)
+    } : null;
+
+    const continueWatching = (state.history || []).slice(0, 6).map(h => ({
+      anime_id: h.anime_id,
+      title: h.title,
+      episode: h.episode_number,
+      progress_sec: Math.round(h.currentTime || 0),
+      duration_sec: Math.round(h.duration || 0)
+    }));
+
+    const mySavedList = (state.watchlist || []).slice(0, 10).map(w => ({
+      anime_id: w.anime_id,
+      title: w.title
+    }));
+
+    const userContext = {
+      current_anime: currentAnime,
+      continue_watching: continueWatching,
+      my_list: mySavedList,
+      library_count: (state.watchlist || []).length,
+      current_view: getActiveViewId()
+    };
+
+    const payload = {
+      message: text,
+      image: currentImg || '',
+      history: vegetaConversation.slice(-12),
+      context: userContext
+    };
+    vegetaConversation.push({ role: 'user', text: text || 'Identify this anime screenshot' });
 
     try {
       let res;
@@ -4862,6 +5670,13 @@ document.addEventListener('DOMContentLoaded', () => {
         vegetaConversation.push({ role: 'model', text: data.reply });
         if (vegetaConversation.length > 24) vegetaConversation.splice(0, vegetaConversation.length - 24);
         appendVegetaMessage('bot', data.reply);
+
+        const allActions = Array.isArray(data.actions) && data.actions.length > 0
+          ? data.actions
+          : (data.action ? [data.action] : []);
+        if (allActions.length > 0) {
+          handleAgenticActions(allActions);
+        }
       } else {
         appendVegetaMessage('bot', 'Hmph! Even the Prince of Saiyans got no answer from this archive. Try another genre, warrior!');
       }
