@@ -91,14 +91,14 @@ function resolveApiBase() {
     (typeof window !== 'undefined' && window.__API_BASE__) ||
     '/api';
   const cleaned = String(raw).trim().replace(/\/+$/, '');
-  if (!cleaned) return '/api';
+  if (!cleaned || cleaned.includes('kuro-anime.onrender.com')) return '/api';
   if (cleaned.startsWith('http') && !cleaned.endsWith('/api')) {
     return `${cleaned}/api`;
   }
   return cleaned;
 }
 
-const API_BASE = resolveApiBase();
+let API_BASE = resolveApiBase();
 
 
 // ─── Lucide Icons Initializer ───────────────────────────────────────
@@ -353,6 +353,15 @@ async function fetchApi(endpoint) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
+    if (API_BASE !== '/api') {
+      try {
+        const fallbackRes = await fetch(`/api${endpoint}`);
+        if (fallbackRes.ok) {
+          API_BASE = '/api';
+          return await fallbackRes.json();
+        }
+      } catch {}
+    }
     console.error('API Error on', endpoint, err);
     return null;
   }
