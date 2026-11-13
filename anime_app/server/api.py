@@ -1977,8 +1977,188 @@ def _find_exact_or_fuzzy_title(user_msg: str, kb_items: list):
     return best_item, related
 
 
+_CHAR_VISUAL_CACHE: dict = {"loaded": False, "features": None, "meta": None}
+
+
+def _load_char_visuals() -> tuple:
+    """Lazy-load the prebuilt MAL/AniList character visual feature matrix & metadata."""
+    if _CHAR_VISUAL_CACHE["loaded"]:
+        return _CHAR_VISUAL_CACHE["features"], _CHAR_VISUAL_CACHE["meta"]
+    _CHAR_VISUAL_CACHE["loaded"] = True
+    try:
+        import gzip
+        import numpy as np
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        npz_path = os.path.join(base_dir, "vegeta_char_visuals.npz")
+        meta_path = os.path.join(base_dir, "vegeta_char_visuals_meta.json.gz")
+        if not os.path.exists(npz_path) or not os.path.exists(meta_path):
+            return None, None
+        data = np.load(npz_path)
+        features = data["features"].astype(np.float32)
+        with gzip.open(meta_path, "rb") as f:
+            meta = json.loads(f.read().decode("utf-8"))
+        _CHAR_VISUAL_CACHE["features"] = features
+        _CHAR_VISUAL_CACHE["meta"] = meta
+        return features, meta
+    except Exception:
+        return None, None
+
+
+def _extract_artwork_crop(raw_bytes: bytes) -> bytes | None:
+    """Strip white/dark browser/phone UI chrome to isolate the inner anime artwork rectangle."""
+    try:
+        import cv2
+        import numpy as np
+        arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None or img.size == 0:
+            return None
+        H, W = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Case 1: Screenshot contains a white UI card (e.g. Google Images / Bored Panda / Pinterest)
+        white = (gray > 235).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(white, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            card = max(contours, key=cv2.contourArea)
+            cx, cy, cw, ch = cv2.boundingRect(card)
+            card_area = cw * ch
+            if 0.12 * W * H <= card_area <= 0.96 * W * H:
+                card_img = img[cy:cy + ch, cx:cx + cw]
+                card_gray = gray[cy:cy + ch, cx:cx + cw]
+                non_white = (card_gray < 230).astype(np.uint8) * 255
+                opened = cv2.morphologyEx(non_white, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9)))
+                c2, _ = cv2.findContours(opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if c2:
+                    art = max(c2, key=cv2.contourArea)
+                    ax, ay, aw, ah = cv2.boundingRect(art)
+                    if aw >= 50 and ah >= 50 and (aw * ah) >= 0.15 * card_area:
+                        crop = card_img[ay:ay + ah, ax:ax + aw]
+                        ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 94])
+                        if ok:
+                            return buf.tobytes()
+
+        # Case 2: Outer uniform white or black borders around an anime frame
+        non_border = ((gray > 18) & (gray < 236)).astype(np.uint8) * 255
+        opened = cv2.morphologyEx(non_border, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9)))
+        c3, _ = cv2.findContours(opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if c3:
+            art = max(c3, key=cv2.contourArea)
+            ax, ay, aw, ah = cv2.boundingRect(art)
+            if aw >= 60 and ah >= 60 and (aw * ah) < 0.88 * W * H and (aw * ah) >= 0.15 * W * H:
+                crop = img[ay:ay + ah, ax:ax + aw]
+                ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 94])
+                if ok:
+                    return buf.tobytes()
+    except Exception:
+        pass
+    return None
+
+
+def _extract_visual_descriptor(img_bgr) -> object:
+    """Compute the 312-dim L2-normalized visual descriptor matching build_char_visual_db.py."""
+    import cv2
+    import numpy as np
+    if img_bgr is None or img_bgr.size == 0:
+        return None
+    h, w = img_bgr.shape[:2]
+    if h < 20 or w < 20:
+        return None
+    resized = cv2.resize(img_bgr, (128, 128), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+    hist_parts = []
+    h_glob = cv2.calcHist([hsv], [0, 1], None, [8, 3], [0, 180, 0, 256]).flatten()
+    h_glob = h_glob / (np.linalg.norm(h_glob) + 1e-6)
+    hist_parts.append(h_glob * 1.4)
+    for y0 in (0, 64):
+        for x0 in (0, 64):
+            patch = hsv[y0:y0 + 64, x0:x0 + 64]
+            hp = cv2.calcHist([patch], [0, 1], None, [8, 3], [0, 180, 0, 256]).flatten()
+            hp = hp / (np.linalg.norm(hp) + 1e-6)
+            hist_parts.append(hp)
+
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    mag = np.sqrt(gx * gx + gy * gy)
+    ang = (np.arctan2(gy, gx) + np.pi) * (8.0 / (2.0 * np.pi))
+    bins = np.clip(ang.astype(np.int32), 0, 7)
+    grad_parts = []
+    for cy in range(4):
+        for cx in range(4):
+            y0, y1 = cy * 32, (cy + 1) * 32
+            x0, x1 = cx * 32, (cx + 1) * 32
+            cell_hist = np.bincount(bins[y0:y1, x0:x1].ravel(), weights=mag[y0:y1, x0:x1].ravel(), minlength=8).astype(np.float32)
+            grad_parts.append(cell_hist)
+    grad_vec = np.concatenate(grad_parts)
+    grad_vec = grad_vec / (np.linalg.norm(grad_vec) + 1e-6)
+
+    small_gray = cv2.resize(gray, (8, 8), interpolation=cv2.INTER_AREA).flatten()
+    small_gray = small_gray - small_gray.mean()
+    small_gray = small_gray / (np.linalg.norm(small_gray) + 1e-6)
+
+    color_vec = np.concatenate(hist_parts).astype(np.float32)
+    color_vec = color_vec / (np.linalg.norm(color_vec) + 1e-6)
+    full = np.concatenate([color_vec * 1.1, grad_vec * 1.0, small_gray * 0.7]).astype(np.float32)
+    return full / (np.linalg.norm(full) + 1e-6)
+
+
+def _match_character_visual(raw_bytes: bytes, kb: dict, top_k: int = 3) -> list[dict]:
+    """Match an uploaded character image against the MAL/AniList character visual index."""
+    features, meta = _load_char_visuals()
+    if features is None or not meta:
+        return []
+    try:
+        import cv2
+        import numpy as np
+        arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return []
+
+        h, w = img.shape[:2]
+        crops = [img]
+        # Also test upper-center portrait crop if image is full-body / wide
+        if h >= 60 and w >= 60:
+            crops.append(img[0:int(h * 0.65), int(w * 0.15):int(w * 0.85)])
+
+        best_scores = np.zeros(len(meta), dtype=np.float32)
+        for c in crops:
+            vec = _extract_visual_descriptor(c)
+            if vec is not None:
+                scores = features @ vec
+                best_scores = np.maximum(best_scores, scores)
+
+        top_idx = np.argsort(best_scores)[::-1][:top_k]
+        results = []
+        for idx in top_idx:
+            score = float(best_scores[idx])
+            m = meta[int(idx)]
+            matched_item = None
+            al_id = m.get("al")
+            mal_id = m.get("mal")
+            if al_id and kb.get("by_anilist_id"):
+                matched_item = kb["by_anilist_id"].get(al_id)
+            if not matched_item and mal_id and kb.get("by_mal_id"):
+                matched_item = kb["by_mal_id"].get(mal_id)
+            if not matched_item and m.get("t"):
+                matched_item = kb.get("by_title", {}).get(_normalize_str(m["t"]))
+            results.append({
+                "score": score,
+                "character": m.get("n", ""),
+                "role": m.get("r", "S"),
+                "anime_title": m.get("t", ""),
+                "anilist_id": al_id,
+                "mal_id": mal_id,
+                "matched_item": matched_item,
+            })
+        return results
+    except Exception:
+        return []
+
+
 def _vegeta_reverse_image_search(image_base64: str, kb: dict) -> dict:
-    """Reverse search an anime screenshot using trace.moe with strict confidence gating."""
+    """Reverse search an anime screenshot using trace.moe with auto-cropping & strict confidence gating."""
     if not image_base64:
         return None
     clean_b64 = image_base64
@@ -1992,38 +2172,31 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict) -> dict:
 
     try:
         import urllib.request as _urllib_req
-        req = _urllib_req.Request(
-            "https://api.trace.moe/search",
-            data=img_bytes,
-            headers={
-                "Content-Type": "image/jpeg",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
-        )
-        with _urllib_req.urlopen(req, timeout=9) as res:
-            data = json.loads(res.read().decode("utf-8"))
-            results = data.get("result") or []
-            if not results:
-                return None
+        cropped_bytes = _extract_artwork_crop(img_bytes)
+        search_bytes = cropped_bytes if cropped_bytes else img_bytes
 
-            by_al = kb.get("by_anilist_id", {})
-            best_sim = float(results[0].get("similarity") or 0.0)
+        def _query_trace_moe(payload_bytes: bytes) -> list[dict]:
+            req = _urllib_req.Request(
+                "https://api.trace.moe/search",
+                data=payload_bytes,
+                headers={
+                    "Content-Type": "image/jpeg",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                },
+            )
+            with _urllib_req.urlopen(req, timeout=9) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                return data.get("result") or []
 
-            # Discard low-similarity trace.moe hits (< 0.78) to prevent false matches on character portraits/fanart
-            if best_sim < 0.78:
-                return {
-                    "similarity": best_sim,
-                    "confident": False,
-                    "anilist_id": results[0].get("anilist"),
-                    "episode": results[0].get("episode") or 1,
-                    "from_seconds": float(results[0].get("from") or 0.0),
-                    "filename": results[0].get("filename") or "",
-                    "matched_item": None,
-                }
+        results = _query_trace_moe(search_bytes)
+        by_al = kb.get("by_anilist_id", {})
+        best_sim = float(results[0].get("similarity") or 0.0) if results else 0.0
 
+        # Only accept high-confidence (>= 0.87) trace.moe episode frame locks
+        if best_sim >= 0.87:
             for cand in results[:3]:
                 similarity = float(cand.get("similarity") or 0.0)
-                if similarity < 0.78:
+                if similarity < 0.87:
                     continue
                 al_id = cand.get("anilist")
                 episode = cand.get("episode") or 1
@@ -2034,7 +2207,7 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict) -> dict:
                 if al_id and int(al_id) in by_al:
                     matched_item = by_al[int(al_id)]
 
-                if not matched_item and filename and similarity >= 0.84:
+                if not matched_item and filename:
                     clean_fn = re.sub(r"\[.*?\]|\(.*?\)|_|\.mp4|\.mkv|\d{3,4}p|x264|AAC", " ", filename, flags=re.I)
                     clean_fn = re.sub(r"-\s*\d+.*$", "", clean_fn).strip()
                     if clean_fn:
@@ -2043,23 +2216,31 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict) -> dict:
                 if matched_item:
                     return {
                         "similarity": similarity,
-                        "confident": similarity >= 0.87,
+                        "confident": True,
                         "anilist_id": al_id,
                         "episode": episode,
                         "from_seconds": from_sec,
                         "filename": filename,
                         "matched_item": matched_item,
+                        "char_matches": [],
+                        "cropped": bool(cropped_bytes),
                     }
 
-            return {
-                "similarity": best_sim,
-                "confident": False,
-                "anilist_id": results[0].get("anilist"),
-                "episode": results[0].get("episode") or 1,
-                "from_seconds": float(results[0].get("from") or 0.0),
-                "filename": results[0].get("filename") or "",
-                "matched_item": None,
-            }
+        # Fallback to MAL/AniList Character Portrait Visual Index
+        char_matches = _match_character_visual(search_bytes, kb, top_k=3)
+        top_char = char_matches[0] if char_matches else None
+        return {
+            "similarity": best_sim,
+            "confident": False,
+            "anilist_id": results[0].get("anilist") if results else None,
+            "episode": (results[0].get("episode") or 1) if results else 1,
+            "from_seconds": float(results[0].get("from") or 0.0) if results else 0.0,
+            "filename": (results[0].get("filename") or "") if results else "",
+            "matched_item": None,
+            "char_matches": char_matches,
+            "best_char_match": top_char if (top_char and top_char["score"] >= 0.86) else None,
+            "cropped": bool(cropped_bytes),
+        }
     except Exception as err:
         print(f"trace.moe search error: {err}")
         return None
@@ -4132,43 +4313,59 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
     total_episodes = kb["total_episodes"]
     msg_low = user_msg.lower().strip()
 
-    # -1. Visual Screenshot Match Response (only auto-confirm high-confidence matches)
-    if image_search_result and image_search_result.get("matched_item"):
+    # -1. Visual Screenshot / Character Portrait Match Response (high-confidence only)
+    if image_search_result and image_search_result.get("matched_item") and image_search_result.get("confident"):
         it = image_search_result["matched_item"]
         ep = image_search_result.get("episode") or 1
         sec = int(image_search_result.get("from_seconds") or 0)
         sim = int(image_search_result.get("similarity", 0) * 100)
-        confident = bool(image_search_result.get("confident"))
         mins = sec // 60
         secs = sec % 60
         time_str = f"{mins}:{secs:02d}"
+        reply = (
+            f"## Prince Vegeta's Saiyan Scouter • Visual Match Confirmed!\n\n"
+            f"Hmph! You dare test the Prince of Saiyans with a single frame? "
+            f"My scouter locks onto **{it['title_english'] or it['title']}** (Episode {ep} at {time_str}) with **{sim}% combat accuracy**!\n\n"
+            f"- **Rating:** ★ {it['score']}/10\n"
+            f"- **Genres:** {it['genres']}\n"
+            f"- **The Prince's Verdict:** {(it.get('synopsis') or '')[:240]}...\n\n"
+            f"Cease your hesitation and witness this battle now:\n"
+            f"- [Watch on KuroAnime](#anime/{it['anime_id']}?ep={ep})"
+        )
+        action = {
+            "type": "play",
+            "anime_id": it["anime_id"],
+            "episode": ep,
+            "time": sec,
+            "title": it["title_english"] or it["title"],
+        }
+        return reply, action
 
-        if confident:
+    if image_search_result and image_search_result.get("best_char_match"):
+        bcm = image_search_result["best_char_match"]
+        score_pct = int(bcm["score"] * 100)
+        char_name = bcm["character"]
+        anime_name = bcm["anime_title"]
+        it = bcm.get("matched_item")
+        if it:
+            display_title = it["title_english"] or it["title"]
             reply = (
-                f"## Prince Vegeta's Saiyan Scouter • Visual Match Confirmed!\n\n"
-                f"Hmph! You dare test the Prince of Saiyans with a single frame? "
-                f"My scouter locks onto **{it['title_english'] or it['title']}** (Episode {ep} at {time_str}) with **{sim}% combat accuracy**!\n\n"
+                f"## Prince Vegeta's Saiyan Scouter • Character Match Confirmed!\n\n"
+                f"Hmph! My MyAnimeList character database locks onto **{char_name}** from **{display_title}** (**{score_pct}%** portrait match)!\n\n"
                 f"- **Rating:** ★ {it['score']}/10\n"
                 f"- **Genres:** {it['genres']}\n"
-                f"- **The Prince's Verdict:** {(it.get('synopsis') or '')[:240]}...\n\n"
-                f"Cease your hesitation and witness this battle now:\n"
-                f"- [Watch on KuroAnime](#anime/{it['anime_id']}?ep={ep})"
+                f"- [Watch on KuroAnime](#anime/{it['anime_id']}?ep=1)"
             )
             action = {
                 "type": "play",
                 "anime_id": it["anime_id"],
-                "episode": ep,
-                "time": sec,
-                "title": it["title_english"] or it["title"]
+                "episode": 1,
+                "time": 0,
+                "title": display_title,
             }
             return reply, action
-        else:
-            reply = (
-                f"Tch! My frame scouter only picked up a weak signal (**{sim}%**). If this is a character portrait, fanart, or cropped image rather than a 16:9 episode frame, my offline scouter cannot guarantee a lock.\n\n"
-                f"Closest episode frame candidate: **{it['title_english'] or it['title']}** (Ep {ep} at {time_str}) — "
-                f"[Watch on KuroAnime](#anime/{it['anime_id']}?ep={ep})"
-            )
-            return reply, None
+        reply = f"Hmph! My MyAnimeList character database locks onto **{char_name}** from **{anime_name}** (**{score_pct}%** portrait match)!"
+        return reply, None
 
     # 0. Agentic Play Command Execution
     play_action = _detect_play_intent(user_msg, items, user_context)
@@ -5054,13 +5251,13 @@ async def ai_chat(req: Request):
                 print(f"Gemini API error ({model}): {gemini_err}")
                 continue
 
-    # If image was uploaded and Gemini Vision was unavailable/failed and trace.moe wasn't confident
-    if image_data and not (image_result and image_result.get("matched_item")):
+    # If image was uploaded and Gemini Vision was unavailable/failed and neither trace.moe nor MAL character matcher locked on
+    if image_data and not (image_result and (image_result.get("matched_item") or image_result.get("best_char_match"))):
         return {
             "ok": True,
             "reply": (
-                "Tch! My offline frame scouter only indexes exact 16:9 anime episode frames — it cannot identify cropped character portraits, fanart, or posters without **Gemini Vision**!\n\n"
-                "Set your `GEMINI_API_KEY` on the server (or paste a full 16:9 episode screenshot) and I will lock onto the character and anime instantly."
+                "Tch! My offline scouter only locks onto exact 16:9 anime episode frames or direct MyAnimeList character portraits — it cannot identify heavily cropped scenes, screenshots-with-UI, or fanart without **Gemini Vision**!\n\n"
+                "Configure `GEMINI_API_KEY` on the server (or send a clean full 16:9 episode screenshot / character portrait) and I will identify the character and anime with 100% precision."
             ),
             "action": None,
             "actions": [],
