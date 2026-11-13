@@ -15,7 +15,10 @@ import {
   generateSyncShareCode,
   lookupSyncShareCode,
   importSyncShare,
-  normalizeShareCode
+  normalizeShareCode,
+  fetchVegetaChatHistoryFromCloud,
+  saveVegetaChatMessageToCloud,
+  clearVegetaChatHistoryFromCloud
 } from './supabase.js';
 
 // Initialize Vercel Web Analytics
@@ -4932,6 +4935,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const vegetaToggleBtn = document.getElementById('btn-vegeta-toggle');
   const vegetaChatCard = document.getElementById('vegeta-chat-card');
   const vegetaCloseBtn = document.getElementById('btn-vegeta-close');
+  const vegetaClearBtn = document.getElementById('btn-vegeta-clear');
   const vegetaVoiceBtn = document.getElementById('btn-vegeta-voice');
   const vegetaMessagesBox = document.getElementById('vegeta-messages-box');
   const vegetaTypingIndicator = document.getElementById('vegeta-typing-indicator');
@@ -5105,6 +5109,9 @@ document.addEventListener('DOMContentLoaded', () => {
       vegetaChatCard.classList.add('open');
       vegetaChatCard.setAttribute('aria-hidden', 'false');
       setTimeout(() => vegetaChatInput?.focus(), 150);
+      if (vegetaConversation.length === 0) {
+        syncVegetaChatFromCloud();
+      }
     } else {
       VegetaVoice.stop();
       vegetaChatCard.classList.remove('open');
@@ -5182,7 +5189,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return paragraphs.join('');
   }
 
-  function appendVegetaMessage(role, content, attachedImg = null) {
+  function appendVegetaMessage(role, content, attachedImg = null, shouldSpeak = true) {
     if (!vegetaMessagesBox) return;
     const row = document.createElement('div');
     row.className = `vegeta-msg-row vegeta-${role}`;
@@ -5295,7 +5302,7 @@ document.addEventListener('DOMContentLoaded', () => {
     vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
 
     // Automatically speak bot replies if Vegeta voice is enabled
-    if (role === 'bot' && VegetaVoice.enabled) {
+    if (role === 'bot' && VegetaVoice.enabled && shouldSpeak) {
       VegetaVoice.speak(content);
     }
   }
@@ -5582,6 +5589,43 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const vegetaConversation = [];
+  const initialGreetingHtml = vegetaMessagesBox?.innerHTML || '';
+
+  function resetVegetaMessagesToInitial() {
+    if (vegetaMessagesBox && initialGreetingHtml) {
+      vegetaMessagesBox.innerHTML = initialGreetingHtml;
+      vegetaConversation.length = 0;
+    }
+  }
+
+  async function syncVegetaChatFromCloud() {
+    if (!supabase) return;
+    try {
+      const cloudChats = await fetchVegetaChatHistoryFromCloud(60);
+      if (cloudChats && cloudChats.length > 0) {
+        vegetaConversation.length = 0;
+        if (vegetaMessagesBox && initialGreetingHtml) {
+          vegetaMessagesBox.innerHTML = initialGreetingHtml;
+        }
+        for (const msg of cloudChats) {
+          const role = (msg.role === 'model' || msg.role === 'bot') ? 'bot' : 'user';
+          vegetaConversation.push({
+            role: role === 'bot' ? 'model' : 'user',
+            text: msg.content
+          });
+          appendVegetaMessage(role, msg.content, msg.image_url, false);
+        }
+        if (vegetaConversation.length > 24) {
+          vegetaConversation.splice(0, vegetaConversation.length - 24);
+        }
+        if (vegetaMessagesBox) {
+          vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
+        }
+      }
+    } catch (err) {
+      console.warn('[Supabase sync vegeta chat error]', err);
+    }
+  }
 
   async function sendVegetaMessage(promptText) {
     const text = (promptText || vegetaChatInput?.value || '').trim();
@@ -5597,6 +5641,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (vegetaPreviewImg) vegetaPreviewImg.src = '';
 
     appendVegetaMessage('user', text, currentImg);
+    saveVegetaChatMessageToCloud({
+      role: 'user',
+      content: text || 'Identify this anime screenshot',
+      imageUrl: currentImg
+    });
 
     if (vegetaTypingIndicator) {
       vegetaTypingIndicator.style.display = 'flex';
@@ -5674,11 +5723,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const allActions = Array.isArray(data.actions) && data.actions.length > 0
           ? data.actions
           : (data.action ? [data.action] : []);
+        saveVegetaChatMessageToCloud({
+          role: 'model',
+          content: data.reply,
+          actions: allActions
+        });
+
         if (allActions.length > 0) {
           handleAgenticActions(allActions);
         }
       } else {
-        appendVegetaMessage('bot', 'Hmph! Even the Prince of Saiyans got no answer from this archive. Try another genre, warrior!');
+        const fallbackMsg = 'Hmph! Even the Prince of Saiyans got no answer from this archive. Try another genre, warrior!';
+        appendVegetaMessage('bot', fallbackMsg);
+        saveVegetaChatMessageToCloud({
+          role: 'model',
+          content: fallbackMsg
+        });
       }
     } catch (err) {
       console.error('Vegeta Advisor error:', err);
@@ -5690,6 +5750,15 @@ document.addEventListener('DOMContentLoaded', () => {
   vegetaChatForm?.addEventListener('submit', (e) => {
     e.preventDefault();
     sendVegetaMessage();
+  });
+
+  vegetaClearBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    VegetaVoice.stop();
+    await clearVegetaChatHistoryFromCloud();
+    resetVegetaMessagesToInitial();
+    showToast('Vegeta chat history cleared.');
   });
 
   vegetaMessagesBox?.addEventListener('click', (e) => {
@@ -5818,9 +5887,11 @@ function initUserMenuAndSettings() {
       localStorage.setItem('kuro_user_profile', JSON.stringify(profile));
       renderAuthState();
       await syncCloudUserData();
+      await syncVegetaChatFromCloud();
       return;
     } else {
       localStorage.removeItem('kuro_user_profile');
+      resetVegetaMessagesToInitial();
     }
     renderAuthState();
   }

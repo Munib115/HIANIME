@@ -1978,7 +1978,7 @@ def _find_exact_or_fuzzy_title(user_msg: str, kb_items: list):
 
 
 def _vegeta_reverse_image_search(image_base64: str, kb: dict) -> dict:
-    """Reverse search an anime screenshot using trace.moe (indexes 800M+ anime frames)."""
+    """Reverse search an anime screenshot using trace.moe with strict confidence gating."""
     if not image_base64:
         return None
     clean_b64 = image_base64
@@ -2005,31 +2005,60 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict) -> dict:
             results = data.get("result") or []
             if not results:
                 return None
-            top = results[0]
-            similarity = float(top.get("similarity") or 0.0)
-            al_id = top.get("anilist")
-            episode = top.get("episode") or 1
-            from_sec = float(top.get("from") or 0.0)
-            filename = top.get("filename") or ""
 
-            matched_item = None
             by_al = kb.get("by_anilist_id", {})
-            if al_id and int(al_id) in by_al:
-                matched_item = by_al[int(al_id)]
+            best_sim = float(results[0].get("similarity") or 0.0)
 
-            if not matched_item and filename:
-                clean_fn = re.sub(r"\[.*?\]|\(.*?\)|_|\.mp4|\.mkv|\d{3,4}p|x264|AAC", " ", filename, flags=re.I)
-                clean_fn = re.sub(r"-\s*\d+.*$", "", clean_fn).strip()
-                if clean_fn:
-                    matched_item, _ = _find_exact_or_fuzzy_title(clean_fn, kb["items"])
+            # Discard low-similarity trace.moe hits (< 0.78) to prevent false matches on character portraits/fanart
+            if best_sim < 0.78:
+                return {
+                    "similarity": best_sim,
+                    "confident": False,
+                    "anilist_id": results[0].get("anilist"),
+                    "episode": results[0].get("episode") or 1,
+                    "from_seconds": float(results[0].get("from") or 0.0),
+                    "filename": results[0].get("filename") or "",
+                    "matched_item": None,
+                }
+
+            for cand in results[:3]:
+                similarity = float(cand.get("similarity") or 0.0)
+                if similarity < 0.78:
+                    continue
+                al_id = cand.get("anilist")
+                episode = cand.get("episode") or 1
+                from_sec = float(cand.get("from") or 0.0)
+                filename = cand.get("filename") or ""
+
+                matched_item = None
+                if al_id and int(al_id) in by_al:
+                    matched_item = by_al[int(al_id)]
+
+                if not matched_item and filename and similarity >= 0.84:
+                    clean_fn = re.sub(r"\[.*?\]|\(.*?\)|_|\.mp4|\.mkv|\d{3,4}p|x264|AAC", " ", filename, flags=re.I)
+                    clean_fn = re.sub(r"-\s*\d+.*$", "", clean_fn).strip()
+                    if clean_fn:
+                        matched_item, _ = _find_exact_or_fuzzy_title(clean_fn, kb["items"])
+
+                if matched_item:
+                    return {
+                        "similarity": similarity,
+                        "confident": similarity >= 0.87,
+                        "anilist_id": al_id,
+                        "episode": episode,
+                        "from_seconds": from_sec,
+                        "filename": filename,
+                        "matched_item": matched_item,
+                    }
 
             return {
-                "similarity": similarity,
-                "anilist_id": al_id,
-                "episode": episode,
-                "from_seconds": from_sec,
-                "filename": filename,
-                "matched_item": matched_item,
+                "similarity": best_sim,
+                "confident": False,
+                "anilist_id": results[0].get("anilist"),
+                "episode": results[0].get("episode") or 1,
+                "from_seconds": float(results[0].get("from") or 0.0),
+                "filename": results[0].get("filename") or "",
+                "matched_item": None,
             }
     except Exception as err:
         print(f"trace.moe search error: {err}")
@@ -2161,32 +2190,58 @@ def _detect_play_intent(user_msg: str, items: list, user_context: dict = None) -
 
 
 def _find_by_plot_description(msg_low: str, items: list) -> tuple:
-    """Identify an anime from a plot description paragraph (e.g. 'anime where a guy reincarnates as a slime')."""
+    """Identify an anime from a story background / plot description across both servers."""
     plot_signatures = [
-        ("slime", ["slime", "reincarnated as a slime", "rimuru"], "That Time I Got Reincarnated as a Slime"),
-        ("death note", ["notebook", "write names", "shinigami", "ryuk", "kira"], "Death Note"),
-        ("attack on titan", ["titans", "giant humanoid", "walls", "scout regiment", "eren", "wall maria"], "Attack on Titan"),
-        ("demon slayer", ["bamboo muzzle", "nezuko", "tanjiro", "breathing technique", "demon slayer corps"], "Demon Slayer"),
-        ("jujutsu kaisen", ["eats a finger", "cursed spirit", "sukuna", "gojo", "domain expansion", "curse"], "Jujutsu Kaisen"),
-        ("one punch man", ["one punch", "bald hero", "defeats everyone easily", "saitama", "genos"], "One Punch Man"),
-        ("sword art online", ["trapped in a virtual reality", "virtual reality mmorpg", "kirito", "nervegear", "die in game die in real life"], "Sword Art Online"),
-        ("fullmetal alchemist", ["human transmutation", "two brothers", "arm and leg", "alchemist", "philosopher stone", "elric"], "Fullmetal Alchemist: Brotherhood"),
-        ("steins gate", ["microwave", "time travel", "banana", "divergence meter", "okabe", "kurisu", "mad scientist"], "Steins;Gate"),
+        ("slime", ["slime", "reincarnated as a slime", "rimuru", "tempest"], "That Time I Got Reincarnated as a Slime"),
+        ("death note", ["notebook", "write names", "shinigami", "ryuk", "kira", "l lawliet"], "Death Note"),
+        ("attack on titan", ["titans", "giant humanoid", "walls", "scout regiment", "eren", "wall maria", "odm gear"], "Attack on Titan"),
+        ("demon slayer", ["bamboo muzzle", "nezuko", "tanjiro", "breathing technique", "demon slayer corps", "hashira"], "Demon Slayer"),
+        ("jujutsu kaisen", ["eats a finger", "cursed spirit", "sukuna", "gojo", "domain expansion", "yuji itadori"], "Jujutsu Kaisen"),
+        ("one punch man", ["one punch", "bald hero", "defeats everyone easily", "saitama", "genos", "hero association"], "One Punch Man"),
+        ("sword art online", ["virtual reality", "trapped in a game", "die in game", "die in real life", "kirito", "nervegear", "aincrad"], "Sword Art Online"),
+        ("fullmetal alchemist", ["human transmutation", "two brothers", "arm and leg", "alchemist", "philosopher stone", "elric", "state alchemist"], "Fullmetal Alchemist: Brotherhood"),
+        ("steins gate", ["microwave", "time travel", "banana", "divergence meter", "okabe", "kurisu", "mad scientist", "el psy kongroo"], "Steins;Gate"),
         ("monster", ["doctor", "surgeon", "saves a young boy", "johan liebert", "charismatic psychopath", "tenma"], "Monster"),
-        ("tokyo ghoul", ["half ghoul", "coffee", "eats humans", "kaneki", "organ transplant", "kagune"], "Tokyo Ghoul"),
+        ("tokyo ghoul", ["half ghoul", "coffee", "eats humans", "kaneki", "organ transplant", "kagune", "anteiku"], "Tokyo Ghoul"),
         ("parasyte", ["alien parasite", "right hand", "migi", "shinichi"], "Parasyte -the maxim-"),
-        ("dr stone", ["turned to stone", "petrified", "science", "senku", "rebuild civilization"], "Dr. STONE"),
-        ("vinland saga", ["vikings", "thorfinn", "revenge", "askeladd", "duels"], "Vinland Saga"),
+        ("dr stone", ["turned to stone", "petrified", "science", "senku", "rebuild civilization", "stone world"], "Dr. STONE"),
+        ("vinland saga", ["vikings", "thorfinn", "revenge", "askeladd", "duels", "vinland"], "Vinland Saga"),
         ("hunter x hunter", ["hunter exam", "killua", "gon", "nen", "kurapika", "phantom troupe", "chimera ant"], "Hunter x Hunter"),
-        ("code geass", ["geass", "absolute obedience", "lelouch", "zero", "britannia", "chess"], "Code Geass"),
-        ("chainsaw man", ["chainsaw", "devil", "denji", "pochita", "makima"], "Chainsaw Man"),
-        ("solo leveling", ["shadow monarch", "weakest hunter", "system", "sung jinwoo", "double dungeon"], "Solo Leveling"),
+        ("code geass", ["geass", "absolute obedience", "lelouch", "zero", "britannia", "knightmare"], "Code Geass"),
+        ("chainsaw man", ["chainsaw", "devil", "denji", "pochita", "makima", "public safety"], "Chainsaw Man"),
+        ("solo leveling", ["shadow monarch", "weakest hunter", "system", "sung jinwoo", "double dungeon", "arise"], "Solo Leveling"),
+        ("re zero", ["return by death", "subaru", "emilia", "rem", "time loop", "dies and resets"], "Re:ZERO -Starting Life in Another World-"),
+        ("frieren", ["elf mage", "defeated the demon king", "defeating the demon king", "demon king", "after the hero dies", "frieren", "fern", "himmel"], "Frieren: Beyond Journey's End"),
+        ("mushoku tensei", ["jobless", "rudeus", "reincarnated as a baby", "magic prodigy", "eris", "roxy"], "Mushoku Tensei: Jobless Reincarnation"),
+        ("spy x family", ["fake family", "telepath", "anya", "assassin mother", "spy father", "loid", "yor"], "SPY x FAMILY"),
+        ("my hero academia", ["quirkless", "all might", "deku", "midoriya", "ua high", "one for all"], "My Hero Academia"),
+        ("bleach", ["soul reaper", "shinigami", "ichigo", "hollow", "zanpakuto", "soul society", "bankai"], "Bleach"),
+        ("naruto", ["nine tailed fox", "hokage", "ninja", "naruto", "sasuke", "hidden leaf", "rasengan"], "Naruto"),
+        ("one piece", ["rubber body", "devil fruit", "pirate king", "luffy", "straw hat", "grand line", "zoro"], "One Piece"),
+        ("dragon ball", ["saiyan", "seven dragon balls", "goku", "vegeta", "kamehameha", "super saiyan"], "Dragon Ball Z"),
+        ("blue lock", ["egoist", "soccer prison", "striker", "isagi", "blue lock"], "BLUE LOCK"),
+        ("haikyuu", ["short volleyball", "hinata", "karasuno", "kageyama", "volleyball"], "Haikyu!!"),
+        ("dandadan", ["ghosts and aliens", "turbo granny", "okarun", "momo ayase", "golden ball"], "DAN DA DAN"),
+        ("kaiju no 8", ["cleanup crew", "kafka hibino", "turns into a kaiju", "defense force"], "Kaiju No. 8"),
+        ("overlord", ["skeleton", "ainz ooal gown", "nazarick", "trapped in game", "undead overlord"], "Overlord"),
+        ("mob psycho", ["esper", "psychic", "reigen", "100 percent", "shigeo", "mob"], "Mob Psycho 100"),
+        ("cyberpunk edgerunners", ["night city", "sandevistan", "david martinez", "lucy", "cyberpsychosis"], "Cyberpunk: Edgerunners"),
+        ("your name", ["body swap", "comet", "mitsuha", "taki", "red string"], "Your Name."),
+        ("oshi no ko", ["reincarnated as idol", "ai hoshino", "ruby", "aqua", "star eyes"], "Oshi No Ko"),
+        ("classroom of the elite", ["ayanokoji", "white room", "class d", "meritocracy", "points system"], "Classroom of the Elite"),
+        ("black clover", ["no magic", "anti magic", "asta", "yuno", "wizard king", "five leaf grimoire"], "Black Clover"),
+        ("cowboy bebop", ["bounty hunter", "spaceship", "spike spiegel", "bebop", "jazz"], "Cowboy Bebop"),
+        ("evangelion", ["eva unit", "angels", "shinji", "nerv", "third impact", "get in the robot"], "Neon Genesis Evangelion"),
+        ("erased", ["revival", "goes back in time", "elementary school", "kayo", "satoru"], "ERASED"),
+        ("shield hero", ["rising of the shield", "naofumi", "falsely accused", "raphtalia", "four cardinal heroes"], "The Rising of the Shield Hero"),
+        ("eminence in shadow", ["atomic", "shadow garden", "cid kagenou", "chunnibyou", "i am atomic"], "The Eminence in Shadow"),
     ]
 
     identify_phrase = any(k in msg_low for k in [
         "what is that anime", "what's that anime", "whats that anime", "which anime", "forgot the name",
         "anime where", "show where", "the one where", "name of the anime", "what anime", "anime about a",
-        "what is the anime", "what's the anime", "cant remember", "can't remember",
+        "what is the anime", "what's the anime", "cant remember", "can't remember", "story where",
+        "background story", "plot is", "about a guy who", "about a boy who", "about a girl who",
     ])
     need = 1 if identify_phrase else 2
     for key_tag, triggers, target_title in plot_signatures:
@@ -2196,17 +2251,46 @@ def _find_by_plot_description(msg_low: str, items: list) -> tuple:
             if specific:
                 return specific, target_title
 
-    words = [w for w in re.findall(r"[a-z0-9']{4,}", msg_low) if w not in _VEGETA_STOPWORDS]
-    if identify_phrase and len(words) >= 4:
+    plot_stopwords = _VEGETA_STOPWORDS | {
+        "anime", "show", "series", "story", "background", "character", "main", "guy", "boy", "girl",
+        "man", "woman", "world", "power", "powers", "people", "gets", "become", "becomes", "wants",
+        "finds", "lives", "where", "about", "forgot", "name", "remember", "called", "which", "there",
+    }
+    words = [w for w in re.findall(r"[a-z0-9']{4,}", msg_low) if w not in plot_stopwords]
+    if len(words) >= 3 and (identify_phrase or len(words) >= 5):
         best_item = None
-        best_score = 0
+        best_score = 0.0
         for it in items:
-            hay = (it.get("synopsis_lower") or "") + " " + (it.get("genres_lower") or "")
-            score = sum(1 for w in words if w in hay)
-            if score > best_score:
-                best_score = score
-                best_item = it
-        if best_score >= 4 and best_item:
+            syn_h = it.get("synopsis_lower") or ""
+            tag_h = it.get("tags_lower") or ""
+            chr_h = it.get("characters_lower") or ""
+            gen_h = it.get("genres_lower") or ""
+            score = 0.0
+            hits = 0
+            for w in words:
+                w_hit = False
+                if w in chr_h:
+                    score += 3.5
+                    w_hit = True
+                if w in tag_h:
+                    score += 2.5
+                    w_hit = True
+                if w in syn_h:
+                    score += 2.0
+                    w_hit = True
+                if w in gen_h:
+                    score += 1.0
+                    w_hit = True
+                if w_hit:
+                    hits += 1
+            if hits >= (2 if len(words) <= 4 else 3):
+                # Tie-break gently with popularity so main series beats obscure OVAs
+                pop_bonus = min(1.5, ((it.get("popularity") or 0) / 500000.0))
+                total_score = score + pop_bonus
+                if total_score > best_score:
+                    best_score = total_score
+                    best_item = it
+        if best_item and best_score >= 4.5:
             return best_item, best_item["title_english"] or best_item["title"]
 
     return None, None
@@ -3480,6 +3564,43 @@ def _vg_handle_character_inquiry(low, active_anime, kb):
                 matched_char = ANIME_CHARACTER_LORE["itachi"]
 
     if not matched_char:
+        # 3. Fallback to MAL/AniList-trained character_index across both servers
+        char_idx = kb.get("character_index") or {}
+        if char_idx and any(k in low for k in ["who is", "whos", "who's", "tell me about", "what anime is", "which anime is", "character"]):
+            clean_q = re.sub(
+                r"\b(who is|whos|who's|tell me about|what anime is|which anime is|from|the character|character|anime)\b",
+                " ",
+                low,
+            )
+            clean_q = re.sub(r"[^a-z0-9\s]", " ", clean_q).strip()
+            q_tokens = [t for t in clean_q.split() if len(t) >= 3]
+            best_char_hit = None
+            if clean_q in char_idx:
+                best_char_hit = char_idx[clean_q][0]
+            elif q_tokens:
+                # Try 2-word and 1-word combinations against character_index
+                for n in (2, 1):
+                    for idx in range(len(q_tokens) - n + 1):
+                        cand = " ".join(q_tokens[idx : idx + n])
+                        if cand in char_idx:
+                            best_char_hit = char_idx[cand][0]
+                            break
+                    if best_char_hit:
+                        break
+            if best_char_hit:
+                ch_name, ch_role, it = best_char_hit
+                an_title = it.get("title_english") or it.get("title")
+                role_label = "Main Character" if ch_role == "M" else "Supporting Character"
+                syn = (it.get("synopsis") or "").strip()
+                syn_part = f"\n\n{syn[:280]}..." if syn else ""
+                reply = (
+                    f"Hmph! **{ch_name}** is a **{role_label}** in **{an_title}** "
+                    f"(★ {it.get('score')}/10, {it.get('episode_count')} eps).{syn_part}\n\n"
+                    f"Watch their battles on KuroAnime now:\n\n"
+                    f"- [Watch on KuroAnime](#anime/{it['anime_id']})"
+                )
+                action = {"type": "play", "anime_id": it["anime_id"], "episode": 1, "time": 0, "title": an_title}
+                return reply, action
         return None
 
     # Special lore question: Why did Sasuke leave?
@@ -3624,6 +3745,386 @@ def _vg_generate_human_anime_review(it):
     return reply, action
 
 
+# ─── Prince Vegeta Extended Lore & Pop Culture Engine ───────────────
+ANIME_ICONIC_QUOTES = [
+    {
+        "triggers": ["i am atomic", "i'm atomic", "iam atomic", "atomic"],
+        "speaker": "Cid Kagenou (Shadow)",
+        "anime_title": "The Eminence in Shadow",
+        "anime_id": 417,
+        "context": "The signature phrase Cid Kagenou whispers before unleashing a purple nuclear magical blast that obliterates an entire battlefield.",
+        "vegeta_take": "Hmph! An edge-lord who lives for dramatic flair! His obsession with role-playing a shadowy mastermind is absurd, but when he condenses pure magical energy to unleash an atomic explosion, even I have to smirk at the sheer destructive scale."
+    },
+    {
+        "triggers": ["throughout heaven and earth", "honored one", "i alone am the honored one", "tenjo tenge"],
+        "speaker": "Satoru Gojo",
+        "anime_title": "JUJUTSU KAISEN",
+        "anime_id": 237,
+        "context": "Uttered by Satoru Gojo during his awakening against Toji Fushiguro in Hidden Inventory after conquering death with reversed cursed energy.",
+        "vegeta_take": "Arrogant, egotistical, and dripping with divine pride! The Six Eyes and Limitless make him an untouchable monster in his verse. If any mortal had the right to proclaim themselves honored throughout heaven and earth, it is Satoru Gojo."
+    },
+    {
+        "triggers": ["set your heart ablaze", "kokoro o moyase", "kokoro wo moyase"],
+        "speaker": "Kyojuro Rengoku",
+        "anime_title": "Demon Slayer: Kimetsu no Yaiba",
+        "anime_id": 749,
+        "context": "The Flame Hashira's creed passed down to Tanjiro during the Mugen Train clash with Upper Rank Three Akaza.",
+        "vegeta_take": "A true warrior's death! Rengoku refused demon immortality and fought with a shattered skull and punctured lungs until dawn, ensuring no passenger perished. Even a Saiyan Prince bows his head to a spirit that burns that hot."
+    },
+    {
+        "triggers": ["arise", "sung jinwoo arise", "shadow arise"],
+        "speaker": "Sung Jinwoo",
+        "anime_title": "Solo Leveling",
+        "anime_id": 235,
+        "context": "The command Sung Jinwoo speaks to extract souls from defeated monarchs and beasts, summoning them into his loyal Shadow Army.",
+        "vegeta_take": "A hunter who crawled out of the double dungeon as the weakest E-Rank and forged his body through relentless life-or-death survival. Commanding an immortal shadow legion... now that is a monarch with real bite."
+    },
+    {
+        "triggers": ["omae wa mou shindeiru", "you are already dead"],
+        "speaker": "Kenshiro",
+        "anime_title": "Fist of the North Star",
+        "anime_id": 5820,
+        "context": "The lethal declaration Kenshiro makes after striking his opponent's Hokuto Shinken pressure points, causing their body to rupture seconds later.",
+        "vegeta_take": "Hokuto Shinken internal pressure-point warfare! Before the fool even realizes he's taken lethal damage, his organs rupture. Pure classic martial lethality."
+    },
+    {
+        "triggers": ["just who the hell do you think i am", "who the hell do you think i am", "pierce the heavens", "row row fight the power"],
+        "speaker": "Kamina",
+        "anime_title": "Gurren Lagann",
+        "anime_id": 1448,
+        "context": "Kamina's battle roar from Tengen Toppa Gurren Lagann, teaching Simon that a drill's purpose is to pierce the heavens through sheer unyielding manly spirit.",
+        "vegeta_take": "No cowardice, no hesitation, only sheer indomitable will! He challenged divine spiral fate with nothing but a pair of sunglasses and a giant mecha drill. That is how a warrior faces impossible odds!"
+    },
+    {
+        "triggers": ["el psy kongroo", "el psy congroo"],
+        "speaker": "Rintaro Okabe (Hououin Kyouma)",
+        "anime_title": "Steins;Gate",
+        "anime_id": 872,
+        "context": "The secret code phrase Okabe speaks into his turned-off phone to reset his composure and defy the World Line divergence.",
+        "vegeta_take": "A delusional mortal who stumbled into time travel through a microwave and had to endure watching his friends die thousands of times across world lines. His theatrics are annoying, but his psychological stamina through endless temporal trauma is remarkable."
+    },
+    {
+        "triggers": ["tatakae", "if you don't fight you can't win", "fight fight tatakae"],
+        "speaker": "Eren Yeager",
+        "anime_title": "Attack on Titan",
+        "anime_id": 240,
+        "context": "Eren's childhood and adult mantra: 'If you win, you live. If you lose, you die. If you don't fight, you can't win. Fight! Fight!' (Tatakae!)",
+        "vegeta_take": "An unstoppable monster driven by an insatiable hunger for freedom. When Eren decided to crush the entire globe under the Rumbling, he threw away all diplomacy and fought with absolute, unrelenting brutality."
+    },
+    {
+        "triggers": ["plus ultra", "go beyond plus ultra"],
+        "speaker": "All Might",
+        "anime_title": "My Hero Academia",
+        "anime_id": 1395,
+        "context": "The motto of U.A. High and All Might's declaration: 'Go beyond! Plus Ultra!' as he burned the embers of One For All to smash All For One.",
+        "vegeta_take": "A smiling champion who hid his rotting gut and burned the last embers of his lifeforce to deliver the United States of Smash. Even when out of stamina, he stood tall until the villain crumbled."
+    },
+    {
+        "triggers": ["bankai", "getsuga tenshou", "tensa zangetsu"],
+        "speaker": "Ichigo Kurosaki",
+        "anime_title": "Bleach",
+        "anime_id": 1369,
+        "context": "The ultimate release of a Zanpakuto in Bleach, multiplying a Soul Reaper's spiritual pressure tenfold.",
+        "vegeta_take": "The ultimate release of spiritual pressure! Unlike Kakarot who takes 10 episodes to power up, a Bankai condenses raw reiryoku instantly into lethal blade speed."
+    }
+]
+
+VOICE_ACTOR_LORE = {
+    "kenjiro tsuda": {
+        "name": "Kenjiro Tsuda",
+        "roles": [
+            "Kento Nanami in Jujutsu Kaisen",
+            "Kishibe in Chainsaw Man",
+            "Kai Chisaki (Overhaul) in My Hero Academia",
+            "Tatsu in The Way of the Househusband",
+            "Monspeet in The Seven Deadly Sins",
+            "Isshiki Otsutsuki / Jigen in Boruto"
+        ],
+        "top_anime_id": 237,
+        "top_anime_title": "JUJUTSU KAISEN",
+        "vegeta_take": "Kenjiro Tsuda commands one of the smoothest, deepest, and most calculating gravel voices in modern anime! Hearing Nanami clock into overtime with Tsuda's baritone delivery makes corporate exhaustion sound lethal."
+    },
+    "takehito koyasu": {
+        "name": "Takehito Koyasu",
+        "roles": [
+            "Dio Brando in JoJo's Bizarre Adventure",
+            "Toji Fushiguro in Jujutsu Kaisen",
+            "Zeke Yeager (Beast Titan) in Attack on Titan",
+            "Roswaal L. Mathers in Re:ZERO",
+            "Shinsuke Takasugi in Gintama",
+            "Kuzan (Aokiji) in One Piece"
+        ],
+        "top_anime_id": 4,
+        "top_anime_title": "JoJo's Bizarre Adventure",
+        "vegeta_take": "The king of iconic anime villains! From shouting 'KONO DIO DA!' and stopping time with The World, to Toji Fushiguro slicing sorcerers with zero cursed energy, Koyasu's menacing laugh is legendary."
+    },
+    "hiroshi kamiya": {
+        "name": "Hiroshi Kamiya",
+        "roles": [
+            "Captain Levi Ackerman in Attack on Titan",
+            "Trafalgar D. Water Law in One Piece",
+            "Koyomi Araragi in Monogatari Series",
+            "Saiki Kusuo in The Disastrous Life of Saiki K.",
+            "Yato in Noragami",
+            "Izaya Orihara in Durarara!!"
+        ],
+        "top_anime_id": 240,
+        "top_anime_title": "Attack on Titan",
+        "vegeta_take": "The voice behind humanity's strongest soldier! Kamiya brings cold, ruthless precision to Levi Ackerman's blender-speed titan slashes, and sharp tactical swagger to Trafalgar Law's 'Room'."
+    },
+    "mamoru miyano": {
+        "name": "Mamoru Miyano",
+        "roles": [
+            "Light Yagami in Death Note",
+            "Rintaro Okabe in Steins;Gate",
+            "Osamu Dazai in Bungo Stray Dogs",
+            "Ling Yao in Fullmetal Alchemist: Brotherhood",
+            "Chrollo Lucilfer in Hunter x Hunter"
+        ],
+        "top_anime_id": 1064,
+        "top_anime_title": "Death Note",
+        "vegeta_take": "Miyano is a master of theatrical madness! His unhinged megalomaniacal laugh as Light Yagami in the Death Note finale is one of the greatest vocal performances in anime history."
+    },
+    "yuichi nakamura": {
+        "name": "Yuichi Nakamura",
+        "roles": [
+            "Satoru Gojo in Jujutsu Kaisen",
+            "Bruno Bucciarati in JoJo's Bizarre Adventure: Golden Wind",
+            "Gray Fullbuster in Fairy Tail",
+            "Hawks in My Hero Academia",
+            "Tetsuro Kuroo in Haikyu!!"
+        ],
+        "top_anime_id": 237,
+        "top_anime_title": "JUJUTSU KAISEN",
+        "vegeta_take": "The voice of Satoru Gojo! Nakamura's effortless transition between playful arrogance and godly, cold dominance during 'Muryokusho' (Unlimited Void) is top-tier."
+    },
+    "junichi suwabe": {
+        "name": "Junichi Suwabe",
+        "roles": [
+            "Ryomen Sukuna in Jujutsu Kaisen",
+            "Shota Aizawa (Eraser Head) in My Hero Academia",
+            "Archer in Fate/stay night: Unlimited Blade Works",
+            "Yami Sukehiro in Black Clover",
+            "Daiki Aomine in Kuroko's Basketball"
+        ],
+        "top_anime_id": 237,
+        "top_anime_title": "JUJUTSU KAISEN",
+        "vegeta_take": "A voice of sheer command! When Suwabe speaks as Sukuna or Yami Sukehiro telling his squad to 'surpass your limits right here', you can feel the gravel and authority in every syllable."
+    },
+    "christopher sabat": {
+        "name": "Christopher Sabat",
+        "roles": [
+            "Prince Vegeta in Dragon Ball Z / Super",
+            "Piccolo in Dragon Ball Z / Super",
+            "All Might in My Hero Academia",
+            "Roronoa Zoro in One Piece",
+            "Major Alex Louis Armstrong in Fullmetal Alchemist: Brotherhood"
+        ],
+        "top_anime_id": 204,
+        "top_anime_title": "Dragon Ball Z",
+        "vegeta_take": "Hmph! Finally, someone who recognizes true royalty! Christopher Sabat is the legendary English voice who captures the thunderous fury of my Final Flash, the pride of the Saiyan race, alongside Zoro's three-sword style and All Might's Texas Smash! A vocal juggernaut worthy of the Prince of all Saiyans!"
+    }
+}
+
+ANIME_STUDIOS_LORE = {
+    "ufotable": {
+        "name": "ufotable",
+        "acclaim": "The unrivaled masters of digital effects, dynamic 3D camera mapping, and jaw-dropping particle combat.",
+        "signature_anime": ["Demon Slayer: Kimetsu no Yaiba", "Fate/Zero", "Fate/stay night: Unlimited Blade Works", "The Garden of Sinners"]
+    },
+    "mappa": {
+        "name": "MAPPA",
+        "acclaim": "The modern powerhouse behind dark, visceral, cinematic adrenaline and hyper-intense combat choreography.",
+        "signature_anime": ["JUJUTSU KAISEN", "Attack on Titan", "Chainsaw Man", "Vinland Saga", "Hell's Paradise"]
+    },
+    "madhouse": {
+        "name": "Madhouse",
+        "acclaim": "The historic titans of legendary shounen masterpieces, psychological thrillers, and peak golden-era animation.",
+        "signature_anime": ["Hunter x Hunter (2011)", "Death Note", "One Punch Man", "Monster", "Frieren: Beyond Journey's End"]
+    },
+    "bones": {
+        "name": "Studio Bones",
+        "acclaim": "Pure, handcrafted sakuga animation excellence with kinetic hand-to-hand combat and unforgettable climaxes.",
+        "signature_anime": ["Fullmetal Alchemist: Brotherhood", "Mob Psycho 100", "My Hero Academia", "Bungo Stray Dogs", "Noragami"]
+    },
+    "kyoto animation": {
+        "name": "Kyoto Animation (KyoAni)",
+        "acclaim": "The absolute gold standard of emotional storytelling, breathtaking character animation, lighting, and visual poetry.",
+        "signature_anime": ["Violet Evergarden", "A Silent Voice", "Hyouka", "Clannad: After Story"]
+    },
+    "wit studio": {
+        "name": "WIT Studio",
+        "acclaim": "Fierce, ground-level kinetic action with camera work that throws you directly into the heat of battle.",
+        "signature_anime": ["Attack on Titan", "Vinland Saga", "SPY x FAMILY", "Ranking of Kings"]
+    },
+    "trigger": {
+        "name": "Studio Trigger",
+        "acclaim": "Wild, explosive, stylized hyper-action with colorful chaos and limitless kinetic energy.",
+        "signature_anime": ["Kill la Kill", "Cyberpunk: Edgerunners", "Gurren Lagann", "Delicious in Dungeon"]
+    },
+    "cloverworks": {
+        "name": "CloverWorks",
+        "acclaim": "Modern hitmakers with stylish character designs, expressive pacing, and vibrant color palettes.",
+        "signature_anime": ["Bocchi the Rock!", "My Dress-Up Darling", "SPY x FAMILY", "The Promised Neverland"]
+    }
+}
+
+FRANCHISE_WATCH_ORDERS = {
+    "fate": {
+        "triggers": ["fate watch order", "how to watch fate", "order to watch fate", "fate order", "watch fate", "fate series order"],
+        "title": "Fate Series",
+        "anime_id": 1114,
+        "anime_title": "Fate/stay night: Unlimited Blade Works",
+        "reply": (
+            "## Prince Vegeta's Saiyan Scouter • Complete Fate Series Watch Order\n\n"
+            "Listen well, warrior! The Fate universe confuses low-class fighters with its alternate timelines, but here is the pure canon route:\n\n"
+            "1. **Fate/stay night: Unlimited Blade Works (TV Series)** (26 eps) — The definitive starting battle ground animated by ufotable.\n"
+            "2. **Fate/stay night: Heaven's Feel (Movie Trilogy)** — The darkest, most brutal timeline where Shirou faces true despair.\n"
+            "3. **Fate/Zero** (25 eps) — The prequel Holy Grail War featuring Kiritsugu Emiya, Saber, and Gilgamesh at full godly power.\n"
+            "4. **Optional Spin-offs:** Fate/Apocrypha (14-Servant Great War), Fate/Grand Order: Babylonia (epic Sumerian battle), Fate/kaleid liner Prisma Illya.\n\n"
+            "Stream the Holy Grail War right now:\n\n"
+            "- [Watch Unlimited Blade Works on KuroAnime](#anime/1114)"
+        )
+    },
+    "monogatari": {
+        "triggers": ["monogatari watch order", "how to watch monogatari", "order to watch monogatari", "monogatari series order"],
+        "title": "Monogatari Series",
+        "anime_id": 170,
+        "anime_title": "Bakemonogatari",
+        "reply": (
+            "## Prince Vegeta's Saiyan Scouter • Monogatari Series Watch Order\n\n"
+            "Hmph! Follow the original light novel release order by Nisio Isin and Studio SHAFT:\n\n"
+            "1. **Bakemonogatari** (15 episodes) • First apparitions\n"
+            "2. **Kizumonogatari (Movie Trilogy)** • The vampire origin of Koyomi Araragi & Kiss-shot\n"
+            "3. **Nisemonogatari** (11 episodes) • Fire Sisters\n"
+            "4. **Nekomonogatari (Black)** (4 episodes) • Tsubasa Hanekawa arc\n"
+            "5. **Monogatari Series Second Season** (26 episodes) • Peak narrative combat\n"
+            "6. **Hanamonogatari & Tsukimonogatari**\n"
+            "7. **Owarimonogatari (Seasons 1 & 2)** • The grand finale\n"
+            "8. **Zoku Owarimonogatari** • Epilogue\n\n"
+            "- [Watch Bakemonogatari on KuroAnime](#anime/170)"
+        )
+    },
+    "jojo": {
+        "triggers": ["jojo watch order", "how to watch jojo", "order to watch jojo", "jojos bizarre adventure watch order", "jojo order"],
+        "title": "JoJo's Bizarre Adventure",
+        "anime_id": 4,
+        "anime_title": "JoJo's Bizarre Adventure",
+        "reply": (
+            "## Prince Vegeta's Saiyan Scouter • JoJo's Bizarre Adventure Watch Order\n\n"
+            "Tch! With JoJo, you NEVER skip parts! Each generation of the Joestar bloodline passes down the battle spirit:\n\n"
+            "1. **Part 1 & 2:** Phantom Blood (Jonathan Joestar) & Battle Tendency (Joseph Joestar) (26 eps)\n"
+            "2. **Part 3:** Stardust Crusaders & Battle in Egypt (Jotaro Kujo & Stands) (48 eps)\n"
+            "3. **Part 4:** Diamond is Unbreakable (Josuke Higashikata) (39 eps)\n"
+            "4. **Part 5:** Golden Wind / Vento Aureo (Giorno Giovanna) (39 eps)\n"
+            "5. **Part 6:** Stone Ocean (Jolyne Cujoh) (38 eps)\n"
+            "6. **Part 7:** Steel Ball Run (Johnny Joestar & Gyro Zeppeli)\n\n"
+            "- [Watch JoJo on KuroAnime](#anime/4)"
+        )
+    },
+    "dragon ball": {
+        "triggers": ["dragon ball watch order", "how to watch dragon ball", "order to watch dragon ball", "dragon ball order"],
+        "title": "Dragon Ball Series",
+        "anime_id": 204,
+        "anime_title": "Dragon Ball Z",
+        "reply": (
+            "## Prince Vegeta's Royal Saiyan Chronicle • Dragon Ball Watch Order\n\n"
+            "Pay close attention, warrior! You are studying the history of the greatest warrior race in the cosmos:\n\n"
+            "1. **Dragon Ball** (153 eps) • Young Kakarot and Bulma searching for the seven Dragon Balls.\n"
+            "2. **Dragon Ball Z (or Dragon Ball Kai)** (291 eps) • The Saiyan Saga (where I arrived on Earth!), Namek & Frieza, the Androids & Cell, and Majin Buu.\n"
+            "3. **Dragon Ball Super** (131 eps) • Battle of Gods, Resurrection 'F', Universe 6 Tournament, Goku Black / Future Trunks Saga, and Tournament of Power!\n"
+            "4. **Canon Movies:** Dragon Ball Super: Broly & Dragon Ball Super: Super Hero.\n"
+            "5. **Optional Non-Canon:** Dragon Ball GT (fun, but merely an alternate universe).\n\n"
+            "- [Watch Dragon Ball Z on KuroAnime](#anime/204)"
+        )
+    }
+}
+
+
+def _vg_handle_quote_inquiry(low: str, kb: dict):
+    items = kb["items"]
+    for q in ANIME_ICONIC_QUOTES:
+        for trig in q["triggers"]:
+            if re.search(rf"\b{re.escape(trig)}\b", low):
+                matched_item = None
+                if q.get("anime_id"):
+                    matched_item = kb.get("by_id", {}).get(q["anime_id"])
+                if not matched_item:
+                    matched_item, _ = _find_exact_or_fuzzy_title(q["anime_title"], items)
+                aid = matched_item["anime_id"] if matched_item else q.get("anime_id", 1)
+                reply = (
+                    f"## Prince Vegeta's Saiyan Scouter • Iconic Quote Identified!\n\n"
+                    f"That legendary line belongs to **{q['speaker']}** from **{q['anime_title']}**!\n\n"
+                    f"- **Battle Context:** {q['context']}\n"
+                    f"- **The Prince's Verdict:** {q['vegeta_take']}\n\n"
+                    f"Witness that power in action right now:\n\n"
+                    f"- [Watch on KuroAnime](#anime/{aid})"
+                )
+                action = {"type": "play", "anime_id": aid, "episode": 1, "time": 0, "title": q["anime_title"]}
+                return reply, action
+    return None
+
+
+def _vg_handle_seiyuu_inquiry(low: str, kb: dict):
+    is_va_phrase = any(k in low for k in ["voice actor", "seiyuu", "who voices", "who voice", "voiced by", "voice of", "japanese voice", "english voice", "actor"])
+    for k, va in VOICE_ACTOR_LORE.items():
+        if k in low or (is_va_phrase and any(tok in low for tok in k.split() if len(tok) >= 4)):
+            matched_item = kb.get("by_id", {}).get(va["top_anime_id"])
+            if not matched_item:
+                matched_item, _ = _find_exact_or_fuzzy_title(va["top_anime_title"], kb["items"])
+            aid = matched_item["anime_id"] if matched_item else va["top_anime_id"]
+            lines = [
+                f"## Prince Vegeta's Scouting Report • {va['name']} Profile\n\n"
+                f"Hmph! Pay attention, warrior! **{va['name']}** is an elite voice actor responsible for some of the most iconic warriors in anime history:\n\n"
+                f"### Legendary Roles:\n"
+            ]
+            for r in va["roles"]:
+                lines.append(f"- **{r}**")
+            lines.append(f"\n{va['vegeta_take']}\n\nStream their peak battle performance on KuroAnime:\n\n- [Watch {va['top_anime_title']} on KuroAnime](#anime/{aid})")
+            act = {"type": "play", "anime_id": aid, "episode": 1, "time": 0, "title": va["top_anime_title"]}
+            return "\n".join(lines), act
+    return None
+
+
+def _vg_handle_studio_inquiry(low: str, kb: dict):
+    if not any(k in low for k in ["studio", "studios", "animated by", "made by", "who made", "anime by"]):
+        return None
+    items = kb["items"]
+    for k, st in ANIME_STUDIOS_LORE.items():
+        if k in low or (k == "kyoto animation" and "kyoani" in low):
+            lines = [
+                f"## Prince Vegeta's Scouting Report • {st['name']} Masterpieces\n\n"
+                f"Hmph! You want to know about **{st['name']}**? "
+                f"{st['acclaim']}\n\n"
+                f"### Supreme {st['name']} Combat & Masterpieces in KuroAnime Archives:\n"
+            ]
+            first_aid = None
+            first_title = None
+            for sig in st["signature_anime"]:
+                it, _ = _find_exact_or_fuzzy_title(sig, items)
+                if it:
+                    if not first_aid:
+                        first_aid = it["anime_id"]
+                        first_title = it.get("title_english") or it.get("title")
+                    lines.append(f"- **{it.get('title_english') or it.get('title')}** (★ {it.get('score')}/10, {it.get('episode_count')} eps) • [Watch on KuroAnime](#anime/{it['anime_id']})")
+            lines.append("\nPick any battle above and prepare your spirit!")
+            act = {"type": "play", "anime_id": first_aid, "episode": 1, "time": 0, "title": first_title} if first_aid else None
+            return "\n".join(lines), act
+    return None
+
+
+def _vg_handle_franchise_watch_order(low: str, kb: dict):
+    for f_key, fo in FRANCHISE_WATCH_ORDERS.items():
+        if any(trig in low for trig in fo["triggers"]) or (f_key in low and any(w in low for w in ["watch order", "order to watch", "chronological order", "order should i watch", "what order"])):
+            matched_item = kb.get("by_id", {}).get(fo["anime_id"])
+            if not matched_item:
+                matched_item, _ = _find_exact_or_fuzzy_title(fo["anime_title"], kb["items"])
+            aid = matched_item["anime_id"] if matched_item else fo["anime_id"]
+            act = {"type": "play", "anime_id": aid, "episode": 1, "time": 0, "title": fo["anime_title"]}
+            return fo["reply"], act
+    return None
+
+
 def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None, image_search_result: dict = None, history: list = None) -> tuple:
     """Generate intelligent, conversational in-character Prince Vegeta response grounded in live anime archives and multi-turn context."""
     items = kb["items"]
@@ -3631,34 +4132,43 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
     total_episodes = kb["total_episodes"]
     msg_low = user_msg.lower().strip()
 
-    # -1. Visual Screenshot Match Response
+    # -1. Visual Screenshot Match Response (only auto-confirm high-confidence matches)
     if image_search_result and image_search_result.get("matched_item"):
         it = image_search_result["matched_item"]
         ep = image_search_result.get("episode") or 1
         sec = int(image_search_result.get("from_seconds") or 0)
         sim = int(image_search_result.get("similarity", 0) * 100)
+        confident = bool(image_search_result.get("confident"))
         mins = sec // 60
         secs = sec % 60
         time_str = f"{mins}:{secs:02d}"
 
-        reply = (
-            f"## Prince Vegeta's Saiyan Scouter • Visual Match Confirmed!\n\n"
-            f"Hmph! You dare test the Prince of Saiyans with a single frame? "
-            f"My scouter locks onto **{it['title_english'] or it['title']}** (Episode {ep} at {time_str}) with **{sim}% combat accuracy**!\n\n"
-            f"- **Rating:** ★ {it['score']}/10\n"
-            f"- **Genres:** {it['genres']}\n"
-            f"- **The Prince's Verdict:** {it['synopsis'][:240]}...\n\n"
-            f"Cease your hesitation and witness this battle now:\n"
-            f"- [Watch on KuroAnime](#anime/{it['anime_id']}?ep={ep})"
-        )
-        action = {
-            "type": "play",
-            "anime_id": it["anime_id"],
-            "episode": ep,
-            "time": sec,
-            "title": it["title_english"] or it["title"]
-        }
-        return reply, action
+        if confident:
+            reply = (
+                f"## Prince Vegeta's Saiyan Scouter • Visual Match Confirmed!\n\n"
+                f"Hmph! You dare test the Prince of Saiyans with a single frame? "
+                f"My scouter locks onto **{it['title_english'] or it['title']}** (Episode {ep} at {time_str}) with **{sim}% combat accuracy**!\n\n"
+                f"- **Rating:** ★ {it['score']}/10\n"
+                f"- **Genres:** {it['genres']}\n"
+                f"- **The Prince's Verdict:** {(it.get('synopsis') or '')[:240]}...\n\n"
+                f"Cease your hesitation and witness this battle now:\n"
+                f"- [Watch on KuroAnime](#anime/{it['anime_id']}?ep={ep})"
+            )
+            action = {
+                "type": "play",
+                "anime_id": it["anime_id"],
+                "episode": ep,
+                "time": sec,
+                "title": it["title_english"] or it["title"]
+            }
+            return reply, action
+        else:
+            reply = (
+                f"Tch! My frame scouter only picked up a weak signal (**{sim}%**). If this is a character portrait, fanart, or cropped image rather than a 16:9 episode frame, my offline scouter cannot guarantee a lock.\n\n"
+                f"Closest episode frame candidate: **{it['title_english'] or it['title']}** (Ep {ep} at {time_str}) — "
+                f"[Watch on KuroAnime](#anime/{it['anime_id']}?ep={ep})"
+            )
+            return reply, None
 
     # 0. Agentic Play Command Execution
     play_action = _detect_play_intent(user_msg, items, user_context)
@@ -3680,23 +4190,35 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
     if banter:
         return banter
 
-    # 2. Character & Lore Inquiries (who is tanjiro, who is his sister, why did sasuke leave, gojo, sukuna, etc.)
-    char_inq = _vg_handle_character_inquiry(msg_low, active_anime, kb)
-    if char_inq:
-        return char_inq
+    # 1.1. Iconic Quotes & Catchphrases (who says i am atomic, honored one, set your heart ablaze, tatakae, etc.)
+    quote_res = _vg_handle_quote_inquiry(msg_low, kb)
+    if quote_res:
+        return quote_res
 
-    # 3. Follow-up Questions on Active Anime (how many episodes, is season 2 out, is it finished, who made it, watch order, etc.)
-    follow_up = _vg_handle_followup_question(msg_low, active_anime, kb)
-    if follow_up:
-        return follow_up
+    # 1.2. Voice Actors & Seiyuu Inquiries (Kenjiro Tsuda, Takehito Koyasu, Hiroshi Kamiya, Christopher Sabat, etc.)
+    va_res = _vg_handle_seiyuu_inquiry(msg_low, kb)
+    if va_res:
+        return va_res
 
-    # 4. Reverse Plot / Forgotten Anime Identification (ONLY if explicit plot inquiry)
+    # 1.3. Animation Studios Showcase (ufotable, MAPPA, Madhouse, Bones, KyoAni, WIT, Trigger, etc.)
+    studio_res = _vg_handle_studio_inquiry(msg_low, kb)
+    if studio_res:
+        return studio_res
+
+    # 1.4. Franchise Watch Orders (Fate, Monogatari, JoJo, Dragon Ball, etc.)
+    order_res = _vg_handle_franchise_watch_order(msg_low, kb)
+    if order_res:
+        return order_res
+
+    # 1.5. Reverse Plot / Forgotten Anime Identification (check before character aliases when describing a story)
     identify_phrase = any(k in msg_low for k in [
         "what is that anime", "what's that anime", "whats that anime", "which anime", "forgot the name",
         "anime where", "show where", "the one where", "name of the anime", "what anime", "anime about a",
-        "what is the anime", "what's the anime", "cant remember", "can't remember"
+        "what is the anime", "what's the anime", "cant remember", "can't remember", "story where",
+        "background story", "plot is", "about a guy who", "about a boy who", "about a girl who",
     ])
-    if identify_phrase:
+    is_char_q = re.match(r"^(?:who is|who's|whos|why did|tell me about)\b", msg_low)
+    if not is_char_q and (identify_phrase or len(re.findall(r"[a-z0-9']{4,}", msg_low)) >= 5):
         plot_item, plot_title = _find_by_plot_description(msg_low, items)
         if plot_item:
             reply = (
@@ -3705,7 +4227,7 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
                 f"That is indisputably **{plot_item['title_english'] or plot_item['title']}**!\n\n"
                 f"- **Rating:** ★ {plot_item['score']}/10 ({'Masterpiece' if plot_item['score'] >= 8.5 else 'Elite'})\n"
                 f"- **Format:** {plot_item['episode_count']} Episodes • {plot_item['type']} ({plot_item['status']})\n"
-                f"- **The Prince's Dossier:** {plot_item['synopsis'][:260]}...\n\n"
+                f"- **The Prince's Dossier:** {(plot_item.get('synopsis') or '')[:260]}...\n\n"
                 f"Cease your hesitation and stream it now:\n"
                 f"- [Watch on KuroAnime](#anime/{plot_item['anime_id']}?ep=1)"
             )
@@ -3717,6 +4239,16 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
                 "title": plot_item["title_english"] or plot_item["title"]
             }
             return reply, action
+
+    # 2. Character & Lore Inquiries (who is tanjiro, who is his sister, why did sasuke leave, gojo, sukuna, etc.)
+    char_inq = _vg_handle_character_inquiry(msg_low, active_anime, kb)
+    if char_inq:
+        return char_inq
+
+    # 3. Follow-up Questions on Active Anime (how many episodes, is season 2 out, is it finished, who made it, watch order, etc.)
+    follow_up = _vg_handle_followup_question(msg_low, active_anime, kb)
+    if follow_up:
+        return follow_up
 
     # 5. User Watch History / Resume Inquiries
     if any(k in msg_low for k in ["what was i watching", "what am i watching", "continue watching", "resume", "where did i leave off", "my watchlist", "what show was i on", "what should i continue", "my history"]):
@@ -3905,8 +4437,8 @@ def get_vegeta_full_knowledge():
         s1_streams = 0
 
     m_anime_rows = munib_rows("""
-        SELECT anime_id, anilist_id, title, title_english, title_romaji, type, status, genres,
-               season_year, anilist_score, anilist_popularity, episode_count, subbed_count, dubbed_count
+        SELECT anime_id, anilist_id, title, title_english, title_romaji, japanese_name, type, status, genres,
+               season, season_year, anilist_score, anilist_popularity, episode_count, subbed_count, dubbed_count
         FROM anime
     """)
     m_ep = munib_rows("SELECT COUNT(*) AS n FROM episodes")
@@ -3916,17 +4448,24 @@ def get_vegeta_full_knowledge():
     s2_streams = m_st[0]["n"] if m_st else 0
     s2_dub_anime = m_dub[0]["n"] if m_dub else 0
 
+    by_al = kb.setdefault("by_anilist_id", {})
     exclusive_added = 0
     for r in m_anime_rows:
         a_id = r.get("anime_id")
+        al_id = r.get("anilist_id")
         if a_id is None:
             continue
         if a_id in by_id:
             by_id[a_id]["on_munib"] = True
+            if al_id and int(al_id) > 0:
+                if not by_id[a_id].get("anilist_id"):
+                    by_id[a_id]["anilist_id"] = int(al_id)
+                by_al.setdefault(int(al_id), by_id[a_id])
             continue
         title = (r.get("title") or "").strip()
         title_eng = (r.get("title_english") or title).strip()
         title_rom = (r.get("title_romaji") or "").strip()
+        title_jp = (r.get("japanese_name") or "").strip()
         if not title and not title_eng:
             continue
         raw_score = r.get("anilist_score")
@@ -3938,10 +4477,11 @@ def get_vegeta_full_knowledge():
         genres = (r.get("genres") or "").strip()
         year = str(r.get("season_year") or "")
         norm_titles = [t for t in dict.fromkeys([
-            _normalize_str(title), _normalize_str(title_eng), _normalize_str(title_rom)
+            _normalize_str(title), _normalize_str(title_eng), _normalize_str(title_rom), _normalize_str(title_jp)
         ]) if t]
         item = {
             "anime_id": a_id,
+            "anilist_id": int(al_id) if (al_id and int(al_id) > 0) else None,
             "title": title or title_eng,
             "title_english": title_eng or title,
             "title_romaji": title_rom,
@@ -3952,7 +4492,7 @@ def get_vegeta_full_knowledge():
             "status": r.get("status") or "Finished Airing",
             "year": year,
             "season_year": int(year) if year.isdigit() else 0,
-            "premiered": "",
+            "premiered": f"{r.get('season') or ''} {year}".strip(),
             "score": score or 7.0,
             "popularity": r.get("anilist_popularity") or 0,
             "studios": "Unknown Studio",
@@ -3970,8 +4510,83 @@ def get_vegeta_full_knowledge():
             "munib_exclusive": True,
         }
         by_id[a_id] = item
+        if item["anilist_id"]:
+            by_al.setdefault(item["anilist_id"], item)
         items.append(item)
         exclusive_added += 1
+
+    # Enrich BOTH Server 1 and Server 2 items with MyAnimeList / AniList trained knowledge
+    mal_data = {}
+    for mal_path in [
+        os.path.join(CURRENT_DIR, "vegeta_mal_knowledge.json.gz"),
+        os.path.join(PARENT_DIR, "vegeta_mal_knowledge.json.gz"),
+        os.path.join(CURRENT_DIR, "api", "vegeta_mal_knowledge.json.gz"),
+        os.path.join(os.getcwd(), "api", "vegeta_mal_knowledge.json.gz"),
+        os.path.join(os.getcwd(), "anime_app", "web", "api", "vegeta_mal_knowledge.json.gz"),
+    ]:
+        if os.path.exists(mal_path):
+            try:
+                import gzip as _gzip
+                with _gzip.open(mal_path, "rb") as _mf:
+                    mal_data = json.loads(_mf.read().decode("utf-8"))
+                break
+            except Exception as _me:
+                print(f"MAL knowledge load error ({mal_path}): {_me}")
+
+    by_mal_id = {}
+    char_index = {}
+    for it in items:
+        al_id = it.get("anilist_id")
+        meta = mal_data.get(str(al_id)) if al_id else None
+        tags = []
+        chars = []
+        if meta:
+            if meta.get("mal"):
+                it["mal_id"] = int(meta["mal"])
+                by_mal_id.setdefault(int(meta["mal"]), it)
+            if not it.get("synopsis") and meta.get("ds"):
+                it["synopsis"] = meta["ds"]
+                it["synopsis_lower"] = meta["ds"].lower()
+            if (not it.get("studios") or it.get("studios") == "Unknown Studio") and meta.get("st"):
+                it["studios"] = ", ".join(meta["st"])
+                it["studios_lower"] = it["studios"].lower()
+            if meta.get("syn"):
+                existing_norm = set(it.get("all_titles_norm") or [])
+                for s in meta["syn"]:
+                    ns = _normalize_str(s)
+                    if ns and ns not in existing_norm:
+                        it["all_titles_norm"].append(ns)
+                        existing_norm.add(ns)
+            tags = meta.get("tg") or []
+            chars = meta.get("ch") or []
+
+        it["tags"] = tags
+        it["tags_lower"] = " ".join(tags).lower()
+        it["characters"] = chars
+        char_names = []
+        for ch in chars:
+            cn = ch.get("n") or ""
+            if not cn:
+                continue
+            char_names.append(cn)
+            c_role = ch.get("r") or "S"
+            keys_to_add = [cn.lower()] + [a.lower() for a in (ch.get("a") or []) if a]
+            # Also index individual name tokens (>= 4 chars) if main character for natural queries
+            if c_role == "M":
+                for tok in re.findall(r"[a-z]{4,}", cn.lower()):
+                    keys_to_add.append(tok)
+            for ck in dict.fromkeys(keys_to_add):
+                ck_clean = re.sub(r"[^a-z0-9\s]", " ", ck).strip()
+                if len(ck_clean) >= 3:
+                    char_index.setdefault(ck_clean, []).append((cn, c_role, it))
+        it["characters_lower"] = " ".join(char_names).lower()
+
+    # Sort character_index entries so Main characters and highest-popularity anime rank first
+    for ck in char_index:
+        char_index[ck].sort(key=lambda x: (1 if x[1] == "M" else 0, x[2].get("popularity") or 0), reverse=True)
+
+    kb["by_mal_id"] = by_mal_id
+    kb["character_index"] = char_index
 
     genre_counts = {}
     type_counts = {}
@@ -4023,13 +4638,17 @@ def _vegeta_line(it, synopsis_len=260):
         f" | {it.get('type')} | {it.get('episode_count')} eps{s_note} | {it.get('status')} | {it.get('year') or '?'}"
         f" | score {it.get('score')}/10 | {it.get('genres')} | studio {it.get('studios')} | servers: {servers}"
     )
+    if it.get("tags"):
+        line += f" | tags: {', '.join(it['tags'][:6])}"
+    if it.get("characters"):
+        line += f" | chars: {', '.join(c['n'] for c in it['characters'][:5])}"
     if syn:
         line += f" | synopsis: {syn}"
     return line
 
 
-def _vegeta_retrieve(user_msg, history, kb, image_search_result=None):
-    """Ground every answer: pick the exact titles, genre matches, plot identification, screenshot matches, and keyword matches from the real catalog."""
+def _vegeta_retrieve(user_msg, history, kb, image_search_result=None, has_image=False):
+    """Ground every answer: pick the exact titles, genre matches, plot identification, character matches, and screenshot matches from BOTH servers."""
     items = kb["items"]
     msg_low = (user_msg or "").lower()
     blocks = []
@@ -4041,19 +4660,32 @@ def _vegeta_retrieve(user_msg, history, kb, image_search_result=None):
             return True
         return False
 
-    # -1. Visual Screenshot Match (from trace.moe reverse image engine)
-    if image_search_result and image_search_result.get("matched_item"):
-        it = image_search_result["matched_item"]
-        ep = image_search_result.get("episode") or 1
-        sec = int(image_search_result.get("from_seconds") or 0)
-        sim = int(image_search_result.get("similarity", 0) * 100)
-        time_str = f"{sec // 60}:{sec % 60:02d}"
-        if add(it):
+    # -1. Visual Image Analysis / trace.moe Scouter Report
+    if has_image:
+        if image_search_result and image_search_result.get("matched_item") and image_search_result.get("confident"):
+            it = image_search_result["matched_item"]
+            ep = image_search_result.get("episode") or 1
+            sec = int(image_search_result.get("from_seconds") or 0)
+            sim = int(image_search_result.get("similarity", 0) * 100)
+            time_str = f"{sec // 60}:{sec % 60:02d}"
+            if add(it):
+                blocks.append(
+                    f"TRACE.MOE REVERSE IMAGE SCOUTER REPORT (HIGH CONFIDENCE {sim}%):\n"
+                    f"- Visual Match: {_vegeta_line(it, 240).lstrip('- ')}\n"
+                    f"- Detected Scene: Episode {ep} at {time_str} ({sec}s).\n"
+                    f"- Action Directive: Visually verify the attached image actually matches this anime/character. If it is fanart or a different character, trust YOUR Gemini Vision instead and call search_anime!"
+                )
+        else:
+            hint = ""
+            if image_search_result and image_search_result.get("matched_item"):
+                h_it = image_search_result["matched_item"]
+                h_sim = int(image_search_result.get("similarity", 0) * 100)
+                hint = f" (Weak trace.moe hint {h_sim}%: {h_it.get('title_english') or h_it.get('title')} — DO NOT trust blindly!)"
             blocks.append(
-                f"TRACE.MOE REVERSE IMAGE SCOUTER REPORT:\n"
-                f"- Visual Match: {_vegeta_line(it, 240).lstrip('- ')}\n"
-                f"- Detected Scene: Episode {ep} at {time_str} ({sec}s) with {sim}% scouter confidence.\n"
-                f"- Action Directive: If confident, confirm to warrior and include action tag to auto-play this exact scene."
+                f"GEMINI VISION IMAGE IDENTIFICATION REQUIRED{hint}:\n"
+                f"- The user attached an image (character portrait, fanart, poster, or cropped frame) and trace.moe could not confirm an exact episode frame.\n"
+                f"- Examine the character's hair, eyes, outfit, uniform, weapons, markings, and art style using YOUR Gemini Vision.\n"
+                f"- Identify the exact character and anime series, then IMMEDIATELY call `search_anime` to look up that anime in KuroAnime's dual-server catalog (ZokoAnime + Munib Server) and give the `[Watch on KuroAnime](#anime/ID)` link!"
             )
 
     # 0. Reverse Plot / Description Identification Match
@@ -4061,10 +4693,28 @@ def _vegeta_retrieve(user_msg, history, kb, image_search_result=None):
     if plot_item and add(plot_item):
         blocks.append(
             f"REVERSE PLOT SCOUTING IDENTIFICATION:\n"
-            f"- Identified Anime: {_vegeta_line(plot_item, 260).lstrip('- ')}\n"
-            f"- Plot Synopsis: {plot_item.get('synopsis', '')[:300]}...\n"
-            f"- Action Directive: Confirm this is the anime they described and provide direct streaming."
+            f"- Identified Anime: {_vegeta_line(plot_item, 320).lstrip('- ')}\n"
+            f"- Action Directive: Verify if this matches the story/background the user described; if another anime fits better from your knowledge, call `search_anime` for that title instead!"
         )
+
+    # 0.5. Character Index Match (from MyAnimeList/AniList trained character database)
+    char_idx = kb.get("character_index") or {}
+    if char_idx and msg_low:
+        q_tokens = re.findall(r"[a-z]{3,}", msg_low)
+        char_hits = []
+        for n in (2, 1):
+            for idx in range(len(q_tokens) - n + 1):
+                cand = " ".join(q_tokens[idx : idx + n])
+                if cand in char_idx and cand not in _VEGETA_STOPWORDS:
+                    for ch_name, ch_role, c_it in char_idx[cand][:2]:
+                        if add(c_it):
+                            char_hits.append(f"- Character '{ch_name}' ({'Main' if ch_role == 'M' else 'Supporting'}): {_vegeta_line(c_it, 200).lstrip('- ')}")
+                    if len(char_hits) >= 4:
+                        break
+            if len(char_hits) >= 4:
+                break
+        if char_hits:
+            blocks.append("CHARACTER KNOWLEDGE MATCHES (MAL/ANILIST TRAINED):\n" + "\n".join(char_hits))
 
     # 1. Specific title (also look back into recent user turns for follow-up questions like "how many seasons?")
     specific, related = (None, [])
@@ -4117,7 +4767,12 @@ def _vegeta_retrieve(user_msg, history, kb, image_search_result=None):
     if words and not specific:
         scored = []
         for it in items:
-            hay = (it.get("synopsis_lower") or "") + " " + (it.get("title_english") or "").lower()
+            hay = (
+                (it.get("synopsis_lower") or "") + " "
+                + (it.get("tags_lower") or "") + " "
+                + (it.get("characters_lower") or "") + " "
+                + (it.get("title_english") or "").lower()
+            )
             hits = sum(1 for w in words if w in hay)
             if hits:
                 scored.append((hits, it.get("popularity") or 0, it))
@@ -4266,7 +4921,7 @@ async def ai_chat(req: Request):
             }
 
     if api_key and not api_key.startswith("0x"):
-        context = _vegeta_retrieve(user_msg, history, kb, image_search_result=image_result)
+        context = _vegeta_retrieve(user_msg, history, kb, image_search_result=image_result, has_image=bool(image_data))
         system_instruction = _vegeta_system_prompt(kb, context, user_context)
 
         contents = []
@@ -4294,7 +4949,7 @@ async def ai_chat(req: Request):
                     "data": clean_b64
                 }
             })
-        prompt_txt = user_msg or "Identify which anime, episode, and scene this screenshot is from, Prince Vegeta!"
+        prompt_txt = user_msg or "Identify which anime and character this image is from, Prince Vegeta!"
         user_parts.append({"text": prompt_txt})
 
         if contents and contents[-1]["role"] == "user":
@@ -4302,25 +4957,19 @@ async def ai_chat(req: Request):
         else:
             contents.append({"role": "user", "parts": user_parts})
 
-        payload = {
-            "contents": contents,
-            "systemInstruction": {"parts": [{"text": system_instruction}]},
-            "tools": [{"functionDeclarations": _GEMINI_TOOLS_DECLARATIONS}],
-            "safetySettings": _GEMINI_SAFETY_SETTINGS,
-            "generationConfig": {
-                "temperature": 0.85,
-                "topP": 0.95,
-                "maxOutputTokens": 1400,
-                "thinkingConfig": {"thinkingBudget": 0},
-            },
-        }
-
-        for model in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"]:
+        for model in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
                 collected_actions = []
                 working_contents = list(contents)
                 final_reply = ""
+                gen_cfg = {
+                    "temperature": 0.85,
+                    "topP": 0.95,
+                    "maxOutputTokens": 1400,
+                }
+                if "2.5" in model:
+                    gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
                 
                 # Multi-turn tool execution loop (max 3 rounds)
                 for _round in range(3):
@@ -4329,15 +4978,11 @@ async def ai_chat(req: Request):
                         "systemInstruction": {"parts": [{"text": system_instruction}]},
                         "tools": [{"functionDeclarations": _GEMINI_TOOLS_DECLARATIONS}],
                         "safetySettings": _GEMINI_SAFETY_SETTINGS,
-                        "generationConfig": {
-                            "temperature": 0.85,
-                            "topP": 0.95,
-                            "maxOutputTokens": 1400,
-                            "thinkingConfig": {"thinkingBudget": 0},
-                        },
+                        "generationConfig": gen_cfg,
                     }
                     res = _STREAM_SESSION.post(url, json=cur_payload, headers={"Content-Type": "application/json"}, timeout=18)
                     if res.status_code != 200:
+                        print(f"Gemini HTTP {res.status_code} ({model}): {res.text[:200]}")
                         break
                     data = res.json()
                     cands = data.get("candidates") or []
@@ -4386,7 +5031,7 @@ async def ai_chat(req: Request):
                             pass
                     
                     if not collected_actions:
-                        if image_result and image_result.get("matched_item"):
+                        if image_result and image_result.get("matched_item") and image_result.get("confident"):
                             it = image_result["matched_item"]
                             collected_actions.append({
                                 "type": "play",
@@ -4409,18 +5054,32 @@ async def ai_chat(req: Request):
                 print(f"Gemini API error ({model}): {gemini_err}")
                 continue
 
-    # 2. Smart Reasoning Engine (comparisons, similar anime, decade/format filters, personal taste)
-    smart = _vg_smart_answer(user_msg, kb, user_context, history)
-    if smart:
-        reply_text, smart_actions = smart
-        valid_actions = _vg_validate_actions(smart_actions, kb)
+    # If image was uploaded and Gemini Vision was unavailable/failed and trace.moe wasn't confident
+    if image_data and not (image_result and image_result.get("matched_item")):
         return {
             "ok": True,
-            "reply": reply_text,
-            "action": valid_actions[0] if valid_actions else None,
-            "actions": valid_actions,
-            "used_gemini": False
+            "reply": (
+                "Tch! My offline frame scouter only indexes exact 16:9 anime episode frames — it cannot identify cropped character portraits, fanart, or posters without **Gemini Vision**!\n\n"
+                "Set your `GEMINI_API_KEY` on the server (or paste a full 16:9 episode screenshot) and I will lock onto the character and anime instantly."
+            ),
+            "action": None,
+            "actions": [],
+            "used_gemini": False,
         }
+
+    # 2. Smart Reasoning Engine (comparisons, similar anime, decade/format filters, personal taste)
+    if not image_data:
+        smart = _vg_smart_answer(user_msg, kb, user_context, history)
+        if smart:
+            reply_text, smart_actions = smart
+            valid_actions = _vg_validate_actions(smart_actions, kb)
+            return {
+                "ok": True,
+                "reply": reply_text,
+                "action": valid_actions[0] if valid_actions else None,
+                "actions": valid_actions,
+                "used_gemini": False
+            }
 
     # 3. Local Vegeta Brain fallback (plot identification, stats, canon guides)
     reply_res = _generate_vegeta_response(user_msg, kb, user_context, image_result, history=history)

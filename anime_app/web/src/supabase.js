@@ -264,6 +264,82 @@ export async function deleteDiscussionMessageFromSupabase(commentId) {
 }
 
 /**
+ * Fetch Vegeta chat history from Supabase for the signed-in user
+ */
+export async function fetchVegetaChatHistoryFromCloud(limit = 60) {
+  const user = await getCurrentUser();
+  if (!user || !supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('vegeta_chat_messages')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true })
+      .limit(limit);
+    if (error) {
+      console.warn('[Supabase vegeta chat fetch error]', error.message);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    console.warn('[Supabase vegeta chat fetch exception]', e);
+    return [];
+  }
+}
+
+/**
+ * Save a Vegeta chat message to Supabase for the signed-in user
+ */
+export async function saveVegetaChatMessageToCloud({ role, content, imageUrl = null, actions = null }) {
+  const user = await getCurrentUser();
+  if (!user || !supabase || !content) return null;
+  try {
+    const payload = {
+      user_id: user.id,
+      role: role === 'bot' ? 'model' : role,
+      content: String(content),
+      image_url: imageUrl ? String(imageUrl).slice(0, 100000) : null,
+      actions: actions || null,
+      created_at: new Date().toISOString()
+    };
+    const { data, error } = await supabase
+      .from('vegeta_chat_messages')
+      .insert([payload])
+      .select();
+    if (error) {
+      console.warn('[Supabase vegeta chat insert error]', error.message);
+      return null;
+    }
+    return data?.[0] || null;
+  } catch (e) {
+    console.warn('[Supabase vegeta chat insert exception]', e);
+    return null;
+  }
+}
+
+/**
+ * Clear all Vegeta chat history from Supabase for the signed-in user
+ */
+export async function clearVegetaChatHistoryFromCloud() {
+  const user = await getCurrentUser();
+  if (!user || !supabase) return false;
+  try {
+    const { error } = await supabase
+      .from('vegeta_chat_messages')
+      .delete()
+      .eq('user_id', user.id);
+    if (error) {
+      console.warn('[Supabase vegeta chat clear error]', error.message);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn('[Supabase vegeta chat clear exception]', e);
+    return false;
+  }
+}
+
+/**
  * Resolve effective user from either Supabase Auth session or authenticated local profile
  */
 export async function resolveSyncUser() {
