@@ -7,6 +7,7 @@
     "dev": "vite",
     "prebuild": "python ../../generate_sitemap.py || python3 ../../generate_sitemap.py || true",
     "build": "vite build",
+    "postbuild": "node -e \"const fs=require('fs'),p=require('path');const src=path.join('dist','index.html');if(fs.existsSync(src)){[path.join('..','..','api','_spa_template.html'),path.join('api','_spa_template.html')].forEach(d=>{if(fs.existsSync(path.dirname(d)))fs.copyFileSync(src,d);});}\"",
     "preview": "vite preview"
   },
   "devDependencies": {

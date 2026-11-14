@@ -3,8 +3,11 @@ KuroAnime API — Vercel Serverless & Standalone FastAPI Backend
 Provides JSON API over SQLite hianime.db + Direct Ad-Free HLS Stream Resolver & Proxy
 """
 import os
+import time as _time
 import sqlite3
 import re
+import html as _html
+import unicodedata
 import difflib
 import base64
 import json
@@ -318,7 +321,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 router = APIRouter()
 
-CARD_COLS = """anime_id, title, title_english, type, status, episode_count,
+CARD_COLS = """anime_id, title, title_english, title_romaji, type, status, episode_count,
                anilist_score, mal_score, season_year,
                COALESCE(NULLIF(poster_large,''), poster_url) AS poster"""
 
@@ -440,10 +443,242 @@ def audio_flags(anime_ids):
     return out
 
 
+_CANONICAL_MULTI_GENRES = {
+    "slice of life": "Slice of Life",
+    "martial arts": "Martial Arts",
+    "super power": "Super Power",
+    "adult cast": "Adult Cast",
+    "boys love": "Boys Love",
+    "girls love": "Girls Love",
+    "mahou shoujo": "Mahou Shoujo",
+    "magical girl": "Magical Girl",
+    "avant garde": "Avant Garde",
+    "award winning": "Award Winning",
+    "time travel": "Time Travel",
+    "team sports": "Team Sports",
+    "combat sports": "Combat Sports",
+    "reverse harem": "Reverse Harem",
+    "visual arts": "Visual Arts",
+    "performing arts": "Performing Arts",
+    "high stakes game": "High Stakes Game",
+    "video game": "Video Game",
+    "school life": "School Life",
+    "sci-fi": "Sci-Fi",
+    "post-apocalyptic": "Post-Apocalyptic",
+}
+
+_KNOWN_SINGLE_GENRES = {
+    "action", "adventure", "comedy", "drama", "ecchi", "fantasy", "gore", "harem",
+    "hentai", "historical", "horror", "isekai", "josei", "kids", "magic", "mecha",
+    "military", "music", "mystery", "mythology", "parody", "police", "psychological",
+    "romance", "samurai", "school", "seinen", "shoujo", "shounen", "space", "sports",
+    "supernatural", "suspense", "thriller", "vampire", "anthropomorphic", "CGDCT",
+    "delinquents", "detective", "educational", "erotica", "gag humor", "gourmet",
+    "idols", "medical", "organized crime", "otaku culture", "pets", "racing",
+    "reincarnation", "showbiz", "strategy game", "survival", "workplace",
+}
+
+
+def slugify_title(text: str) -> str:
+    """Convert anime title or genre into a clean URL-safe lowercase slug."""
+    if not text:
+        return ""
+    norm = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", norm.lower()).strip("-")
+    return re.sub(r"-{2,}", "-", s)
+
+
+def extract_clean_genres(raw: str) -> list[str]:
+    """Parse messy comma/space-separated genre strings into clean canonical anime genres."""
+    if not raw:
+        return []
+    out = []
+    seen = set()
+
+    def _add(label: str):
+        key = label.lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(label.strip())
+
+    for part in str(raw).split(","):
+        tok = re.sub(r"\s+", " ", part).strip()
+        if not tok or len(tok) > 60 or any(ch in tok for ch in (".", ";", ":", "!", "?")):
+            continue
+        low = tok.lower()
+        if low in _CANONICAL_MULTI_GENRES:
+            _add(_CANONICAL_MULTI_GENRES[low])
+            continue
+        if len(tok) <= 22 and tok.replace("-", "").replace(" ", "").isalpha() and " " not in tok:
+            _add(tok)
+            continue
+        # Handle space-joined scrape artifacts like "Adventure Fantasy Action"
+        remaining = low
+        for m_low, m_canon in _CANONICAL_MULTI_GENRES.items():
+            if m_low in remaining:
+                _add(m_canon)
+                remaining = remaining.replace(m_low, " ")
+        for w in remaining.split():
+            if w in _KNOWN_SINGLE_GENRES:
+                _add(w.title())
+    return out
+
+
+def _normalize_genre_query(raw_genre: str) -> str:
+    """Resolve URL slug (e.g. 'slice-of-life', 'sci-fi') back to readable DB genre name."""
+    g = (raw_genre or "").strip()
+    if not g:
+        return ""
+    low = g.lower()
+    if low in _CANONICAL_MULTI_GENRES:
+        return _CANONICAL_MULTI_GENRES[low]
+    slug_low = low.replace(" ", "-")
+    for m_low, m_canon in _CANONICAL_MULTI_GENRES.items():
+        if m_low.replace(" ", "-") == slug_low:
+            return m_canon
+    if "-" in g:
+        # e.g. action -> Action, sci-fi handled above
+        return " ".join(w.capitalize() for w in g.split("-") if w)
+    return g.title() if g.islower() else g
+
+
+_SLUG_INDEX_LOCK = None
+_SLUG_INDEX_CACHE = None
+
+
+def _get_slug_index():
+    """Lazily build bidirectional (id_to_slug, slug_to_id) maps across both DBs."""
+    global _SLUG_INDEX_CACHE, _SLUG_INDEX_LOCK
+    if _SLUG_INDEX_CACHE is not None:
+        return _SLUG_INDEX_CACHE
+    import threading
+    if _SLUG_INDEX_LOCK is None:
+        _SLUG_INDEX_LOCK = threading.Lock()
+    with _SLUG_INDEX_LOCK:
+        if _SLUG_INDEX_CACHE is not None:
+            return _SLUG_INDEX_CACHE
+        id_to_slug: dict[int, str] = {}
+        slug_to_id: dict[str, int] = {}
+        by_id: dict[int, dict] = {}
+        try:
+            for r in rows("""
+                SELECT anime_id, title, title_english, title_romaji, anilist_popularity
+                FROM anime
+            """):
+                by_id[int(r["anime_id"])] = r
+        except Exception:
+            pass
+        try:
+            for r in munib_rows("""
+                SELECT anime_id, title, title_english, title_romaji, anilist_popularity
+                FROM anime
+            """):
+                aid = int(r["anime_id"])
+                if aid not in by_id:
+                    by_id[aid] = r
+        except Exception:
+            pass
+
+        deduped = sorted(
+            by_id.values(),
+            key=lambda r: (-int(r.get("anilist_popularity") or 0), int(r["anime_id"])),
+        )
+
+        # Pass 1: assign canonical slugs using distinct primary catalog titles first
+        for r in deduped:
+            aid = int(r["anime_id"])
+            base_title = r.get("title") or r.get("title_english") or r.get("title_romaji") or f"anime-{aid}"
+            base_slug = slugify_title(base_title) or f"anime-{aid}"
+            canonical = base_slug if base_slug not in slug_to_id else f"{base_slug}-{aid}"
+            id_to_slug[aid] = canonical
+            slug_to_id[canonical] = aid
+            slug_to_id[f"{base_slug}-{aid}"] = aid
+
+        # Pass 2: register alternate English/Romaji aliases without overriding canonical slugs
+        for r in deduped:
+            aid = int(r["anime_id"])
+            for alt_field in ("title_english", "title_romaji", "title"):
+                alt_slug = slugify_title(r.get(alt_field) or "")
+                if alt_slug and alt_slug not in slug_to_id:
+                    slug_to_id[alt_slug] = aid
+
+        _SLUG_INDEX_CACHE = (id_to_slug, slug_to_id)
+        return _SLUG_INDEX_CACHE
+
+
+def get_anime_slug(anime_id: int, fallback_title: str = "") -> str:
+    id_to_slug, _ = _get_slug_index()
+    if anime_id in id_to_slug:
+        return id_to_slug[anime_id]
+    s = slugify_title(fallback_title)
+    return f"{s}-{anime_id}" if s else str(anime_id)
+
+
+def _resolve_anime_id(ident) -> int:
+    """Resolve either numeric anime_id or URL slug (e.g. 'attack-on-titan') to anime_id."""
+    if isinstance(ident, int):
+        return ident
+    raw = str(ident or "").strip()
+    if not raw:
+        raise HTTPException(404, "Anime not found")
+    if raw.isdigit():
+        return int(raw)
+    id_to_slug, slug_to_id = _get_slug_index()
+    low = slugify_title(raw)
+    if low in slug_to_id:
+        return slug_to_id[low]
+    if raw.lower() in slug_to_id:
+        return slug_to_id[raw.lower()]
+    # Support trailing "-<numeric_id>" slugs only when the prefix shares words with that anime's slug
+    m_tail = re.search(r"^(.+)-(\d+)$", low)
+    if m_tail:
+        prefix, cand_id = m_tail.group(1), int(m_tail.group(2))
+        canon = id_to_slug.get(cand_id, "")
+        if canon:
+            canon_tokens = {t for t in canon.split("-") if len(t) >= 3}
+            pref_tokens = {t for t in prefix.split("-") if len(t) >= 3}
+            if canon.startswith(prefix) or (canon_tokens and (canon_tokens & pref_tokens)):
+                return cand_id
+    raise HTTPException(404, "Anime not found")
+
+
+_DUB_IDS_CACHE: Optional[tuple[float, set[int]]] = None
+
+
+def _get_dub_anime_ids() -> set[int]:
+    """Return cached set of anime_id values that have English Dub streams across both servers."""
+    global _DUB_IDS_CACHE
+    now = _time.time()
+    if _DUB_IDS_CACHE and (now - _DUB_IDS_CACHE[0]) < 1800:
+        return _DUB_IDS_CACHE[1]
+    dub_ids: set[int] = set()
+    try:
+        for r in rows("SELECT DISTINCT anime_id FROM streams WHERE type = 'dub' AND server_name != 'HD-1'"):
+            if r.get("anime_id") is not None:
+                dub_ids.add(int(r["anime_id"]))
+    except Exception:
+        pass
+    try:
+        for r in munib_rows("SELECT DISTINCT anime_id FROM streams WHERE type = 'dub'"):
+            if r.get("anime_id") is not None:
+                dub_ids.add(int(r["anime_id"]))
+    except Exception:
+        pass
+    _DUB_IDS_CACHE = (now, dub_ids)
+    return dub_ids
+
+
 def with_flags(cards):
     flags = audio_flags([c["anime_id"] for c in cards])
+    id_to_slug, _ = _get_slug_index()
     for c in cards:
-        c.update(flags.get(c["anime_id"], {"sub": False, "dub": False}))
+        aid = c["anime_id"]
+        c.update(flags.get(aid, {"sub": False, "dub": False}))
+        if aid in id_to_slug:
+            c["slug"] = id_to_slug[aid]
+        else:
+            s = slugify_title(c.get("title_english") or c.get("title") or "")
+            c["slug"] = f"{s}-{aid}" if s else str(aid)
     return cards
 
 
@@ -584,7 +819,7 @@ def get_schedule():
     return {"timezone": "Asia/Karachi", "utc_offset": "+05:00", "items": build_schedule_catalog()}
 
 
-MUNIB_CARD_COLS = """anime_id, title, title_english, type, status, episode_count,
+MUNIB_CARD_COLS = """anime_id, title, title_english, title_romaji, type, status, episode_count,
                      anilist_score, NULL AS mal_score, season_year,
                      COALESCE(NULLIF(poster_large,''), poster_url) AS poster"""
 
@@ -660,8 +895,9 @@ def resolve_trailer_id(anilist_id=None, title=None):
     return None
 
 
-@router.get("/anime/{anime_id}")
-def anime_detail(anime_id: int):
+@router.get("/anime/{anime_ident}")
+def anime_detail(anime_ident: str):
+    anime_id = _resolve_anime_id(anime_ident)
     a = one("SELECT * FROM anime WHERE anime_id = ?", (anime_id,))
     if not a:
         m_list = munib_rows("SELECT * FROM anime WHERE anime_id = ?", (anime_id,))
@@ -671,6 +907,7 @@ def anime_detail(anime_id: int):
         a["poster"] = a.get("poster_large") or a.get("poster_url")
         a["seasons"] = []
         a.update(audio_flags([anime_id]).get(anime_id, {"sub": True, "dub": False}))
+        a["slug"] = get_anime_slug(anime_id, a.get("title_english") or a.get("title") or "")
         return a
     a["poster"] = a.get("poster_large") or a.get("poster_url")
     a["seasons"] = rows("""
@@ -680,7 +917,9 @@ def anime_detail(anime_id: int):
     have = {r["anime_id"] for r in rows("SELECT anime_id FROM anime")} if a["seasons"] else set()
     for s in a["seasons"]:
         s["available"] = s["season_anime_id"] in have
+        s["season_slug"] = get_anime_slug(s["season_anime_id"], s.get("season_name") or "")
     a.update(audio_flags([anime_id]).get(anime_id, {}))
+    a["slug"] = get_anime_slug(anime_id, a.get("title_english") or a.get("title") or "")
     try:
         t_row = one("SELECT trailer_id, site FROM anime_trailers WHERE anime_id = ?", (anime_id,))
         if t_row and t_row.get("trailer_id"):
@@ -693,8 +932,9 @@ def anime_detail(anime_id: int):
 
 
 
-@router.get("/anime/{anime_id}/trailer")
-def anime_trailer(anime_id: int):
+@router.get("/anime/{anime_ident}/trailer")
+def anime_trailer(anime_ident: str):
+    anime_id = _resolve_anime_id(anime_ident)
     # 1. Check local anime_trailers table
     try:
         t_row = one("SELECT trailer_id, site FROM anime_trailers WHERE anime_id = ?", (anime_id,))
@@ -754,8 +994,9 @@ def anime_trailer(anime_id: int):
     return {"ok": False, "message": "No trailer available"}
 
 
-@router.get("/anime/{anime_id}/episodes")
-def anime_episodes(anime_id: int):
+@router.get("/anime/{anime_ident}/episodes")
+def anime_episodes(anime_ident: str):
+    anime_id = _resolve_anime_id(anime_ident)
     eps = rows("""
         SELECT e.episode_id, e.episode_number, e.title, e.japanese_title,
                MAX(CASE WHEN s.type='sub' THEN 1 ELSE 0 END) AS sub,
@@ -930,22 +1171,27 @@ def search(q: str = Query(..., min_length=1), limit: int = 30):
     return {"results": with_flags(res[:min(limit, 60)])}
 
 
+_GENRES_CACHE: Optional[tuple[float, list[str]]] = None
+
+
 @router.get("/browse")
 def browse(
     genre: Optional[str] = None,
     type: Optional[str] = None,
     status: Optional[str] = None,
+    audio: Optional[str] = None,
     sort: str = "popular",
     page: int = 1,
     per_page: int = 30,
 ):
     where, params = [], []
     m_where, m_params = [], []
-    if genre:
+    norm_genre = _normalize_genre_query(genre) if genre else ""
+    if norm_genre:
         where.append("(genres LIKE ? OR al_genres LIKE ?)")
-        params += [f"%{genre}%", f"%{genre}%"]
+        params += [f"%{norm_genre}%", f"%{norm_genre}%"]
         m_where.append("genres LIKE ?")
-        m_params.append(f"%{genre}%")
+        m_params.append(f"%{norm_genre}%")
     if type:
         where.append("type LIKE ?")
         params.append(f"%{type}%")
@@ -959,6 +1205,13 @@ def browse(
         elif "comp" in st or "finish" in st:
             where.append("(status LIKE '%Finished%' OR anilist_status='FINISHED')")
             m_where.append("status LIKE '%Finished%'")
+    if audio and audio.strip().lower() == "dub":
+        dub_ids = _get_dub_anime_ids()
+        if not dub_ids:
+            return {"page": page, "results": []}
+        dub_csv = ",".join(str(int(i)) for i in sorted(dub_ids))
+        where.append(f"anime_id IN ({dub_csv})")
+        m_where.append(f"anime_id IN ({dub_csv})")
     order = {
         "popular": "anilist_popularity DESC NULLS LAST",
         "score": "anilist_score DESC NULLS LAST",
@@ -969,7 +1222,7 @@ def browse(
     offset = (max(page, 1) - 1) * per_page
 
     # If filtering by Hentai (or if main DB has no matches), query Munib Server DB directly
-    if genre and genre.strip().lower() == "hentai":
+    if norm_genre and norm_genre.strip().lower() == "hentai":
         m_sql = f"SELECT {MUNIB_CARD_COLS} FROM anime"
         if m_where:
             m_sql += " WHERE " + " AND ".join(m_where)
@@ -999,18 +1252,20 @@ def browse(
 
 @router.get("/genres")
 def genres():
+    global _GENRES_CACHE
+    now = _time.time()
+    if _GENRES_CACHE and (now - _GENRES_CACHE[0]) < 600:
+        return {"genres": _GENRES_CACHE[1]}
     counts = {}
     for r in rows("SELECT genres FROM anime WHERE genres IS NOT NULL AND genres != ''"):
-        for g in r["genres"].split(","):
-            g = g.strip()
-            if g:
-                counts[g] = counts.get(g, 0) + 1
+        for g in extract_clean_genres(r["genres"]):
+            counts[g] = counts.get(g, 0) + 1
     for r in munib_rows("SELECT genres FROM anime WHERE genres IS NOT NULL AND genres != '' AND anime_id >= 1000000"):
-        for g in r["genres"].split(","):
-            g = g.strip()
-            if g:
-                counts[g] = counts.get(g, 0) + 1
-    return {"genres": sorted(counts, key=lambda g: -counts[g])}
+        for g in extract_clean_genres(r["genres"]):
+            counts[g] = counts.get(g, 0) + 1
+    clean_sorted = sorted((g for g, c in counts.items() if c >= 2), key=lambda g: -counts[g])
+    _GENRES_CACHE = (now, clean_sorted)
+    return {"genres": clean_sorted}
 
 
 # ─── Direct Ad-Free HLS Stream Resolver & Proxy ─────────────────────
@@ -1058,8 +1313,6 @@ def _parse_master_variants(master_text: str, master_url: str):
     qualities.sort(key=lambda q: q["height"], reverse=True)
     return qualities
 
-
-import time as _time
 
 _RESOLVE_CACHE: dict = {}
 _HLS_PLAYLIST_CACHE: dict = {}
@@ -5662,8 +5915,11 @@ def _background_scraper_worker():
 
 
 def _keep_alive_worker():
-    """Ping external Render URL every 10 minutes so Render Free Tier never sleeps or resets /tmp."""
-    url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kuro-anime.onrender.com").rstrip("/") + "/api/stats"
+    """Ping external Render URL every 10 minutes when explicitly configured."""
+    raw_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if not raw_url or "kuro-anime.onrender.com" in raw_url:
+        return
+    url = raw_url + "/api/stats"
     while True:
         _time.sleep(600)
         try:
@@ -5732,6 +5988,413 @@ def trigger_scraper_now():
         "message": "Scraper pass triggered in background. Check /api/scraper/status for live progress.",
         "status": _SCRAPER_STATE,
     }
+
+
+# ─── Server-Side SEO Rendering (SSR Meta + JSON-LD + Crawler Content) ──────
+SITE_ORIGIN = "https://kuroanime-flax.vercel.app"
+_SSR_TEMPLATE_CACHE: Optional[tuple[float, str]] = None
+
+
+def _get_spa_template_html() -> str:
+    global _SSR_TEMPLATE_CACHE
+    root_dir = os.path.dirname(PARENT_DIR)
+    candidates = [
+        os.path.join(CURRENT_DIR, "_spa_template.html"),
+        os.path.join(PARENT_DIR, "anime_app", "web", "dist", "index.html"),
+        os.path.join(os.getcwd(), "anime_app", "web", "dist", "index.html"),
+        os.path.join(PARENT_DIR, "dist", "index.html"),
+        os.path.join(os.getcwd(), "dist", "index.html"),
+        os.path.join(PARENT_DIR, "anime_app", "web", "index.html"),
+        os.path.join(os.getcwd(), "anime_app", "web", "index.html"),
+    ]
+    for c in candidates:
+        if c and os.path.isfile(c):
+            mtime = os.path.getmtime(c)
+            if _SSR_TEMPLATE_CACHE and _SSR_TEMPLATE_CACHE[0] == mtime:
+                return _SSR_TEMPLATE_CACHE[1]
+            with open(c, "r", encoding="utf-8") as f:
+                html_txt = f.read()
+            _SSR_TEMPLATE_CACHE = (mtime, html_txt)
+            return html_txt
+    return "<!doctype html><html><head><title>KuroAnime</title></head><body><main id=\"main-content\"></main></body></html>"
+
+
+def _dual_anime_names(a: dict) -> tuple[str, str, str]:
+    """Return (english_title, romaji_title, combined_title) cleanly deduplicated."""
+    eng = (a.get("title_english") or a.get("title") or "").strip()
+    romaji = (a.get("title_romaji") or a.get("title") or "").strip()
+    if eng and romaji and eng.lower() != romaji.lower():
+        combined = f"{eng} ({romaji})"
+    else:
+        combined = eng or romaji or "Anime"
+    return eng or combined, romaji or combined, combined
+
+
+def _render_ssr_html(
+    *,
+    title: str,
+    description: str,
+    canonical_path: str,
+    og_image: str = f"{SITE_ORIGIN}/goku-banner.jpg",
+    og_type: str = "website",
+    schema_obj: Optional[dict] = None,
+    ssr_body_html: str = "",
+    status_code: int = 200,
+) -> HTMLResponse:
+    tpl = _get_spa_template_html()
+    canon_url = f"{SITE_ORIGIN}{canonical_path}"
+    e_title = _html.escape(title, quote=True)
+    e_desc = _html.escape(description, quote=True)
+    e_canon = _html.escape(canon_url, quote=True)
+    e_img = _html.escape(og_image or f"{SITE_ORIGIN}/goku-banner.jpg", quote=True)
+    e_type = _html.escape(og_type or "website", quote=True)
+
+    out = re.sub(r"<title>.*?</title>", f"<title>{e_title}</title>", tpl, count=1, flags=re.DOTALL | re.IGNORECASE)
+    out = re.sub(
+        r'<meta\s+name="description"[^>]*/?>',
+        f'<meta name="description" content="{e_desc}" />',
+        out,
+        count=1,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    out = re.sub(
+        r'<link\s+rel="canonical"[^>]*id="kuro-canonical"[^>]*/?>',
+        f'<link rel="canonical" href="{e_canon}" id="kuro-canonical" />',
+        out,
+        count=1,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    for tag_id, prop_attr, prop_val, content_val in [
+        ("kuro-og-type", "property", "og:type", e_type),
+        ("kuro-og-url", "property", "og:url", e_canon),
+        ("kuro-og-title", "property", "og:title", e_title),
+        ("kuro-og-desc", "property", "og:description", e_desc),
+        ("kuro-og-image", "property", "og:image", e_img),
+        ("kuro-tw-url", "name", "twitter:url", e_canon),
+        ("kuro-tw-title", "name", "twitter:title", e_title),
+        ("kuro-tw-desc", "name", "twitter:description", e_desc),
+        ("kuro-tw-image", "name", "twitter:image", e_img),
+    ]:
+        out = re.sub(
+            rf'<meta\s+[^>]*id="{tag_id}"[^>]*/?>',
+            f'<meta {prop_attr}="{prop_val}" content="{content_val}" id="{tag_id}" />',
+            out,
+            count=1,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+
+    if schema_obj is not None:
+        safe_json = json.dumps(schema_obj, ensure_ascii=False).replace("</", "<\\/")
+        out = re.sub(
+            r'<script\s+type="application/ld\+json"\s+id="kuro-schema-json">.*?</script>',
+            f'<script type="application/ld+json" id="kuro-schema-json">{safe_json}</script>',
+            out,
+            count=1,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+
+    if ssr_body_html:
+        ssr_block = (
+            '<div id="kuro-ssr-seo" class="sr-only" '
+            'style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">'
+            f"{ssr_body_html}"
+            "</div>\n</main>"
+        )
+        out = out.replace("</main>", ssr_block, 1)
+
+    cache_hdr = "no-store" if status_code >= 400 else "public, s-maxage=1800, stale-while-revalidate=86400"
+    return HTMLResponse(
+        content=out,
+        status_code=status_code,
+        media_type="text/html",
+        headers={"Cache-Control": cache_hdr},
+    )
+
+
+def _load_ssr_anime_context(anime_ident: str):
+    """Fetch anime + episodes + flags by numeric ID or URL slug for SSR."""
+    anime_id = _resolve_anime_id(anime_ident)
+    a = one("SELECT * FROM anime WHERE anime_id = ?", (anime_id,))
+    if not a:
+        m_list = munib_rows("SELECT * FROM anime WHERE anime_id = ?", (anime_id,))
+        if not m_list:
+            raise HTTPException(404, "Anime not found")
+        a = m_list[0]
+    a["poster"] = a.get("poster_large") or a.get("poster_url") or ""
+    a.update(audio_flags([anime_id]).get(anime_id, {"sub": True, "dub": False}))
+    slug = get_anime_slug(anime_id, a.get("title_english") or a.get("title") or "")
+    eps = rows(
+        "SELECT episode_id, episode_number, title, japanese_title FROM episodes WHERE anime_id = ? ORDER BY episode_number LIMIT 150",
+        (anime_id,),
+    )
+    if not eps:
+        eps = munib_rows(
+            "SELECT episode_id, episode_number, title FROM episodes WHERE anime_id = ? ORDER BY episode_number LIMIT 150",
+            (anime_id,),
+        )
+    return a, slug, eps
+
+
+def _build_anime_ssr_response(anime_ident: str, ep_num: Optional[int] = None, is_watch: bool = False) -> HTMLResponse:
+    try:
+        a, slug, eps = _load_ssr_anime_context(anime_ident)
+    except HTTPException:
+        return _render_ssr_html(
+            title="Anime Not Found | KuroAnime",
+            description="Browse and stream thousands of anime in Sub and Dub with instant player servers on KuroAnime.",
+            canonical_path="/browse",
+            status_code=404,
+        )
+
+    eng, romaji, combined = _dual_anime_names(a)
+    raw_syn = re.sub(r"<[^>]+>", " ", a.get("synopsis") or a.get("al_description") or "")
+    synopsis = re.sub(r"\s+", " ", raw_syn).strip()
+    genres_list = extract_clean_genres(a.get("genres") or a.get("al_genres") or "")
+    total_eps = int(a.get("episode_count") or a.get("al_episodes") or len(eps) or 0)
+    score_val = None
+    if a.get("anilist_score"):
+        score_val = round(float(a["anilist_score"]) / 10.0, 1)
+    elif a.get("mal_score"):
+        score_val = a["mal_score"]
+    year_val = a.get("season_year") or ""
+    poster_img = a.get("banner_image") or a.get("poster") or f"{SITE_ORIGIN}/goku-banner.jpg"
+    upload_date = (a.get("enriched_at") or a.get("scraped_at") or _datetime.now(_timezone.utc).strftime("%Y-%m-%d"))[:10]
+    audio_str = "English Sub & Dub" if a.get("dub") else "English Sub"
+
+    if is_watch or ep_num:
+        ep_val = max(1, int(ep_num or 1))
+        ep_row = next((e for e in eps if int(e.get("episode_number") or 0) == ep_val), None)
+        ep_title_part = f": {ep_row['title']}" if ep_row and ep_row.get("title") else ""
+        page_title = f"Watch {combined} Episode {ep_val} ({audio_str}) Free | KuroAnime"
+        canonical_path = f"/watch/{slug}?ep={ep_val}"
+        page_desc = (
+            f"Stream {combined} Episode {ep_val}{ep_title_part} online free in HD with {audio_str}. "
+            + (synopsis[:140] if synopsis else f"Watch full episodes of {eng} on KuroAnime.")
+        )
+    else:
+        page_title = f"Watch {combined} Sub & Dub Free | KuroAnime"
+        canonical_path = f"/anime/{slug}"
+        prefix = f"Watch {combined} ({total_eps} episodes) in {audio_str} free HD on KuroAnime. " if total_eps else f"Watch {combined} in {audio_str} free HD on KuroAnime. "
+        page_desc = (prefix + synopsis)[:160]
+
+    canon_full = f"{SITE_ORIGIN}{canonical_path}"
+    first_genre = genres_list[0] if genres_list else "Anime"
+    breadcrumb_schema = {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{SITE_ORIGIN}/"},
+            {"@type": "ListItem", "position": 2, "name": "Browse", "item": f"{SITE_ORIGIN}/browse"},
+            {"@type": "ListItem", "position": 3, "name": first_genre, "item": f"{SITE_ORIGIN}/genre/{slugify_title(first_genre)}"},
+            {"@type": "ListItem", "position": 4, "name": combined, "item": f"{SITE_ORIGIN}/anime/{slug}"},
+        ],
+    }
+
+    series_schema = {
+        "@type": "Movie" if str(a.get("type") or "").lower() == "movie" else "TVSeries",
+        "name": eng,
+        "alternateName": romaji if romaji != eng else None,
+        "url": f"{SITE_ORIGIN}/anime/{slug}",
+        "description": synopsis or page_desc,
+        "image": a.get("poster") or poster_img,
+        "genre": genres_list or ["Anime"],
+        "datePublished": str(year_val) if year_val else None,
+        "numberOfEpisodes": total_eps or None,
+        "inLanguage": ["Japanese", "English"] if a.get("dub") else ["Japanese"],
+    }
+    if score_val is not None:
+        series_schema["aggregateRating"] = {
+            "@type": "AggregateRating",
+            "ratingValue": str(score_val),
+            "bestRating": "10",
+            "worstRating": "1",
+        }
+    series_schema = {k: v for k, v in series_schema.items() if v is not None}
+
+    ep_for_video = int(ep_num or (eps[0]["episode_number"] if eps else 1) or 1)
+    video_schema = {
+        "@type": "VideoObject",
+        "name": f"{combined} - Episode {ep_for_video} ({audio_str})",
+        "description": page_desc,
+        "thumbnailUrl": [a.get("poster") or poster_img],
+        "uploadDate": upload_date,
+        "contentUrl": f"{SITE_ORIGIN}/watch/{slug}?ep={ep_for_video}",
+        "embedUrl": f"{SITE_ORIGIN}/watch/{slug}?ep={ep_for_video}",
+        "partOfSeries": {"@type": "TVSeries", "name": combined, "url": f"{SITE_ORIGIN}/anime/{slug}"},
+    }
+
+    faq_schema = {
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": f"Where can I watch {combined} in English Sub and Dub?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": f"Stream all released episodes of {combined} in HD with Japanese Subtitles and English Dub on KuroAnime.",
+                },
+            },
+            {
+                "@type": "Question",
+                "name": f"How many episodes does {combined} have?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": f"{combined} has {total_eps or len(eps) or 'multiple'} episodes available to stream free on KuroAnime.",
+                },
+            },
+        ],
+    }
+
+    genre_links_html = " ".join(
+        f'<a href="/genre/{slugify_title(g)}">{_html.escape(g)}</a>' for g in genres_list[:10]
+    )
+    ep_links_html = "".join(
+        f'<li><a href="/watch/{slug}?ep={int(e.get("episode_number") or 1)}">'
+        f'{_html.escape(eng)} Episode {int(e.get("episode_number") or 1)}'
+        + (f': {_html.escape(str(e["title"]))}' if e.get("title") else "")
+        + f' ({audio_str})</a></li>'
+        for e in eps[:120]
+    )
+    ssr_body = (
+        f'<article itemscope itemtype="https://schema.org/TVSeries">'
+        f'<h1>{_html.escape(combined)}</h1>'
+        f'<p>Watch {_html.escape(combined)} online in English Sub &amp; Dub free HD. '
+        f'Released: {_html.escape(str(year_val))} &middot; Status: {_html.escape(str(a.get("status") or ""))} &middot; Episodes: {total_eps}</p>'
+        f'<p>{_html.escape(synopsis)}</p>'
+        f'<nav aria-label="Genres">{genre_links_html}</nav>'
+        f'<section><h2>Episodes of {_html.escape(combined)}</h2><ul>{ep_links_html}</ul></section>'
+        f'</article>'
+    )
+
+    return _render_ssr_html(
+        title=page_title,
+        description=page_desc,
+        canonical_path=canonical_path,
+        og_image=poster_img,
+        og_type="video.episode" if (is_watch or ep_num) else "video.tv_show",
+        schema_obj={"@context": "https://schema.org", "@graph": [breadcrumb_schema, series_schema, video_schema, faq_schema]},
+        ssr_body_html=ssr_body,
+    )
+
+
+@app.get("/anime/{anime_ident}", response_class=HTMLResponse, include_in_schema=False)
+def ssr_anime_page(anime_ident: str, ep: Optional[int] = Query(None)):
+    return _build_anime_ssr_response(anime_ident, ep_num=ep, is_watch=False)
+
+
+@app.get("/watch/{anime_ident}", response_class=HTMLResponse, include_in_schema=False)
+def ssr_watch_page(anime_ident: str, ep: int = Query(1)):
+    return _build_anime_ssr_response(anime_ident, ep_num=ep, is_watch=True)
+
+
+def _build_collection_ssr(title: str, heading: str, description: str, canonical_path: str, items: list[dict]) -> HTMLResponse:
+    list_elems = []
+    links_html = []
+    for idx, it in enumerate(items[:24], start=1):
+        eng, romaji, combined = _dual_anime_names(it)
+        slug = it.get("slug") or get_anime_slug(it["anime_id"], eng)
+        url = f"{SITE_ORIGIN}/anime/{slug}"
+        list_elems.append({
+            "@type": "ListItem",
+            "position": idx,
+            "name": combined,
+            "url": url,
+        })
+        links_html.append(f'<li><a href="/anime/{_html.escape(slug)}">Watch {_html.escape(combined)} Sub &amp; Dub</a></li>')
+
+    schema_obj = {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        "name": heading,
+        "description": description,
+        "url": f"{SITE_ORIGIN}{canonical_path}",
+        "mainEntity": {
+            "@type": "ItemList",
+            "itemListElement": list_elems,
+        },
+    }
+    ssr_body = (
+        f'<section><h1>{_html.escape(heading)}</h1><p>{_html.escape(description)}</p>'
+        f'<ul>{"".join(links_html)}</ul></section>'
+    )
+    return _render_ssr_html(
+        title=title,
+        description=description,
+        canonical_path=canonical_path,
+        schema_obj=schema_obj,
+        ssr_body_html=ssr_body,
+    )
+
+
+@app.get("/genre/{genre_slug}", response_class=HTMLResponse, include_in_schema=False)
+def ssr_genre_page(genre_slug: str):
+    genre_name = _normalize_genre_query(genre_slug) or genre_slug.replace("-", " ").title()
+    data = browse(genre=genre_name, per_page=24, page=1, sort="popular")
+    heading = f"Best {genre_name} Anime to Watch Free in Sub & Dub"
+    desc = f"Discover and stream the best {genre_name} anime series and movies in English Sub and Dub free HD on KuroAnime."
+    return _build_collection_ssr(
+        title=f"{heading} | KuroAnime",
+        heading=heading,
+        description=desc,
+        canonical_path=f"/genre/{slugify_title(genre_name)}",
+        items=data.get("results") or [],
+    )
+
+
+@app.get("/dubbed", response_class=HTMLResponse, include_in_schema=False)
+def ssr_dubbed_page():
+    data = browse(audio="dub", per_page=24, page=1, sort="popular")
+    heading = "Watch English Dubbed Anime Online Free"
+    desc = "Stream thousands of top-rated English dubbed anime series and movies free in HD with zero popup ads on KuroAnime."
+    return _build_collection_ssr(
+        title=f"{heading} | KuroAnime",
+        heading=heading,
+        description=desc,
+        canonical_path="/dubbed",
+        items=data.get("results") or [],
+    )
+
+
+@app.get("/airing", response_class=HTMLResponse, include_in_schema=False)
+def ssr_airing_page():
+    year = _datetime.now(_timezone.utc).year
+    data = browse(status="airing", per_page=24, page=1, sort="popular")
+    heading = f"Currently Airing Seasonal Anime ({year})"
+    desc = f"Watch the latest ongoing and currently airing {year} anime episodes updated daily in Sub and Dub on KuroAnime."
+    return _build_collection_ssr(
+        title=f"{heading} | KuroAnime",
+        heading=heading,
+        description=desc,
+        canonical_path="/airing",
+        items=data.get("results") or [],
+    )
+
+
+@app.get("/advisor", response_class=HTMLResponse, include_in_schema=False)
+def ssr_advisor_page():
+    title = "Prince Vegeta AI Anime Advisor & Recommender | KuroAnime"
+    desc = "Ask Prince Vegeta AI for personalized anime recommendations, plot lookups, or upload any anime screenshot to identify the series and episode."
+    schema_obj = {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Prince Vegeta AI Anime Advisor",
+        "applicationCategory": "EntertainmentApplication",
+        "operatingSystem": "Web",
+        "url": f"{SITE_ORIGIN}/advisor",
+        "description": desc,
+    }
+    ssr_body = (
+        '<section><h1>Prince Vegeta AI Anime Advisor &amp; Recommender</h1>'
+        '<p>Get instant personalized anime recommendations by mood, genre, or favorite series, '
+        'or upload an anime character portrait or episode screenshot to identify the anime on KuroAnime.</p></section>'
+    )
+    return _render_ssr_html(
+        title=title,
+        description=desc,
+        canonical_path="/advisor",
+        schema_obj=schema_obj,
+        ssr_body_html=ssr_body,
+    )
 
 
 app.include_router(router, prefix="/api")

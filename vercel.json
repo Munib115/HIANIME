@@ -8,15 +8,15 @@
   },
   "functions": {
     "api/index.py": {
-      "includeFiles": "api/*.{db*,json.gz,npz}",
+      "includeFiles": "api/*.{db*,json.gz,npz,html}",
       "maxDuration": 60
     },
     "api/*.py": {
-      "includeFiles": "api/*.{db*,json.gz,npz}",
+      "includeFiles": "api/*.{db*,json.gz,npz,html}",
       "maxDuration": 60
     },
     "api/**/*.py": {
-      "includeFiles": "api/*.{db*,json.gz,npz}",
+      "includeFiles": "api/*.{db*,json.gz,npz,html}",
       "maxDuration": 60
     }
   },
@@ -39,6 +39,34 @@
     {
       "source": "/sitemap.xml",
       "destination": "/sitemap.xml"
+    },
+    {
+      "source": "/sitemap-:part.xml",
+      "destination": "/sitemap-:part.xml"
+    },
+    {
+      "source": "/anime/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/watch/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/genre/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/dubbed",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/airing",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/advisor",
+      "destination": "/api/index.py"
     },
     {
       "source": "/api/(.*)",

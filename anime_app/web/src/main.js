@@ -66,6 +66,7 @@ import {
 const state = {
   currentTab: 'home',
   activeAnimeId: null,
+  activeAnimeSlug: '',
   activeAnimeData: null,
   activeEpisodes: [],
   activeEpisodeIndex: 0,
@@ -76,11 +77,76 @@ const state = {
   browseGenre: '',
   browseType: '',
   browseStatus: '',
+  browseAudio: '',
   browseSort: 'popular',
+  browseMode: 'browse', // 'browse' | 'genre' | 'dubbed' | 'airing'
   searchDebounceTimer: null,
   watchlist: JSON.parse(localStorage.getItem('kuro_watchlist') || '[]'),
   history: JSON.parse(localStorage.getItem('kuro_history') || '[]'),
 };
+
+function slugifyTitle(text) {
+  if (!text) return '';
+  return String(text)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
+function getAnimeSlug(anime) {
+  if (!anime) return '';
+  if (anime.slug) return anime.slug;
+  const aid = anime.anime_id || anime.id || '';
+  const base = slugifyTitle(anime.title_english || anime.title || anime.title_romaji || '');
+  return base && aid ? `${base}-${aid}` : String(aid || base);
+}
+
+function getDualAnimeNames(anime) {
+  const eng = (anime?.title_english || anime?.title || '').trim();
+  const romaji = (anime?.title_romaji || anime?.title || '').trim();
+  const combined =
+    eng && romaji && eng.toLowerCase() !== romaji.toLowerCase()
+      ? `${eng} (${romaji})`
+      : (eng || romaji || 'Anime');
+  return { eng: eng || combined, romaji: romaji || combined, combined };
+}
+
+function formatGenreFromSlug(slug) {
+  if (!slug) return '';
+  const map = {
+    'sci-fi': 'Sci-Fi',
+    'slice-of-life': 'Slice of Life',
+    'martial-arts': 'Martial Arts',
+    'super-power': 'Super Power',
+    'adult-cast': 'Adult Cast',
+    'boys-love': 'Boys Love',
+    'girls-love': 'Girls Love',
+    'mahou-shoujo': 'Mahou Shoujo',
+    'magical-girl': 'Magical Girl',
+    'avant-garde': 'Avant Garde',
+    'award-winning': 'Award Winning',
+    'time-travel': 'Time Travel',
+    'team-sports': 'Team Sports',
+    'combat-sports': 'Combat Sports',
+    'reverse-harem': 'Reverse Harem',
+    'visual-arts': 'Visual Arts',
+    'performing-arts': 'Performing Arts',
+    'high-stakes-game': 'High Stakes Game',
+    'video-game': 'Video Game',
+    'school-life': 'School Life',
+    'post-apocalyptic': 'Post-Apocalyptic',
+  };
+  const key = String(slug).toLowerCase().trim();
+  if (map[key]) return map[key];
+  return key
+    .split('-')
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
 function resolveApiBase() {
   if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
@@ -237,25 +303,37 @@ function showView(viewId, { pushHistory = true } = {}) {
     try {
       let targetPath = '/';
       if (viewId === 'view-browse') {
-        targetPath = state.browseGenre ? `/browse?genre=${encodeURIComponent(state.browseGenre)}` : '/browse';
+        if (state.browseMode === 'dubbed' && state.browseAudio === 'dub' && !state.browseGenre && !state.browseStatus && !state.browseType) {
+          targetPath = '/dubbed';
+        } else if (state.browseMode === 'airing' && state.browseStatus === 'airing' && !state.browseGenre && !state.browseAudio && !state.browseType) {
+          targetPath = '/airing';
+        } else if (state.browseMode === 'genre' && state.browseGenre && !state.browseStatus && !state.browseAudio && !state.browseType) {
+          targetPath = `/genre/${slugifyTitle(state.browseGenre)}`;
+        } else {
+          targetPath = state.browseGenre ? `/browse?genre=${encodeURIComponent(state.browseGenre)}` : '/browse';
+        }
       } else if (viewId === 'view-search') {
         const searchInput = document.getElementById('search-input-field');
         const q = searchInput?.value?.trim();
         targetPath = q ? `/search?q=${encodeURIComponent(q)}` : '/search';
       } else if (viewId === 'view-watchlist') {
         targetPath = '/watchlist';
-      } else if (viewId === 'view-detail' && state.activeAnimeId) {
-        targetPath = `/anime/${state.activeAnimeId}`;
-      } else if (viewId === 'view-watch' && state.activeAnimeId) {
+      } else if (viewId === 'view-advisor') {
+        targetPath = '/advisor';
+      } else if (viewId === 'view-detail' && (state.activeAnimeSlug || state.activeAnimeId)) {
+        const slugOrId = state.activeAnimeSlug || getAnimeSlug(state.activeAnimeData) || state.activeAnimeId;
+        targetPath = `/anime/${slugOrId}`;
+      } else if (viewId === 'view-watch' && (state.activeAnimeSlug || state.activeAnimeId)) {
         const ep = state.activeEpisodes[state.activeEpisodeIndex];
         const epNum = ep ? (ep.episode_number || state.activeEpisodeIndex + 1) : 1;
-        targetPath = `/watch/${state.activeAnimeId}?ep=${epNum}`;
+        const slugOrId = state.activeAnimeSlug || getAnimeSlug(state.activeAnimeData) || state.activeAnimeId;
+        targetPath = `/watch/${slugOrId}?ep=${epNum}`;
       }
 
       const currentState = window.history.state;
-      if (!currentState || currentState.viewId !== viewId || currentState.animeId !== state.activeAnimeId || window.location.pathname !== targetPath) {
+      if (!currentState || currentState.viewId !== viewId || currentState.animeId !== state.activeAnimeId || window.location.pathname + window.location.search !== targetPath) {
         window.history.pushState(
-          { viewId, tab: state.currentTab, animeId: state.activeAnimeId },
+          { viewId, tab: state.currentTab, animeId: state.activeAnimeId, slug: state.activeAnimeSlug },
           '',
           targetPath
         );
@@ -264,48 +342,143 @@ function showView(viewId, { pushHistory = true } = {}) {
   }
 }
 
-window.addEventListener('popstate', (e) => {
+function parseUrlTargetAndDispatch(fullPath) {
+  const path = fullPath || window.location.pathname;
+  const animeMatch = path.match(/^\/anime\/([^/?#]+)/);
+  const watchMatch = path.match(/^\/watch\/([^/?#]+)/);
+  const genreMatch = path.match(/^\/genre\/([^/?#]+)/);
+
+  if (animeMatch) {
+    const ident = decodeURIComponent(animeMatch[1]);
+    const searchParams = new URLSearchParams(window.location.search);
+    const epParam = searchParams.get('ep') || searchParams.get('episode');
+    const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
+    const targetTime = tParam ? parseFloat(tParam) : 0;
+    if (epParam !== null) {
+      const epNum = parseInt(epParam, 10);
+      openAnimeDetail(ident, true, Math.max(0, epNum - 1), epNum, targetTime);
+    } else if (targetTime > 0) {
+      openAnimeDetail(ident, true, 0, null, targetTime);
+    } else {
+      openAnimeDetail(ident, false);
+    }
+  } else if (watchMatch) {
+    const ident = decodeURIComponent(watchMatch[1]);
+    const searchParams = new URLSearchParams(window.location.search);
+    const epParam = searchParams.get('ep') || searchParams.get('episode');
+    const epNum = parseInt(epParam || '1', 10);
+    const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
+    const targetTime = tParam ? parseFloat(tParam) : 0;
+    openAnimeDetail(ident, true, Math.max(0, epNum - 1), epNum, targetTime);
+  } else if (genreMatch) {
+    openGenreHub(formatGenreFromSlug(decodeURIComponent(genreMatch[1])));
+  } else if (path === '/dubbed') {
+    openDubbedHub();
+  } else if (path === '/airing') {
+    openAiringHub();
+  } else if (path === '/advisor') {
+    openAdvisorHub();
+  } else if (path === '/browse') {
+    state.browseMode = 'browse';
+    switchTab('browse');
+    const searchParams = new URLSearchParams(window.location.search);
+    const genre = searchParams.get('genre');
+    if (genre) {
+      state.browseGenre = genre;
+      const chip = document.querySelector(`.chip-btn[data-genre="${genre}"]`);
+      if (chip) chip.click();
+    }
+  } else if (path === '/search') {
+    switchTab('search');
+    const searchParams = new URLSearchParams(window.location.search);
+    const q = searchParams.get('q');
+    if (q) {
+      const input = document.getElementById('search-input-field');
+      if (input) input.value = q;
+      performSearch(q);
+    }
+  } else if (path === '/watchlist') {
+    switchTab('watchlist');
+  } else if (path === '/sync') {
+    switchTab('watchlist');
+    const searchParams = new URLSearchParams(window.location.search);
+    const code = searchParams.get('code') || searchParams.get('sync') || '';
+    setTimeout(() => syncModalInstance?.openModal('import', code), 250);
+  } else {
+    switchTab('home');
+  }
+}
+
+window.addEventListener('popstate', () => {
   isHandlingPopState = true;
   try {
-    const path = window.location.pathname;
-    const animeMatch = path.match(/^\/anime\/(\d+)/);
-    const watchMatch = path.match(/^\/watch\/(\d+)/);
-
-    if (animeMatch) {
-      const id = parseInt(animeMatch[1], 10);
-      const searchParams = new URLSearchParams(window.location.search);
-      const epParam = searchParams.get('ep') || searchParams.get('episode');
-      const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
-      const targetTime = tParam ? parseFloat(tParam) : 0;
-      if (epParam !== null) {
-        const epNum = parseInt(epParam, 10);
-        openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum, targetTime);
-      } else if (targetTime > 0) {
-        openAnimeDetail(id, true, 0, null, targetTime);
-      } else {
-        openAnimeDetail(id, false);
-      }
-    } else if (watchMatch) {
-      const id = parseInt(watchMatch[1], 10);
-      const searchParams = new URLSearchParams(window.location.search);
-      const epParam = searchParams.get('ep') || searchParams.get('episode');
-      const epNum = parseInt(epParam || '1', 10);
-      const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
-      const targetTime = tParam ? parseFloat(tParam) : 0;
-      openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum, targetTime);
-    } else if (path === '/browse') {
-      switchTab('browse');
-    } else if (path === '/search') {
-      switchTab('search');
-    } else if (path === '/watchlist') {
-      switchTab('watchlist');
-    } else {
-      switchTab('home');
-    }
+    parseUrlTargetAndDispatch(window.location.pathname);
   } finally {
     isHandlingPopState = false;
   }
 });
+
+function syncBrowseFilterInputs() {
+  const audioSel = document.getElementById('browse-audio-select');
+  const statusSel = document.getElementById('browse-status-select');
+  const typeSel = document.getElementById('browse-type-select');
+  const sortSel = document.getElementById('browse-sort-select');
+  if (audioSel) audioSel.value = state.browseAudio || '';
+  if (statusSel) statusSel.value = state.browseStatus || '';
+  if (typeSel) typeSel.value = state.browseType || '';
+  if (sortSel) sortSel.value = state.browseSort || 'popular';
+  syncCustomSelectDisplay('browse-audio-select');
+  syncCustomSelectDisplay('browse-status-select');
+  syncCustomSelectDisplay('browse-type-select');
+  syncCustomSelectDisplay('browse-sort-select');
+}
+
+function openGenreHub(genreName) {
+  state.browseMode = 'genre';
+  state.browseGenre = genreName || '';
+  state.browseStatus = '';
+  state.browseAudio = '';
+  state.browseType = '';
+  state.browseSort = 'popular';
+  state.browsePage = 1;
+  syncBrowseFilterInputs();
+  switchTab('browse');
+}
+
+function openDubbedHub() {
+  state.browseMode = 'dubbed';
+  state.browseGenre = '';
+  state.browseStatus = '';
+  state.browseAudio = 'dub';
+  state.browseType = '';
+  state.browseSort = 'popular';
+  state.browsePage = 1;
+  syncBrowseFilterInputs();
+  switchTab('browse');
+}
+
+function openAiringHub() {
+  state.browseMode = 'airing';
+  state.browseGenre = '';
+  state.browseStatus = 'airing';
+  state.browseAudio = '';
+  state.browseType = '';
+  state.browseSort = 'popular';
+  state.browsePage = 1;
+  syncBrowseFilterInputs();
+  switchTab('browse');
+}
+
+function openAdvisorHub() {
+  state.currentTab = 'advisor';
+  showView('view-advisor');
+  updatePageSeo({
+    title: 'Prince Vegeta AI Anime Advisor & Recommender | KuroAnime',
+    description: 'Ask Prince Vegeta AI for personalized anime recommendations, plot lookups, or upload any anime screenshot to identify the series and episode.',
+    path: '/advisor'
+  });
+  refreshIcons();
+}
 
 function switchTab(tabName) {
   state.currentTab = tabName || 'home';
@@ -319,11 +492,8 @@ function switchTab(tabName) {
   } else if (state.currentTab === 'browse') {
     showView('view-browse');
     loadBrowse();
-    updatePageSeo({
-      title: 'Explore Anime Catalog in Sub & Dub | KuroAnime',
-      description: 'Browse popular anime series and movies filtered by genres, format, and status in Japanese Sub and English Dub.',
-      path: '/browse'
-    });
+  } else if (state.currentTab === 'advisor') {
+    openAdvisorHub();
   } else if (state.currentTab === 'search') {
     showView('view-search');
     setTimeout(() => document.getElementById('search-input-field')?.focus(), 150);
@@ -820,8 +990,9 @@ function renderAnimeCard(anime) {
   const hasDub = anime.dub === true;
   const inWatchlist = isWatchlisted(anime.anime_id);
 
+  const cardSlug = getAnimeSlug(anime);
   return `
-    <a class="anime-card" href="/anime/${anime.anime_id}" data-id="${anime.anime_id}">
+    <a class="anime-card" href="/anime/${cardSlug}" data-id="${anime.anime_id}" data-slug="${cardSlug}">
       <div class="card-poster-wrapper">
         <img class="card-poster-img" src="${poster}" alt="${anime.title} anime poster" loading="lazy" decoding="async" onload="this.classList.add('is-loaded')" onerror="this.onerror=null;this.src='/favicon.svg';this.classList.add('is-fallback')" />
         <div class="card-top-badges">
@@ -1544,7 +1715,7 @@ function renderScheduleDayItems() {
           '</div>';
 
       return (
-        '<a href="/anime/' + item.anime_id + '" class="schedule-card ' + stateClass + '" data-id="' + item.anime_id + '" data-available="' + item.isVideoAvailable + '" data-ep="' + item.scheduledEp + '" data-time="' + item.timeLabelPKT + '">' +
+        '<a href="/anime/' + getAnimeSlug(item) + '" class="schedule-card ' + stateClass + '" data-id="' + item.anime_id + '" data-available="' + item.isVideoAvailable + '" data-ep="' + item.scheduledEp + '" data-time="' + item.timeLabelPKT + '">' +
           '<div class="schedule-time-col">' +
             '<span class="schedule-pkt-time">' + item.timeLabelPKT + '</span>' +
             '<span class="schedule-pkt-zone">PKT</span>' +
@@ -1700,9 +1871,7 @@ function initCustomSelects() {
 
 // ─── Browse View ────────────────────────────────────────────────────
 async function loadBrowse() {
-  syncCustomSelectDisplay('browse-status-select');
-  syncCustomSelectDisplay('browse-type-select');
-  syncCustomSelectDisplay('browse-sort-select');
+  syncBrowseFilterInputs();
 
   // Load genres once
   const genreContainer = document.getElementById('browse-genres-list');
@@ -1711,18 +1880,23 @@ async function loadBrowse() {
     if (data?.genres) {
       genreContainer.innerHTML = `
         <button class="chip-btn ${state.browseGenre === '' ? 'active' : ''}" data-genre="">All Genres</button>
-        ${data.genres.map(g => `<button class="chip-btn ${state.browseGenre === g ? 'active' : ''}" data-genre="${g}">${g}</button>`).join('')}
+        ${data.genres.map(g => `<button class="chip-btn ${state.browseGenre && state.browseGenre.toLowerCase() === g.toLowerCase() ? 'active' : ''}" data-genre="${g}">${g}</button>`).join('')}
       `;
       genreContainer.querySelectorAll('.chip-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           genreContainer.querySelectorAll('.chip-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           state.browseGenre = btn.dataset.genre;
+          state.browseMode = state.browseGenre ? 'genre' : 'browse';
           state.browsePage = 1;
           fetchBrowseResults();
         });
       });
     }
+  } else if (genreContainer) {
+    genreContainer.querySelectorAll('.chip-btn').forEach(b => {
+      b.classList.toggle('active', (b.dataset.genre || '').toLowerCase() === (state.browseGenre || '').toLowerCase());
+    });
   }
 
   fetchBrowseResults();
@@ -1743,29 +1917,73 @@ async function fetchBrowseResults() {
   if (state.browseGenre) params.append('genre', state.browseGenre);
   if (state.browseType) params.append('type', state.browseType);
   if (state.browseStatus) params.append('status', state.browseStatus);
+  if (state.browseAudio) params.append('audio', state.browseAudio);
 
-  // Dynamic Browse / Genre SEO updates
-  if (state.browseGenre) {
+  // Sync browse heading + Dynamic SEO title, description, canonical & hub pills
+  const pageTitleEl = document.getElementById('browse-page-title');
+  const pageSubEl = document.getElementById('browse-page-subtitle');
+  const curYear = new Date().getFullYear();
+
+  document.querySelectorAll('.browse-hub-links .hub-pill-link').forEach(a => {
+    const hub = a.dataset.hub;
+    const active =
+      (hub === 'dubbed' && state.browseAudio === 'dub' && !state.browseGenre && !state.browseStatus) ||
+      (hub === 'airing' && state.browseStatus === 'airing' && !state.browseGenre && !state.browseAudio) ||
+      (hub === 'genre' && state.browseGenre && (a.dataset.genre || '').toLowerCase() === state.browseGenre.toLowerCase()) ||
+      (hub === 'all' && !state.browseGenre && !state.browseStatus && !state.browseAudio);
+    a.classList.toggle('active', Boolean(active));
+  });
+
+  if (state.browseAudio === 'dub' && !state.browseGenre && !state.browseStatus && !state.browseType) {
+    if (pageTitleEl) pageTitleEl.textContent = 'Watch English Dubbed Anime Online Free';
+    if (pageSubEl) pageSubEl.textContent = 'Stream dual-audio and full English dubbed anime series and movies free in HD';
     updatePageSeo({
-      title: `${state.browseGenre} Anime — Stream in Sub & Dub | KuroAnime`,
-      description: `Watch the best ${state.browseGenre} anime series and movies in Japanese Sub and English Dub with fast servers on KuroAnime.`,
-      path: `/browse?genre=${encodeURIComponent(state.browseGenre)}`
+      title: 'Watch English Dubbed Anime Online Free | KuroAnime',
+      description: 'Stream thousands of top-rated English dubbed anime series and movies free in HD with zero popup ads on KuroAnime.',
+      path: '/dubbed'
     });
     try {
-      if (window.location.pathname === '/browse') {
-        window.history.replaceState(
-          { viewId: 'view-browse', tab: 'browse', genre: state.browseGenre },
-          '',
-          `/browse?genre=${encodeURIComponent(state.browseGenre)}`
-        );
+      window.history.replaceState({ viewId: 'view-browse', tab: 'browse', mode: 'dubbed' }, '', '/dubbed');
+    } catch (e) {}
+  } else if (state.browseStatus === 'airing' && !state.browseGenre && !state.browseAudio && !state.browseType) {
+    if (pageTitleEl) pageTitleEl.textContent = `Currently Airing Seasonal Anime (${curYear})`;
+    if (pageSubEl) pageSubEl.textContent = `Ongoing ${curYear} seasonal releases updated daily in Sub & Dub`;
+    updatePageSeo({
+      title: `Currently Airing Seasonal Anime (${curYear}) | KuroAnime`,
+      description: `Watch the latest currently airing ${curYear} anime episodes updated daily in Japanese Sub and English Dub on KuroAnime.`,
+      path: '/airing'
+    });
+    try {
+      window.history.replaceState({ viewId: 'view-browse', tab: 'browse', mode: 'airing' }, '', '/airing');
+    } catch (e) {}
+  } else if (state.browseGenre) {
+    const genreLabel = formatGenreFromSlug(state.browseGenre) || state.browseGenre;
+    if (pageTitleEl) pageTitleEl.textContent = `Best ${genreLabel} Anime`;
+    if (pageSubEl) pageSubEl.textContent = `Watch top ${genreLabel} anime series and movies free in English Sub & Dub`;
+    const gPath = `/genre/${slugifyTitle(genreLabel)}`;
+    updatePageSeo({
+      title: `Best ${genreLabel} Anime to Watch Free in Sub & Dub | KuroAnime`,
+      description: `Watch the best ${genreLabel} anime series and movies in Japanese Sub and English Dub with fast servers on KuroAnime.`,
+      path: gPath
+    });
+    try {
+      if (!state.browseStatus && !state.browseAudio && !state.browseType) {
+        window.history.replaceState({ viewId: 'view-browse', tab: 'browse', genre: genreLabel }, '', gPath);
       }
     } catch (e) {}
   } else {
+    if (pageTitleEl) pageTitleEl.textContent = 'Explore Catalog';
+    if (pageSubEl) pageSubEl.textContent = 'Filter anime by genres, format, audio, and popularity';
     updatePageSeo({
       title: 'Explore Anime Catalog in Sub & Dub | KuroAnime',
       description: 'Browse popular anime series and movies filtered by genres, format, and status in Japanese Sub and English Dub.',
       path: '/browse'
     });
+    try {
+      if (window.location.pathname !== '/browse') {
+        window.history.replaceState({ viewId: 'view-browse', tab: 'browse' }, '', '/browse');
+      }
+    } catch (e) {}
   }
 
   const res = await fetchApi(`/browse?${params.toString()}`);
@@ -1933,8 +2151,8 @@ function computeShareUrl(includeTimestamp = true) {
   const { anime, episode, currentTime } = activeShareContext;
   const targetAnime = anime || state.activeAnimeData;
   const baseUrl = getShareBaseUrl();
-  const aid = targetAnime?.anime_id || targetAnime?.id || state.activeAnimeId || '';
-  let url = `${baseUrl}/anime/${aid}`;
+  const slugOrId = getAnimeSlug(targetAnime) || state.activeAnimeSlug || state.activeAnimeId || '';
+  let url = `${baseUrl}/anime/${slugOrId}`;
 
   const epNum = episode?.episode_number !== undefined
     ? episode.episode_number
@@ -2504,12 +2722,19 @@ async function startAnimeTrailer(anime, triggerBtn) {
 }
 
 // ─── Anime Detail View ──────────────────────────────────────────────
-async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0, targetEpisodeNumber = null, targetTime = 0) {
+async function openAnimeDetail(animeIdOrSlug, autoPlayFirst = false, startEpIndex = 0, targetEpisodeNumber = null, targetTime = 0) {
   stopAnimeTrailer();
-  state.activeAnimeId = animeId;
+  const identKey = String(animeIdOrSlug || '').trim();
+  const initialSlugCandidate = /^\d+$/.test(identKey) ? '' : identKey;
+  if (/^\d+$/.test(identKey)) {
+    state.activeAnimeId = Number(identKey);
+  }
+  if (initialSlugCandidate) {
+    state.activeAnimeSlug = initialSlugCandidate;
+  }
   state.isFetchingDetail = true;
 
-  if (autoPlayFirst && activePlayerInstance && Number(activePlayerInstance.animeId) !== Number(animeId)) {
+  if (autoPlayFirst && activePlayerInstance && String(activePlayerInstance.animeId) !== identKey) {
     try {
       activePlayerInstance.setLoader(true, 'Summoning stream archives...');
       if (activePlayerInstance.video) activePlayerInstance.video.pause();
@@ -2519,7 +2744,7 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
   const container = document.getElementById('detail-container');
   if (!autoPlayFirst) {
     state.playerEnteredFrom = 'detail';
-    if (container && (!container.querySelector('.detail-body') || Number(container.dataset.renderedAnimeId) !== Number(animeId))) {
+    if (container && (!container.querySelector('.detail-body') || (container.dataset.renderedAnimeId !== identKey && container.dataset.renderedSlug !== identKey))) {
       container.innerHTML = renderDetailSkeleton();
       refreshIcons();
       document.getElementById('detail-loading-back-btn')?.addEventListener('click', () => {
@@ -2534,8 +2759,8 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
   let epsData = null;
   try {
     [anime, epsData] = await Promise.all([
-      fetchApi(`/anime/${animeId}`),
-      fetchApi(`/anime/${animeId}/episodes`)
+      fetchApi(`/anime/${encodeURIComponent(identKey)}`),
+      fetchApi(`/anime/${encodeURIComponent(identKey)}/episodes`)
     ]);
   } finally {
     state.isFetchingDetail = false;
@@ -2547,24 +2772,44 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
     return;
   }
 
+  const animeId = Number(anime.anime_id);
+  const animeSlug = anime.slug || getAnimeSlug(anime);
+  state.activeAnimeId = animeId;
+  state.activeAnimeSlug = animeSlug;
+
   if (container) {
     container.dataset.renderedAnimeId = String(animeId);
+    container.dataset.renderedSlug = animeSlug;
+  }
+
+  if (!autoPlayFirst) {
+    try {
+      const targetUrl = `/anime/${animeSlug}`;
+      if (window.location.pathname !== targetUrl) {
+        window.history.replaceState({ viewId: 'view-detail', tab: state.currentTab, animeId, slug: animeSlug }, '', targetUrl);
+      }
+    } catch (e) {}
   }
 
   state.activeAnimeData = anime;
   state.activeEpisodes = epsData?.episodes || [];
 
-  // Update dynamic SEO title, description, canonical link, Open Graph and Schema.org TVSeries/Movie
-  const animeTitle = anime.title_english || anime.title || 'Anime';
+  // Update dynamic SEO title, description, canonical link, Open Graph and Schema.org (English + Romaji)
+  const { eng: engTitle, romaji: romajiTitle, combined: combinedTitle } = getDualAnimeNames(anime);
+  const animeTitle = engTitle;
+  const hasDistinctRomaji = romajiTitle && engTitle && romajiTitle.toLowerCase() !== engTitle.toLowerCase();
   const scoreVal = anime.anilist_score ? (anime.anilist_score / 10).toFixed(1) : (anime.mal_score || 'N/A');
   const synopsisClean = (anime.synopsis || anime.al_description || '').replace(/<[^>]*>?/gm, '').trim();
-  const metaDesc = synopsisClean.length > 155
-    ? synopsisClean.slice(0, 152) + '...'
-    : (synopsisClean || `Watch ${animeTitle} in Sub or Dub on KuroAnime. Episodes, ratings, and My List.`);
-
-  // Phase 2: Rich Multi-Entity Schema.org Graph (BreadcrumbList + TVSeries/Movie + FAQPage)
-  const primaryGenre = (anime.genres || '').split(/\s+/).filter(Boolean)[0] || 'Anime';
   const totalEpisodeCount = epsData?.episodes?.length || anime.episode_count || anime.al_episodes || 0;
+  const audioAvailText = anime.dub === true ? 'Sub & Dub' : 'Sub';
+  const metaDescPrefix = `Watch ${combinedTitle} (${totalEpisodeCount || 'All'} episodes) in ${audioAvailText} free HD on KuroAnime. `;
+  const metaDescRaw = metaDescPrefix + synopsisClean;
+  const metaDesc = metaDescRaw.length > 160
+    ? metaDescRaw.slice(0, 157) + '...'
+    : (metaDescRaw || `Watch ${combinedTitle} in English Sub & Dub free on KuroAnime.`);
+
+  // Rich Multi-Entity Schema.org Graph (BreadcrumbList + TVSeries/Movie + VideoObject + FAQPage)
+  const primaryGenre = (anime.genres || '').split(/[,\s]+/).filter(Boolean)[0] || 'Anime';
 
   const breadcrumbListSchema = {
     "@type": "BreadcrumbList",
@@ -2585,26 +2830,28 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
         "@type": "ListItem",
         "position": 3,
         "name": primaryGenre,
-        "item": `https://kuroanime-flax.vercel.app/browse?genre=${encodeURIComponent(primaryGenre)}`
+        "item": `https://kuroanime-flax.vercel.app/genre/${slugifyTitle(primaryGenre)}`
       },
       {
         "@type": "ListItem",
         "position": 4,
-        "name": animeTitle,
-        "item": `https://kuroanime-flax.vercel.app/anime/${anime.anime_id}`
+        "name": combinedTitle,
+        "item": `https://kuroanime-flax.vercel.app/anime/${animeSlug}`
       }
     ]
   };
 
   const entitySchema = {
     "@type": anime.type === 'Movie' ? 'Movie' : 'TVSeries',
-    "name": animeTitle,
-    "alternateName": anime.title_english && anime.title_english !== anime.title ? anime.title_english : undefined,
+    "name": engTitle,
+    "alternateName": hasDistinctRomaji ? romajiTitle : undefined,
+    "url": `https://kuroanime-flax.vercel.app/anime/${animeSlug}`,
     "description": synopsisClean,
     "image": anime.poster || anime.banner_image,
+    "datePublished": anime.season_year ? String(anime.season_year) : undefined,
     "numberOfEpisodes": totalEpisodeCount || undefined,
-    "inLanguage": ["Japanese", "English"],
-    "genre": (anime.genres || '').split(/\s+/).filter(Boolean),
+    "inLanguage": anime.dub === true ? ["Japanese", "English"] : ["Japanese"],
+    "genre": (anime.genres || '').split(/[,\s]+/).filter(Boolean).slice(0, 8),
     "aggregateRating": scoreVal !== 'N/A' ? {
       "@type": "AggregateRating",
       "ratingValue": String(scoreVal),
@@ -2618,36 +2865,36 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
     "mainEntity": [
       {
         "@type": "Question",
-        "name": `Where can I watch ${animeTitle} in English Sub and Dub?`,
+        "name": `Where can I watch ${combinedTitle} in English Sub and Dub?`,
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": `You can stream all released episodes of ${animeTitle} in HD with Japanese audio + English subtitles and English dub on KuroAnime with fast, verified servers.`
+          "text": `You can stream all released episodes of ${combinedTitle} in HD with Japanese audio + English subtitles and English dub on KuroAnime with fast, verified servers.`
         }
       },
       {
         "@type": "Question",
-        "name": `How many episodes are there in ${animeTitle}?`,
+        "name": `How many episodes are there in ${combinedTitle}?`,
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": `${animeTitle} has ${totalEpisodeCount || 'multiple'} episodes available for instant streaming on KuroAnime.`
+          "text": `${combinedTitle} has ${totalEpisodeCount || 'multiple'} episodes available for instant streaming on KuroAnime.`
         }
       },
       {
         "@type": "Question",
-        "name": `Is ${animeTitle} available in English Dub?`,
+        "name": `Is ${combinedTitle} available in English Dub?`,
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": `${anime.dub === true ? `Yes, ${animeTitle} is available with English Dub on KuroAnime.` : `${animeTitle} is available with English Subtitles and multi-server playback.`}`
+          "text": `${anime.dub === true ? `Yes, ${combinedTitle} is available with English Dub on KuroAnime.` : `${combinedTitle} is available with English Subtitles and multi-server playback.`}`
         }
       }
     ]
   };
 
   updatePageSeo({
-    title: `Watch ${animeTitle} Sub & Dub | KuroAnime`,
+    title: `Watch ${combinedTitle} Sub & Dub Free | KuroAnime`,
     description: metaDesc,
     image: anime.banner_image || anime.poster_large || anime.poster || 'https://kuroanime-flax.vercel.app/goku-banner.jpg',
-    path: `/anime/${anime.anime_id}`,
+    path: `/anime/${animeSlug}`,
     type: 'video.tv_show',
     schema: {
       "@context": "https://schema.org",
@@ -2724,7 +2971,7 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
           <a href="/browse" class="kuro-bc-link" id="bc-nav-browse">Browse</a>
           ${anime.genres ? `
             <span class="kuro-bc-sep">&rsaquo;</span>
-            <a href="/browse?genre=${encodeURIComponent(primaryGenre)}" class="kuro-bc-link kuro-bc-genre" data-genre="${escapeHtmlText(primaryGenre)}">${escapeHtmlText(primaryGenre)}</a>
+            <a href="/genre/${slugifyTitle(primaryGenre)}" class="kuro-bc-link kuro-bc-genre" data-genre="${escapeHtmlText(primaryGenre)}">${escapeHtmlText(primaryGenre)}</a>
           ` : ''}
           <span class="kuro-bc-sep">&rsaquo;</span>
           <span class="kuro-bc-current" title="${escapeHtmlText(anime.title)}">${escapeHtmlText(anime.title)}</span>
@@ -2733,9 +2980,9 @@ async function openAnimeDetail(animeId, autoPlayFirst = false, startEpIndex = 0,
         <div class="detail-header-card">
           <img class="detail-poster" src="${anime.poster}" alt="${anime.title} poster" onerror="this.onerror=null;this.src='/favicon.svg';this.classList.add('is-fallback')" />
           <div class="detail-info">
-            <h1 class="detail-title">${anime.title}</h1>
-            <p class="detail-seo-subheading">Watch ${escapeHtmlText(anime.title)} Online in English Sub &amp; Dub Free HD</p>
-            ${anime.title_english && anime.title_english !== anime.title ? `<div class="detail-japanese-title">${anime.title_english}</div>` : ''}
+            <h1 class="detail-title">${escapeHtmlText(engTitle)}${hasDistinctRomaji ? ` <span class="detail-title-romaji">(${escapeHtmlText(romajiTitle)})</span>` : ''}</h1>
+            <p class="detail-seo-subheading">Watch ${escapeHtmlText(combinedTitle)} Episode 1&ndash;${totalEps || '?'} Online in ${anime.dub === true ? 'English Sub &amp; Dub' : 'English Sub'} Free HD</p>
+            ${anime.japanese_name && anime.japanese_name !== engTitle && anime.japanese_name !== romajiTitle ? `<div class="detail-japanese-title">${escapeHtmlText(anime.japanese_name)}</div>` : ''}
             <div class="detail-meta-row">
               <span class="badge-gold"><i data-lucide="star"></i> ${score}</span>
               ${anime.sub !== false ? '<span class="pill-sub">SUB</span>' : ''}
@@ -3004,6 +3251,41 @@ function renderEpisodeChunk(start, end) {
   });
 }
 
+function updateWatchSeoMetadata(anime, ep, epDisplayNum) {
+  const { combined } = getDualAnimeNames(anime);
+  const slug = anime.slug || getAnimeSlug(anime);
+  const audioText = anime.dub === true ? 'English Sub & Dub' : 'English Sub';
+  const epTitlePart = ep?.title ? `: ${ep.title}` : '';
+  const watchPath = `/watch/${slug}?ep=${epDisplayNum}`;
+  const title = `Watch ${combined} Episode ${epDisplayNum} (${audioText}) | KuroAnime`;
+  const desc = `Stream ${combined} Episode ${epDisplayNum}${epTitlePart} online free in 1080p HD with ${audioText} on KuroAnime.`;
+
+  const videoObjectSchema = {
+    "@context": "https://schema.org",
+    "@type": "VideoObject",
+    "name": `${combined} - Episode ${epDisplayNum}${epTitlePart}`,
+    "description": desc,
+    "thumbnailUrl": anime.poster || anime.banner_image || 'https://kuroanime-flax.vercel.app/goku-banner.jpg',
+    "uploadDate": (anime.enriched_at || anime.scraped_at || new Date().toISOString()).slice(0, 10),
+    "contentUrl": `https://kuroanime-flax.vercel.app${watchPath}`,
+    "embedUrl": `https://kuroanime-flax.vercel.app${watchPath}`,
+    "partOfSeries": {
+      "@type": "TVSeries",
+      "name": combined,
+      "url": `https://kuroanime-flax.vercel.app/anime/${slug}`
+    }
+  };
+
+  updatePageSeo({
+    title,
+    description: desc,
+    image: anime.banner_image || anime.poster_large || anime.poster || 'https://kuroanime-flax.vercel.app/goku-banner.jpg',
+    path: watchPath,
+    type: 'video.episode',
+    schema: videoObjectSchema
+  });
+}
+
 // ─── Watch Player View ──────────────────────────────────────────────
 async function openWatchPlayer(episodeIndex, targetTime = 0) {
   stopAnimeTrailer();
@@ -3013,6 +3295,7 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
   const ep = state.activeEpisodes[episodeIndex];
   if (!anime || !ep) return;
 
+  state.activeAnimeSlug = anime.slug || getAnimeSlug(anime);
   showView('view-watch');
   saveHistory(anime, ep);
 
@@ -3032,10 +3315,10 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
     // 0. Update Anime Title in header & document title
     const animeTitleEl = container.querySelector('.player-anime-title');
     if (animeTitleEl) {
-      animeTitleEl.textContent = anime.title || anime.title_english || '';
+      animeTitleEl.textContent = anime.title_english || anime.title || '';
     }
     const epDisplayNum = ep.episode_number || (episodeIndex + 1);
-    document.title = `Watch ${anime.title_english || anime.title} Episode ${epDisplayNum} | KuroAnime`;
+    updateWatchSeoMetadata(anime, ep, epDisplayNum);
 
     // 1. Update Episode Title in header
     const epTitleEl = container.querySelector('.player-ep-title');
@@ -3115,7 +3398,7 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
   }
   container.dataset.renderedAnimeId = String(anime.anime_id);
   const epDisplayNum = ep.episode_number || (episodeIndex + 1);
-  document.title = `Watch ${anime.title_english || anime.title} Episode ${epDisplayNum} | KuroAnime`;
+  updateWatchSeoMetadata(anime, ep, epDisplayNum);
 
   container.innerHTML = `
     <div class="player-header">
@@ -4769,14 +5052,23 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Browse Dropdowns
+  document.getElementById('browse-audio-select')?.addEventListener('change', e => {
+    state.browseAudio = e.target.value;
+    state.browseMode = state.browseAudio === 'dub' ? 'dubbed' : 'browse';
+    state.browsePage = 1;
+    fetchBrowseResults();
+  });
+
   document.getElementById('browse-status-select')?.addEventListener('change', e => {
     state.browseStatus = e.target.value;
+    state.browseMode = state.browseStatus === 'airing' ? 'airing' : 'browse';
     state.browsePage = 1;
     fetchBrowseResults();
   });
 
   document.getElementById('browse-type-select')?.addEventListener('change', e => {
     state.browseType = e.target.value;
+    state.browseMode = 'browse';
     state.browsePage = 1;
     fetchBrowseResults();
   });
@@ -4785,6 +5077,26 @@ document.addEventListener('DOMContentLoaded', () => {
     state.browseSort = e.target.value;
     state.browsePage = 1;
     fetchBrowseResults();
+  });
+
+  // Hub & Footer SEO SPA Link Interception
+  document.querySelectorAll('.browse-hub-links a, .kuro-site-footer a.kuro-footer-link').forEach(link => {
+    const href = link.getAttribute('href') || '';
+    if (!href || href.startsWith('http') || href.endsWith('.xml')) return;
+    link.addEventListener('click', (e) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      try {
+        window.history.pushState({}, '', href);
+      } catch (err) {}
+      isHandlingPopState = true;
+      try {
+        parseUrlTargetAndDispatch(href);
+      } finally {
+        isHandlingPopState = false;
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   });
 
   document.getElementById('browse-prev-page')?.addEventListener('click', () => {
@@ -5785,6 +6097,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Dedicated /advisor Page Controls
+  document.getElementById('btn-advisor-launch-chat')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleVegetaChat(true);
+  });
+  document.getElementById('btn-advisor-upload-img')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleVegetaChat(true);
+    setTimeout(() => vegetaImageInput?.click(), 180);
+  });
+  document.querySelectorAll('.advisor-prompt-card').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const prompt = btn.getAttribute('data-prompt') || '';
+      toggleVegetaChat(true);
+      if (prompt) setTimeout(() => sendVegetaMessage(prompt), 120);
+    });
+  });
+
 
 // ─── Visual Settings (Ambient Glow / Motion) ─────────────────────────
 function applyVisualSettings() {
@@ -6538,65 +6869,25 @@ let syncModalInstance = null;
 // ─── Initial URL Route Dispatcher ────────────────────────────────────
 function handleInitialRoute() {
   const path = window.location.pathname;
-  const animeMatch = path.match(/^\/anime\/(\d+)/);
-  const watchMatch = path.match(/^\/watch\/(\d+)/);
-
-  if (animeMatch) {
-    const id = parseInt(animeMatch[1], 10);
-    const searchParams = new URLSearchParams(window.location.search);
-    const epParam = searchParams.get('ep') || searchParams.get('episode');
-    const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
-    const targetTime = tParam ? parseFloat(tParam) : 0;
-    if (epParam !== null) {
-      const epNum = parseInt(epParam, 10);
-      openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum, targetTime);
-    } else if (targetTime > 0) {
-      openAnimeDetail(id, true, 0, null, targetTime);
-    } else {
-      openAnimeDetail(id, false);
+  if (
+    /^\/anime\/[^/?#]+/.test(path) ||
+    /^\/watch\/[^/?#]+/.test(path) ||
+    /^\/genre\/[^/?#]+/.test(path) ||
+    ['/dubbed', '/airing', '/advisor', '/browse', '/search', '/watchlist', '/sync'].includes(path)
+  ) {
+    isHandlingPopState = true;
+    try {
+      parseUrlTargetAndDispatch(path);
+    } finally {
+      isHandlingPopState = false;
     }
-  } else if (watchMatch) {
-    const id = parseInt(watchMatch[1], 10);
-    const searchParams = new URLSearchParams(window.location.search);
-    const epParam = searchParams.get('ep') || searchParams.get('episode');
-    const epNum = parseInt(epParam || '1', 10);
-    const tParam = searchParams.get('t') || searchParams.get('time') || (window.location.hash.match(/t=(\d+)/)?.[1]);
-    const targetTime = tParam ? parseFloat(tParam) : 0;
-    openAnimeDetail(id, true, Math.max(0, epNum - 1), epNum, targetTime);
-  } else if (path === '/browse') {
-    switchTab('browse');
-    const searchParams = new URLSearchParams(window.location.search);
-    const genre = searchParams.get('genre');
-    if (genre) {
-      state.browseGenre = genre;
-      const chip = document.querySelector(`.chip-btn[data-genre="${genre}"]`);
-      if (chip) chip.click();
-    }
-  } else if (path === '/search') {
-    switchTab('search');
-    const searchParams = new URLSearchParams(window.location.search);
-    const q = searchParams.get('q');
-    if (q) {
-      const input = document.getElementById('search-input-field');
-      if (input) input.value = q;
-      performSearch(q);
-    }
-  } else if (path === '/watchlist') {
-    switchTab('watchlist');
-  } else if (path === '/sync') {
-    switchTab('watchlist');
-    const searchParams = new URLSearchParams(window.location.search);
-    const code = searchParams.get('code') || searchParams.get('sync') || '';
-    setTimeout(() => syncModalInstance?.openModal('import', code), 250);
   } else {
     initHome();
   }
 }
 
-
-
-
   // Init App
+  document.getElementById('kuro-ssr-seo')?.remove();
   initCustomSelects();
   applyVisualSettings();
   initUserMenuAndSettings();

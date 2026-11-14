@@ -500,8 +500,16 @@
       <!-- 2. Browse View -->
       <section class="view-screen" id="view-browse">
         <div class="browse-header">
-          <h1 class="page-title">Explore Catalog</h1>
-          <p class="page-subtitle">Filter anime by genres, format, and popularity</p>
+          <h1 class="page-title" id="browse-page-title">Explore Catalog</h1>
+          <p class="page-subtitle" id="browse-page-subtitle">Filter anime by genres, format, audio, and popularity</p>
+          <nav class="browse-hub-links" aria-label="Curated Anime Hubs">
+            <a href="/browse" class="hub-pill-link" data-hub="all">All Anime</a>
+            <a href="/dubbed" class="hub-pill-link" data-hub="dubbed">English Dubbed</a>
+            <a href="/airing" class="hub-pill-link" data-hub="airing">Currently Airing</a>
+            <a href="/genre/isekai" class="hub-pill-link" data-hub="genre" data-genre="Isekai">Isekai</a>
+            <a href="/genre/action" class="hub-pill-link" data-hub="genre" data-genre="Action">Action</a>
+            <a href="/advisor" class="hub-pill-link" data-hub="advisor">AI Recommender</a>
+          </nav>
         </div>
 
         <!-- Filter Controls -->
@@ -511,6 +519,25 @@
           </div>
 
           <div class="filter-controls-row">
+            <div class="custom-select-wrapper" id="wrap-audio-select">
+              <button type="button" class="custom-select-trigger" id="trigger-audio-select" aria-haspopup="listbox"
+                aria-expanded="false">
+                <span class="custom-select-label">All Audio</span>
+                <svg class="custom-select-arrow" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor"
+                  stroke-width="2.5" fill="none">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <div class="custom-select-dropdown" role="listbox">
+                <div class="custom-select-option active" data-value="">All Audio</div>
+                <div class="custom-select-option" data-value="dub">English Dub</div>
+              </div>
+              <select class="filter-select sr-only" id="browse-audio-select" tabindex="-1">
+                <option value="">All Audio</option>
+                <option value="dub">English Dub</option>
+              </select>
+            </div>
+
             <div class="custom-select-wrapper" id="wrap-status-select">
               <button type="button" class="custom-select-trigger" id="trigger-status-select" aria-haspopup="listbox"
                 aria-expanded="false">
@@ -676,7 +703,94 @@
       <section class="view-screen view-screen-player" id="view-watch">
         <div class="player-page-container" id="player-page-container"></div>
       </section>
+
+      <!-- 7. Dedicated Prince Vegeta AI Advisor Hub View (/advisor) -->
+      <section class="view-screen" id="view-advisor">
+        <div class="advisor-hub-shell">
+          <div class="advisor-hero-card">
+            <div class="advisor-avatar-stage">
+              <img src="/vegeta.gif?v=2" alt="Prince Vegeta AI Anime Advisor" class="advisor-hero-gif" />
+            </div>
+            <div class="advisor-hero-copy">
+              <span class="advisor-eyebrow">Official KuroAnime AI Bot &amp; Scene Scouter</span>
+              <h1 class="page-title advisor-title">Prince Vegeta — AI Anime Advisor</h1>
+              <p class="advisor-desc">
+                Tell Vegeta what mood, genre, or plot you are looking for — or upload any anime screenshot or character image to identify the exact series and episode instantly.
+              </p>
+              <div class="advisor-cta-row">
+                <button type="button" class="btn-primary" id="btn-advisor-launch-chat">
+                  <i data-lucide="sparkles"></i>
+                  <span>Chat with Prince Vegeta</span>
+                </button>
+                <button type="button" class="btn-secondary" id="btn-advisor-upload-img">
+                  <i data-lucide="search"></i>
+                  <span>Identify Screenshot</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="advisor-prompts-section">
+            <h2 class="advisor-subhead">Popular AI Anime Recommender Prompts</h2>
+            <div class="advisor-prompt-grid">
+              <button type="button" class="advisor-prompt-card" data-prompt="Recommend top 5 peak action & fantasy anime in our catalog">
+                <strong>Peak Action &amp; Fantasy</strong>
+                <span>Top-rated shonen fights &amp; epic worlds</span>
+              </button>
+              <button type="button" class="advisor-prompt-card" data-prompt="Best English dubbed anime to binge watch right now">
+                <strong>Best English Dubs</strong>
+                <span>Top dual-audio series ready to stream</span>
+              </button>
+              <button type="button" class="advisor-prompt-card" data-prompt="Recommend currently airing seasonal 2026 anime worth watching">
+                <strong>Seasonal 2026 Hits</strong>
+                <span>Ongoing anime updated weekly</span>
+              </button>
+              <button type="button" class="advisor-prompt-card" data-prompt="Recommend dark psychological thriller anime like Death Note and Monster">
+                <strong>Mind Games &amp; Thrillers</strong>
+                <span>Psychological suspense picks</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
+
+    <!-- Site SEO & Hub Footer -->
+    <footer class="kuro-site-footer" id="kuro-site-footer">
+      <div class="kuro-footer-inner">
+        <div class="kuro-footer-brand">
+          <div class="brand-text">
+            <span class="brand-title">Kuro<span class="brand-accent">Anime</span></span>
+          </div>
+          <p class="kuro-footer-tagline">
+            Ad-free anime streaming in English Sub &amp; Dub with instant HD playback and Prince Vegeta AI discovery.
+          </p>
+        </div>
+        <nav class="kuro-footer-nav" aria-label="Directory">
+          <div class="kuro-footer-col">
+            <span class="kuro-footer-col-title">Discover</span>
+            <a href="/browse" class="kuro-footer-link">Browse All Anime</a>
+            <a href="/dubbed" class="kuro-footer-link">English Dubbed Anime</a>
+            <a href="/airing" class="kuro-footer-link">Currently Airing (2026)</a>
+            <a href="/advisor" class="kuro-footer-link">Prince Vegeta AI Advisor</a>
+          </div>
+          <div class="kuro-footer-col">
+            <span class="kuro-footer-col-title">Top Genres</span>
+            <a href="/genre/action" class="kuro-footer-link">Action Anime</a>
+            <a href="/genre/isekai" class="kuro-footer-link">Isekai Anime</a>
+            <a href="/genre/fantasy" class="kuro-footer-link">Fantasy Anime</a>
+            <a href="/genre/romance" class="kuro-footer-link">Romance Anime</a>
+          </div>
+          <div class="kuro-footer-col">
+            <span class="kuro-footer-col-title">Catalog</span>
+            <a href="/genre/shounen" class="kuro-footer-link">Shounen Anime</a>
+            <a href="/genre/comedy" class="kuro-footer-link">Comedy Anime</a>
+            <a href="/search" class="kuro-footer-link">Search Catalog</a>
+            <a href="/sitemap.xml" class="kuro-footer-link" target="_blank" rel="noopener">Sitemap</a>
+          </div>
+        </nav>
+      </div>
+    </footer>
 
     <!-- Bottom Mobile Tab Bar (Visible only on mobile <= 768px) -->
     <nav class="app-tab-bar" id="app-tab-bar">
