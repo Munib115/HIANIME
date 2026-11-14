@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "python ../../generate_sitemap.py || python3 ../../generate_sitemap.py || true",
     "build": "vite build",
     "preview": "vite preview"
   },

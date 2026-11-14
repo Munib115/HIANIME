@@ -98,6 +98,7 @@ export class NetflixPlayer {
     this.subSize = localStorage.getItem('kuro_sub_size') || 'md'; // sm | md | lg | xl
     this.autoSkip = localStorage.getItem('kuro_auto_skip') === 'true';
     this.playbackSpeed = 1;
+    this.userVolume = Math.max(0.1, Math.min(1, parseFloat(localStorage.getItem('kuro_volume') || '1') || 1));
     this.activeQuality = 'auto'; // 'auto' or height number
     this.controlsTimeout = null;
     this.isDestroyed = false;
@@ -105,6 +106,8 @@ export class NetflixPlayer {
     this.isDownloading = false;
     this.lastTapTime = 0;
     this.lastTapSide = null;
+    this._unmuteGestureCleanup = null;
+    this._lastMediaErrorAt = 0;
     this.resumeKey = `kuro_pos_${this.animeId}_${this.episodeId}`;
 
     // Live sync with the global Settings modal
@@ -118,7 +121,54 @@ export class NetflixPlayer {
     if (!this.container) return;
     this.renderShell();
     this.bindEvents();
+    this.unlockVideoAudio();
     await this.resolveAndPlay();
+  }
+
+  unlockVideoAudio() {
+    if (!this.video) return;
+    try {
+      this.clearAutoUnmuteGesture();
+      this.video.muted = false;
+      this.video.volume = this.userVolume || 1;
+      this.updateVolumeUI();
+    } catch (e) {}
+  }
+
+  armAutoUnmuteOnGesture() {
+    this.clearAutoUnmuteGesture();
+    const banner = this.root?.querySelector('#nf-unmute-banner');
+    if (banner) banner.style.display = 'inline-flex';
+    this.updateVolumeUI();
+
+    const unmuteNow = () => {
+      if (this.isDestroyed || !this.video) return;
+      try {
+        this.video.muted = false;
+        this.video.volume = this.userVolume || 1;
+        this.updateVolumeUI();
+        if (this.video.paused) {
+          this.video.play().catch(() => {});
+        }
+      } catch (e) {}
+      this.clearAutoUnmuteGesture();
+    };
+
+    const events = ['pointerdown', 'touchstart', 'click', 'keydown'];
+    events.forEach(ev => window.addEventListener(ev, unmuteNow, { once: true, capture: true, passive: true }));
+    this._unmuteGestureCleanup = () => {
+      events.forEach(ev => window.removeEventListener(ev, unmuteNow, { capture: true }));
+      if (banner) banner.style.display = 'none';
+    };
+  }
+
+  clearAutoUnmuteGesture() {
+    if (this._unmuteGestureCleanup) {
+      try { this._unmuteGestureCleanup(); } catch (e) {}
+      this._unmuteGestureCleanup = null;
+    }
+    const banner = this.root?.querySelector('#nf-unmute-banner');
+    if (banner) banner.style.display = 'none';
   }
 
   renderShell() {
@@ -205,6 +255,12 @@ export class NetflixPlayer {
             <span class="nf-center-sec">10</span>
           </button>
         </div>
+
+        <!-- Autoplay Muted Unmute Pill -->
+        <button type="button" id="nf-unmute-banner" style="display:none;position:absolute;top:64px;left:18px;z-index:45;background:rgba(229,9,20,0.94);color:#fff;border:1px solid rgba(255,255,255,0.28);border-radius:999px;padding:7px 14px;font-size:0.82rem;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,0.45);backdrop-filter:blur(8px);align-items:center;gap:6px;">
+          <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.3" fill="none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+          <span>Tap to Unmute</span>
+        </button>
 
         <!-- Netflix Skip Intro / Skip Outro Floating Button -->
         <button type="button" class="nf-skip-btn" id="nf-skip-btn" style="display:none">
@@ -501,9 +557,21 @@ export class NetflixPlayer {
     // Volume & Mute
     const muteBtn = this.root.querySelector('#nf-btn-mute');
     const volSlider = this.root.querySelector('#nf-volume-slider');
+    const unmuteBanner = this.root.querySelector('#nf-unmute-banner');
+    unmuteBanner?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.video.muted = false;
+      this.video.volume = this.userVolume || 1;
+      this.clearAutoUnmuteGesture();
+      this.updateVolumeUI();
+    });
     muteBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       this.video.muted = !this.video.muted;
+      if (!this.video.muted) {
+        this.video.volume = this.userVolume || 1;
+        this.clearAutoUnmuteGesture();
+      }
       this.updateVolumeUI();
     });
     volSlider?.addEventListener('input', (e) => {
@@ -511,6 +579,11 @@ export class NetflixPlayer {
       const val = parseFloat(e.target.value);
       this.video.volume = val;
       this.video.muted = val === 0;
+      if (val > 0) {
+        this.userVolume = val;
+        try { localStorage.setItem('kuro_volume', String(val)); } catch (err) {}
+        this.clearAutoUnmuteGesture();
+      }
       this.updateVolumeUI();
     });
 
@@ -855,11 +928,18 @@ export class NetflixPlayer {
       this.hls = null;
     }
 
+    // Ensure audio is unlocked and unmuted at the start of every stream load
+    this.unlockVideoAudio();
+
     if (Hls.isSupported()) {
       const hls = new Hls({
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        backBufferLength: 30,
+        maxBufferLength: 18,
+        maxMaxBufferLength: 40,
+        backBufferLength: 15,
+        maxBufferSize: 30 * 1000 * 1000,
+        startFragPrefetch: true,
+        highBufferWatchdogPeriod: 2,
+        nudgeMaxRetry: 5,
         enableWorker: true,
       });
       this.hls = hls;
@@ -878,15 +958,16 @@ export class NetflixPlayer {
           this.restoreSavedPosition();
         }
         this.video.playbackRate = this.playbackSpeed;
-        this.video.play().catch(async (playErr) => {
-          // Modern browser autoplay policy safeguard: retry muted if audio playback was blocked
+        this.video.muted = false;
+        this.video.volume = this.userVolume || 1;
+        this.updateVolumeUI();
+        this.video.play().catch(async () => {
+          // Modern browser autoplay policy safeguard: retry muted and auto-unmute on first tap/click
           try {
             this.video.muted = true;
             await this.video.play();
             this.updatePlayUI();
-            if (typeof this.onToast === 'function') {
-              this.onToast('Playing muted (tap anywhere to unmute)');
-            }
+            this.armAutoUnmuteOnGesture();
           } catch (mutedErr) {
             this.setLoader(false);
             this.updatePlayUI();
@@ -899,6 +980,11 @@ export class NetflixPlayer {
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             hls.startLoad();
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            const now = Date.now();
+            if (this._lastMediaErrorAt && (now - this._lastMediaErrorAt) < 5000) {
+              hls.swapAudioCodec();
+            }
+            this._lastMediaErrorAt = now;
             hls.recoverMediaError();
           } else {
             this.switchToIframeFallback();
@@ -917,14 +1003,15 @@ export class NetflixPlayer {
         } else {
           this.restoreSavedPosition();
         }
+        this.video.muted = false;
+        this.video.volume = this.userVolume || 1;
+        this.updateVolumeUI();
         this.video.play().catch(async () => {
           try {
             this.video.muted = true;
             await this.video.play();
             this.updatePlayUI();
-            if (typeof this.onToast === 'function') {
-              this.onToast('Playing muted (tap anywhere to unmute)');
-            }
+            this.armAutoUnmuteOnGesture();
           } catch (e) {
             this.setLoader(false);
             this.updatePlayUI();
@@ -1019,11 +1106,12 @@ export class NetflixPlayer {
     // Show smooth loading state in-place (without touching DOM structure or exiting fullscreen)
     this.setLoader(true, `Playing Episode ${this.episodeNumber}...`);
 
-    // Reset video time & pause old playback
+    // Reset video time & pause old playback, and ensure audio is unmuted
     if (this.video) {
       try {
         this.video.pause();
         this.video.currentTime = 0;
+        this.unlockVideoAudio();
       } catch (e) {}
     }
 
@@ -1133,7 +1221,11 @@ export class NetflixPlayer {
     if (key === 'auto') {
       if (qTag) qTag.textContent = topLabel;
       this.activeQuality = 'auto';
-      this.attachHlsSource(toAbs(this.streamData.master_url), seekTime);
+      // When only 1 variant exists (standard on ZokoAnime), attach the pre-warmed variant playlist directly to skip an extra roundtrip
+      const targetPlaylist = (this.qualities && this.qualities.length === 1 && this.qualities[0].url)
+        ? toAbs(this.qualities[0].url)
+        : toAbs(this.streamData.master_url);
+      this.attachHlsSource(targetPlaylist, seekTime);
       if (!silent) this.onToast(`Quality: Auto (${topLabel})`);
       return;
     }
@@ -1672,6 +1764,7 @@ export class NetflixPlayer {
   }
 
   destroy() {
+    this.clearAutoUnmuteGesture();
     if (this.settingsHandler) {
       window.removeEventListener('kuro:settings-changed', this.settingsHandler);
       this.settingsHandler = null;

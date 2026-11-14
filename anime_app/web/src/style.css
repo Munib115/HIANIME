@@ -12081,3 +12081,91 @@ a.anime-card {
   border-color: rgba(229, 9, 20, 0.45) !important;
   color: #fca5a5 !important;
 }
+
+/* ─── Mobile Detail View & Action Bar Optimization (Unslop) ────────── */
+#view-detail,
+#detail-container,
+.detail-body {
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.detail-actions-bar {
+  width: 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+}
+
+.detail-actions-bar .btn-primary,
+.detail-actions-bar .btn-secondary {
+  white-space: nowrap !important;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.detail-actions-bar .btn-primary svg,
+.detail-actions-bar .btn-secondary svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+
+@media (max-width: 768px) {
+  /* Keep Back & Banner Trailer buttons below the fixed top app bar */
+  .detail-banner .detail-back-btn {
+    top: 66px !important;
+    left: 14px !important;
+    padding: 6px 12px !important;
+    font-size: 0.78rem !important;
+    z-index: 15 !important;
+  }
+
+  .detail-banner .btn-banner-trailer {
+    top: 66px !important;
+    right: 14px !important;
+    padding: 6px 12px !important;
+    font-size: 0.76rem !important;
+    z-index: 15 !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .detail-body {
+    padding: 0 14px 36px !important;
+  }
+
+  .detail-actions-bar {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    margin-top: 16px !important;
+    margin-bottom: 20px !important;
+    width: 100% !important;
+  }
+
+  .detail-actions-bar .btn-primary {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    height: 44px !important;
+    font-size: 0.9rem !important;
+    padding: 0 16px !important;
+  }
+
+  .detail-actions-bar .btn-secondary {
+    width: 100% !important;
+    height: 40px !important;
+    padding: 0 8px !important;
+    font-size: 0.78rem !important;
+    gap: 5px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .detail-actions-bar .btn-secondary span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+

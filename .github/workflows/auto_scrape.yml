@@ -34,11 +34,14 @@ jobs:
       - name: Run Server 2 Scraper (Munib Server / munib_server.db)
         run: python -u scrape_munib_new_episodes.py
 
+      - name: Regenerate Sitemap
+        run: python -u generate_sitemap.py
+
       - name: Commit & Push Updated Databases
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add hianime.db munib_server.db api/hianime.db.gz api/munib_server.db.gz anime_app/web/api/hianime.db.gz anime_app/web/api/munib_server.db.gz
+          git add hianime.db munib_server.db api/hianime.db.gz api/munib_server.db.gz anime_app/web/api/hianime.db.gz anime_app/web/api/munib_server.db.gz anime_app/web/public/sitemap.xml
           if ! git diff --cached --quiet; then
             git commit -m "chore(auto-scrape): sync newly released anime titles and episodes"
             git push origin HEAD:main

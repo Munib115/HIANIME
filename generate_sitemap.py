@@ -1,27 +1,44 @@
 import datetime
+import gzip
 import os
+import shutil
 import sqlite3
+import tempfile
 import xml.sax.saxutils as xml_escape
 
 BASE_URL = "https://kuroanime-flax.vercel.app"
 TODAY = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def find_db():
     candidates = [
-        "hianime.db",
-        os.path.join("api", "hianime.db"),
-        "munib_server.db",
-        os.path.join("api", "munib_server.db"),
+        os.path.join(ROOT_DIR, "hianime.db"),
+        os.path.join(ROOT_DIR, "api", "hianime.db"),
+        os.path.join(ROOT_DIR, "munib_server.db"),
+        os.path.join(ROOT_DIR, "api", "munib_server.db"),
     ]
     for c in candidates:
         if os.path.exists(c) and os.path.getsize(c) > 0:
-            return c
-    return None
+            return c, False
+
+    gz_candidates = [
+        os.path.join(ROOT_DIR, "api", "hianime.db.gz"),
+        os.path.join(ROOT_DIR, "anime_app", "web", "api", "hianime.db.gz"),
+    ]
+    for gz in gz_candidates:
+        if os.path.exists(gz) and os.path.getsize(gz) > 0:
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
+            os.close(tmp_fd)
+            with gzip.open(gz, "rb") as f_in, open(tmp_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            return tmp_path, True
+
+    return None, False
 
 
 def generate():
-    db_path = find_db()
+    db_path, is_temp = find_db()
     if not db_path:
         print("[Sitemap] Warning: No database found, generating minimal static sitemap.")
         anime_rows = []
@@ -40,12 +57,16 @@ def generate():
         genre_set = set()
         for row in anime_rows:
             raw_genres = row[2] or ""
-            # parse both comma or space-separated genres
             tokens = [t.strip() for t in raw_genres.replace(",", " ").split() if t.strip()]
             for t in tokens:
-                if len(t) > 2 and t.isalpha():
+                if 2 < len(t) <= 24 and t.isalpha():
                     genre_set.add(t)
         conn.close()
+        if is_temp and os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except OSError:
+                pass
 
     print(f"[Sitemap] Extracted {len(anime_rows)} anime titles and {len(genre_set)} genres.")
 
@@ -88,7 +109,6 @@ def generate():
     xml_lines.append("  <!-- Anime Detail Pages -->")
     for r in anime_rows:
         anime_id = r[0]
-        # determine lastmod from scraped_at / enriched_at if available
         lastmod = TODAY
         raw_ts = r[4] or r[3]
         if raw_ts and isinstance(raw_ts, str) and len(raw_ts) >= 10:
@@ -106,11 +126,10 @@ def generate():
     xml_lines.append("</urlset>\n")
     sitemap_content = "\n".join(xml_lines)
 
-    # Write to anime_app/web/public/sitemap.xml so Vite copies it to dist/ on build
     out_dirs = [
-        os.path.join("anime_app", "web", "public"),
-        os.path.join("anime_app", "web", "dist"),
-        "public",
+        os.path.join(ROOT_DIR, "anime_app", "web", "public"),
+        os.path.join(ROOT_DIR, "anime_app", "web", "dist"),
+        os.path.join(ROOT_DIR, "public"),
     ]
     for d in out_dirs:
         if os.path.exists(d):
@@ -119,8 +138,7 @@ def generate():
                 f.write(sitemap_content)
             print(f"[Sitemap] Successfully wrote {out_file} ({len(anime_rows) + len(genre_set) + 3} URLs)")
 
-    # Also write to anime_app/web/public/sitemap.xml even if dist doesn't exist yet
-    target_primary = os.path.join("anime_app", "web", "public", "sitemap.xml")
+    target_primary = os.path.join(ROOT_DIR, "anime_app", "web", "public", "sitemap.xml")
     if not os.path.exists(target_primary):
         os.makedirs(os.path.dirname(target_primary), exist_ok=True)
         with open(target_primary, "w", encoding="utf-8") as f:
@@ -130,4 +148,3 @@ def generate():
 
 if __name__ == "__main__":
     generate()
-

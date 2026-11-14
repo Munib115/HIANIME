@@ -316,16 +316,25 @@ def main():
     c.execute("SELECT DISTINCT episode_id FROM episodes")
     db_ep_ids = set(r[0] for r in c.fetchall() if r[0])
 
-    print(f"Initial DB Stats: {len(db_anime)} Anime, {len(db_ep_ids)} Episodes")
+    c.execute("SELECT anime_id, COUNT(DISTINCT episode_id) FROM streams WHERE type = 'dub' AND server_name = 'ZokoAnime' GROUP BY anime_id")
+    db_dub_counts = dict(c.fetchall())
+
+    c.execute("SELECT DISTINCT episode_id FROM streams WHERE type = 'dub' AND server_name = 'ZokoAnime'")
+    db_dub_ep_ids = set(r[0] for r in c.fetchall() if r[0])
+
+    print(f"Initial DB Stats: {len(db_anime)} Anime, {len(db_ep_ids)} Episodes, {len(db_dub_ep_ids)} Dubbed Episodes")
 
     # ─────────────────────────────────────────────────────────────
-    # STEP 1: Discover newly dropped episodes on airing/updated anime
+    # STEP 1: Discover newly dropped SUB & DUB episodes on airing/updated anime
     # ─────────────────────────────────────────────────────────────
-    print("\nScanning /recently-updated and /top-airing for episode drops...")
+    print("\nScanning /dubbed-anime, /recently-updated, and /top-airing for SUB & DUB episode drops...")
     updated_anime_targets = []
+    updated_dub_targets = []
     seen_target_ids = set()
+    seen_dub_target_ids = set()
 
     scan_sources = [
+        (f"{BASE_URL}/dubbed-anime?page={{}}", 15),
         (f"{BASE_URL}/recently-updated?page={{}}", 15),
         (f"{BASE_URL}/top-airing?page={{}}", 6),
         (f"{BASE_URL}/movie?page={{}}", 5),
@@ -345,12 +354,11 @@ def main():
             m = re.search(r"-(\d+)$", a.get("href"))
             if not m: continue
             aid = int(m.group(1))
-            if aid in seen_target_ids: continue
 
             ep_sub = item.select_one(".tick-sub")
             ep_num = int(ep_sub.text.strip()) if (ep_sub and ep_sub.text.strip().isdigit()) else 0
             old_ep = db_anime.get(aid, 0)
-            if aid in db_anime and ep_num > old_ep:
+            if aid in db_anime and ep_num > old_ep and aid not in seen_target_ids:
                 seen_target_ids.add(aid)
                 updated_anime_targets.append({
                     "anime_id": aid,
@@ -359,7 +367,19 @@ def main():
                     "expected_count": ep_num,
                 })
 
-    print(f"Found {len(updated_anime_targets)} anime with newly dropped episodes.", flush=True)
+            ep_dub = item.select_one(".tick-dub")
+            dub_num = int(ep_dub.text.strip()) if (ep_dub and ep_dub.text.strip().isdigit()) else 0
+            old_dub = db_dub_counts.get(aid, 0)
+            if aid in db_anime and dub_num > old_dub and aid not in seen_dub_target_ids:
+                seen_dub_target_ids.add(aid)
+                updated_dub_targets.append({
+                    "anime_id": aid,
+                    "title": a.text.strip(),
+                    "old_dub": old_dub,
+                    "expected_dub": dub_num,
+                })
+
+    print(f"Found {len(updated_anime_targets)} anime with newly dropped episodes and {len(updated_dub_targets)} anime with new DUB episodes.", flush=True)
 
     total_new_episodes = 0
     for idx, target in enumerate(updated_anime_targets, 1):
@@ -394,6 +414,8 @@ def main():
                 INSERT OR IGNORE INTO streams (anime_id, anime_title, episode_id, episode_number, episode_title, type, server_name, provider, embed_url)
                 VALUES (?,?,?,?,?,?,?,?,?)
                 """, (aid, title, s.get("episode_id"), s.get("episode_number", 0), s.get("episode_title", ""), s.get("type", "sub"), s.get("server_name", "ZokoAnime"), s.get("provider", ""), s.get("embed_url", "")))
+                if s.get("type") == "dub" and s.get("episode_id"):
+                    db_dub_ep_ids.add(s.get("episode_id"))
 
             ts = time.strftime("%Y-%m-%d %H:%M:%S")
             c.execute("UPDATE anime SET episode_count = ?, status = 'Currently Airing', scraped_at = ? WHERE anime_id = ?", (len(remote_eps), ts, aid))
@@ -403,14 +425,67 @@ def main():
         except Exception as e:
             print(f"  Error updating episodes for {title}: {e}")
 
+    # Scrape newly dropped DUB episodes on existing anime (cap at 45 series per cycle)
+    total_new_dub_episodes = 0
+    for idx, target in enumerate(updated_dub_targets[:45], 1):
+        aid = target["anime_id"]
+        title = target["title"]
+        expected_dub = target["expected_dub"]
+        try:
+            remote_eps = get_episodes(aid)
+            cand_eps = remote_eps[:expected_dub]
+            missing_dub_eps = [ep for ep in cand_eps if ep.get("episode_id") and ep.get("episode_id") not in db_dub_ep_ids]
+            if not missing_dub_eps:
+                continue
+            # Cap at latest 25 missing dub episodes per show to keep fast
+            if len(missing_dub_eps) > 25:
+                missing_dub_eps = missing_dub_eps[-25:]
+
+            streams = []
+            workers = min(6, len(missing_dub_eps))
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                futs = {ex.submit(fetch_single_episode_servers, ep): ep for ep in missing_dub_eps}
+                for f in as_completed(futs):
+                    try:
+                        res = f.result()
+                        if res: streams.extend(res)
+                    except Exception:
+                        pass
+
+            dub_streams = [s for s in streams if s.get("type") == "dub"]
+            if not dub_streams:
+                continue
+
+            for ep in missing_dub_eps:
+                c.execute("""
+                INSERT OR IGNORE INTO episodes (anime_id, episode_id, episode_number, title, japanese_title, watch_url)
+                VALUES (?,?,?,?,?,?)
+                """, (aid, ep.get("episode_id"), ep.get("episode_number", 0), ep.get("title", ""), ep.get("japanese_title", ""), ep.get("watch_url", "")))
+                db_ep_ids.add(ep.get("episode_id"))
+
+            for s in streams:
+                c.execute("""
+                INSERT OR IGNORE INTO streams (anime_id, anime_title, episode_id, episode_number, episode_title, type, server_name, provider, embed_url)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                """, (aid, title, s.get("episode_id"), s.get("episode_number", 0), s.get("episode_title", ""), s.get("type", "sub"), s.get("server_name", "ZokoAnime"), s.get("provider", ""), s.get("embed_url", "")))
+                if s.get("type") == "dub" and s.get("episode_id"):
+                    db_dub_ep_ids.add(s.get("episode_id"))
+
+            conn.commit()
+            total_new_dub_episodes += len(dub_streams)
+            print(f"  [{idx}/{min(45, len(updated_dub_targets))}] [NEW DUB] {title}: +{len(dub_streams)} dub streams (Target {expected_dub} dub eps)", flush=True)
+        except Exception as e:
+            print(f"  Error updating DUB episodes for {title}: {e}")
+
     # ─────────────────────────────────────────────────────────────
     # STEP 2: Discover & Scrape Brand New Anime Titles from all sections
     # ─────────────────────────────────────────────────────────────
-    print("\nScanning /new-anime, /recently-updated, /movie, /ova, /ona, /special for brand-new anime titles...")
+    print("\nScanning /dubbed-anime, /new-anime, /recently-updated, /movie, /ova, /ona, /special for brand-new anime titles...")
     new_anime_targets = []
     seen_new_ids = set()
 
     discovery_sources = [
+        (f"{BASE_URL}/dubbed-anime?page={{}}", 20),
         (f"{BASE_URL}/new-anime?page={{}}", 30),
         (f"{BASE_URL}/recently-updated?page={{}}", 15),
         (f"{BASE_URL}/movie?page={{}}", 15),
@@ -529,6 +604,7 @@ def main():
     print(f"Scrape Complete!")
     print(f"New Anime Titles Added: {total_new_anime}")
     print(f"New Episodes Added: {total_new_episodes}")
+    print(f"New DUB Streams Added: {total_new_dub_episodes}")
     print("=" * 65)
 
 if __name__ == "__main__":

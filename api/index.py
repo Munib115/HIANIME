@@ -833,13 +833,13 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
                         "SELECT type, server_name, provider, embed_url FROM streams WHERE anilist_id = ? AND episode_number = ?",
                         (al_id, ep_no),
                     )
-                    # Live fallback to reanime.to flix API if not yet cached in munib_server.db
-                    if not munib_data and ep_no is not None:
+                    # Live fallback to reanime.to flix API only if no local stream exists yet
+                    if not data and not munib_data and ep_no is not None:
                         try:
                             fr = _STREAM_SESSION.get(
                                 f"https://reanime.to/api/flix/{al_id}/{ep_no}",
                                 headers={"User-Agent": _STREAM_HEADERS["User-Agent"], "Referer": "https://reanime.to/home"},
-                                timeout=3,
+                                timeout=1.5,
                             )
                             if fr.status_code == 200:
                                 fjson = fr.json()
@@ -1059,20 +1059,63 @@ def _parse_master_variants(master_text: str, master_url: str):
     return qualities
 
 
+import time as _time
+
+_RESOLVE_CACHE: dict = {}
+_HLS_PLAYLIST_CACHE: dict = {}
+
+
+def _rewrite_hls_playlist(raw_text: str, url: str) -> str:
+    """Rewrite a master or media .m3u8 playlist so all sub-playlists and segments route via our fast proxy."""
+    out_lines = []
+    for raw_line in raw_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            out_lines.append("")
+            continue
+
+        if line.startswith("#"):
+            if 'URI="' in line:
+                def _repl_uri(match):
+                    raw_uri = match.group(1)
+                    u = urllib.parse.urljoin(url, raw_uri)
+                    parsed_u = urllib.parse.urlparse(u)
+                    if parsed_u.path.endswith(".m3u8"):
+                        return f'URI="/api/player/hls?url={urllib.parse.quote(u, safe="")}"'
+                    return f'URI="/api/player/segment?url={urllib.parse.quote(u, safe="")}"'
+                line = re.sub(r'URI="([^"]+)"', _repl_uri, line)
+            out_lines.append(line)
+            continue
+
+        full_url = urllib.parse.urljoin(url, line)
+        parsed_target = urllib.parse.urlparse(full_url)
+        if parsed_target.path.endswith(".m3u8"):
+            out_lines.append(f"/api/player/hls?url={urllib.parse.quote(full_url, safe='')}")
+        else:
+            out_lines.append(f"/api/player/segment?url={urllib.parse.quote(full_url, safe='')}")
+
+    return "\n".join(out_lines)
+
+
 @router.get("/player/resolve")
 def player_resolve(url: str = Query(...)):
     """
     Extract direct HLS master playlist, quality variants, multi-language VTT subtitles,
-    and intro/outro skip timestamps from an embed URL.
+    and intro/outro skip timestamps from an embed URL, with in-memory caching and playlist pre-warming.
     """
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="Invalid embed URL")
+
+    now = _time.time()
+    cached_res = _RESOLVE_CACHE.get(url)
+    if cached_res and (now - cached_res[0]) < 600:
+        return cached_res[1]
 
     try:
         r = _STREAM_SESSION.get(url, headers={
             "User-Agent": _STREAM_HEADERS["User-Agent"],
             "Referer": "https://hianime.at/",
-        }, timeout=12)
+        }, timeout=10)
         if r.status_code != 200:
             raise HTTPException(status_code=502, detail=f"Upstream embed returned {r.status_code}")
 
@@ -1085,12 +1128,22 @@ def player_resolve(url: str = Query(...)):
         if not master_url:
             raise HTTPException(status_code=422, detail="No HLS source URL in payload")
 
-        # Fetch master.m3u8 to discover quality variants
+        # Fetch master.m3u8 to discover quality variants & pre-cache rewritten playlist
         qualities = []
         try:
-            mr = _STREAM_SESSION.get(master_url, headers=_STREAM_HEADERS, timeout=10)
+            mr = _STREAM_SESSION.get(master_url, headers=_STREAM_HEADERS, timeout=8)
             if mr.status_code == 200 and "#EXTM3U" in mr.text:
+                _HLS_PLAYLIST_CACHE[master_url] = (_time.time(), _rewrite_hls_playlist(mr.text, master_url))
                 qualities = _parse_master_variants(mr.text, master_url)
+                # Pre-warm the primary variant playlist (e.g. 1080p) so hls.js loads it in 0ms
+                if qualities:
+                    top_raw = qualities[0]["raw_url"]
+                    try:
+                        vr = _STREAM_SESSION.get(top_raw, headers=_STREAM_HEADERS, timeout=6)
+                        if vr.status_code == 200 and "#EXTM3U" in vr.text:
+                            _HLS_PLAYLIST_CACHE[top_raw] = (_time.time(), _rewrite_hls_playlist(vr.text, top_raw))
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -1108,7 +1161,7 @@ def player_resolve(url: str = Query(...)):
                 "url": f"/api/player/vtt?url={urllib.parse.quote(sub_src, safe='')}",
             })
 
-        return {
+        result_payload = {
             "ok": True,
             "embed_url": url,
             "raw_master_url": master_url,
@@ -1120,6 +1173,10 @@ def player_resolve(url: str = Query(...)):
             "video_id": payload.get("video_id"),
             "download_url": payload.get("download_url") or "",
         }
+        if len(_RESOLVE_CACHE) > 200:
+            _RESOLVE_CACHE.clear()
+        _RESOLVE_CACHE[url] = (_time.time(), result_payload)
+        return result_payload
     except HTTPException:
         raise
     except Exception as e:
@@ -1127,64 +1184,43 @@ def player_resolve(url: str = Query(...)):
 
 
 def _normalize_segment_url(seg_url: str, origin: str) -> str:
-    """Normalize edge segment URLs (/s/...) to the primary HLS origin so they never 403."""
-    parsed = urllib.parse.urlparse(seg_url)
-    if parsed.path.startswith("/s/"):
-        return f"{origin}{parsed.path}{'?' + parsed.query if parsed.query else ''}"
+    """Keep fast edge segment URLs intact; fallback hosts are tried in player_segment."""
     return seg_url
 
 
 @router.get("/player/hls")
 def player_hls(url: str = Query(...)):
-    """Proxy and rewrite master or media .m3u8 playlists so all requests route with clean CORS and Referer."""
+    """Proxy and rewrite master or media .m3u8 playlists with in-memory caching."""
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="Invalid HLS URL")
 
+    now = _time.time()
+    cached_pl = _HLS_PLAYLIST_CACHE.get(url)
+    if cached_pl and (now - cached_pl[0]) < 300:
+        return Response(
+            content=cached_pl[1],
+            media_type="application/vnd.apple.mpegurl",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=60",
+            },
+        )
+
     try:
-        r = _STREAM_SESSION.get(url, headers=_STREAM_HEADERS, timeout=12)
+        r = _STREAM_SESSION.get(url, headers=_STREAM_HEADERS, timeout=10)
         if r.status_code != 200:
             raise HTTPException(status_code=r.status_code, detail="Upstream HLS playlist error")
 
-        parsed_base = urllib.parse.urlparse(url)
-        origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
-
-        out_lines = []
-        for raw_line in r.text.splitlines():
-            line = raw_line.strip()
-            if not line:
-                out_lines.append("")
-                continue
-
-            if line.startswith("#"):
-                # Rewrite URI="..." inside #EXT-X-KEY, #EXT-X-MAP, or #EXT-X-MEDIA
-                if 'URI="' in line:
-                    def _repl_uri(match):
-                        raw_uri = match.group(1)
-                        u = urllib.parse.urljoin(url, raw_uri)
-                        parsed_u = urllib.parse.urlparse(u)
-                        if parsed_u.path.endswith(".m3u8"):
-                            return f'URI="/api/player/hls?url={urllib.parse.quote(u, safe="")}"'
-                        u_norm = _normalize_segment_url(u, origin)
-                        return f'URI="/api/player/segment?url={urllib.parse.quote(u_norm, safe="")}"'
-                    line = re.sub(r'URI="([^"]+)"', _repl_uri, line)
-                out_lines.append(line)
-                continue
-
-            full_url = urllib.parse.urljoin(url, line)
-            parsed_target = urllib.parse.urlparse(full_url)
-            if parsed_target.path.endswith(".m3u8"):
-                out_lines.append(f"/api/player/hls?url={urllib.parse.quote(full_url, safe='')}")
-            else:
-                norm_seg = _normalize_segment_url(full_url, origin)
-                out_lines.append(f"/api/player/segment?url={urllib.parse.quote(norm_seg, safe='')}")
-
-        content = "\n".join(out_lines)
+        content = _rewrite_hls_playlist(r.text, url)
+        if len(_HLS_PLAYLIST_CACHE) > 300:
+            _HLS_PLAYLIST_CACHE.clear()
+        _HLS_PLAYLIST_CACHE[url] = (_time.time(), content)
         return Response(
             content=content,
             media_type="application/vnd.apple.mpegurl",
             headers={
                 "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "no-cache",
+                "Cache-Control": "public, max-age=60",
             },
         )
     except HTTPException:
@@ -1195,14 +1231,14 @@ def player_hls(url: str = Query(...)):
 
 @router.get("/player/segment")
 def player_segment(url: str = Query(...)):
-    """Proxy an individual MPEG-TS video segment with Referer authentication and automatic edge failover."""
+    """Proxy an individual MPEG-TS video segment with chunked streaming and automatic edge failover."""
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="Invalid segment URL")
 
     parsed = urllib.parse.urlparse(url)
     candidate_urls = [url]
     if parsed.path.startswith("/s/"):
-        for fallback_host in ("https://hls.dramahot.top", "https://hls1.zoko1.cfd", "https://hls1.proxy1.cfd"):
+        for fallback_host in ("https://hls1.drama1.cfd", "https://hls.dramahot.top", "https://hls1.zoko1.cfd", "https://hls1.proxy1.cfd"):
             alt = f"{fallback_host}{parsed.path}{'?' + parsed.query if parsed.query else ''}"
             if alt not in candidate_urls:
                 candidate_urls.append(alt)
@@ -1210,17 +1246,26 @@ def player_segment(url: str = Query(...)):
     last_status = 502
     for target in candidate_urls:
         try:
-            r = _STREAM_SESSION.get(target, headers=_STREAM_HEADERS, timeout=15)
+            r = _STREAM_SESSION.get(target, headers=_STREAM_HEADERS, timeout=(3.5, 12), stream=True)
             last_status = r.status_code
-            if r.status_code == 200 and r.content:
-                return Response(
-                    content=r.content,
+            if r.status_code == 200:
+                def _iter_chunks(resp=r):
+                    try:
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            if chunk:
+                                yield chunk
+                    finally:
+                        resp.close()
+
+                return StreamingResponse(
+                    _iter_chunks(),
                     media_type="video/mp2t",
                     headers={
                         "Access-Control-Allow-Origin": "*",
                         "Cache-Control": "public, max-age=86400, immutable",
                     },
                 )
+            r.close()
         except Exception:
             continue
 

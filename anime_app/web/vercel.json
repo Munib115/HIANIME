@@ -7,8 +7,17 @@
     }
   },
   "functions": {
+    "api/index.py": {
+      "includeFiles": "api/*.{db*,json.gz,npz}",
+      "maxDuration": 60
+    },
+    "api/*.py": {
+      "includeFiles": "api/*.{db*,json.gz,npz}",
+      "maxDuration": 60
+    },
     "api/**/*.py": {
-      "includeFiles": "api/*.db*"
+      "includeFiles": "api/*.{db*,json.gz,npz}",
+      "maxDuration": 60
     }
   },
   "headers": [
@@ -26,6 +35,10 @@
     {
       "source": "/robots.txt",
       "destination": "/robots.txt"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/sitemap.xml"
     },
     {
       "source": "/api/(.*)",

@@ -194,6 +194,12 @@ def main():
         f"{SEARCH_API}?offset={base_offset + 300}&limit=100",
         f"{SEARCH_API}?offset={base_offset + 400}&limit=100",
     ]
+    # Also include search queries for recently added hianime.db titles missing from munib_server.db
+    missing_refs = [info for al_id, info in by_anilist.items() if al_id not in existing_anime and info.get("title")][:25]
+    for mref in missing_refs:
+        q_str = requests.utils.quote(mref["title"][:40])
+        queries.append(f"{SEARCH_API}?q={q_str}&limit=5")
+
     with ThreadPoolExecutor(max_workers=8) as pool:
         for data in pool.map(fetch_json, queries):
             for item in (data.get("results") if data else []) or []:
