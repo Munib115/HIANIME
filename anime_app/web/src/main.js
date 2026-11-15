@@ -1,6 +1,6 @@
 import './style.css';
 import { inject } from '@vercel/analytics';
-import { NetflixPlayer } from './netflix_player.js';
+import { NetflixPlayer, prefetchStreamResolve } from './netflix_player.js';
 import { 
   supabase, 
   fetchWatchHistoryFromCloud, 
@@ -25,6 +25,43 @@ import {
 inject();
 
 let activePlayerInstance = null;
+const _episodeStreamsCache = new Map();
+
+async function fetchEpisodeStreamsCached(episodeId, animeId) {
+  const key = `${animeId}_${episodeId}`;
+  const cached = _episodeStreamsCache.get(key);
+  if (cached && (Date.now() - cached.ts) < 10 * 60 * 1000) {
+    return cached.data;
+  }
+  const data = await fetchApi(`/episode/${episodeId}/streams?anime_id=${animeId}`);
+  if (data) {
+    if (_episodeStreamsCache.size >= 40) {
+      const oldest = _episodeStreamsCache.keys().next().value;
+      if (oldest) _episodeStreamsCache.delete(oldest);
+    }
+    _episodeStreamsCache.set(key, { ts: Date.now(), data });
+  }
+  return data;
+}
+
+async function prefetchNextEpisodeStream() {
+  const anime = state.activeAnimeData;
+  const nextEp = state.activeEpisodes?.[state.activeEpisodeIndex + 1];
+  if (!anime || !nextEp?.episode_id) return;
+  try {
+    const data = await fetchEpisodeStreamsCached(nextEp.episode_id, anime.anime_id);
+    if (!data) return;
+    const list = data[state.activeAudioType]?.length ? data[state.activeAudioType] : (data.sub || data.dub || []);
+    if (!list.length) return;
+    const pref = state.preferredServerName
+      ? list.find(s => s.server_name === state.preferredServerName)
+      : null;
+    const target = pref || list[0];
+    if (target?.embed_url && !target.embed_url.includes('flixcloud.cc')) {
+      prefetchStreamResolve(API_BASE, target.embed_url);
+    }
+  } catch {}
+}
 import { 
   createIcons, 
   Home, 
@@ -3349,8 +3386,8 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
     // 4. Show smooth loading overlay inside player while fetching new streams
     activePlayerInstance.setLoader(true, `Loading Episode ${ep.episode_number}...`);
 
-    // 5. Fetch streams for the new episode
-    const streamsData = await fetchApi(`/episode/${ep.episode_id}/streams?anime_id=${anime.anime_id}`);
+    // 5. Fetch streams for the new episode (instant if prefetched)
+    const streamsData = await fetchEpisodeStreamsCached(ep.episode_id, anime.anime_id);
     state.currentStreams = streamsData || { sub: [], dub: [] };
     state.activeServerIndex = 0;
 
@@ -3606,8 +3643,8 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
     });
   });
 
-  // Fetch streams for this episode
-  const streamsData = await fetchApi(`/episode/${ep.episode_id}/streams?anime_id=${anime.anime_id}`);
+  // Fetch streams for this episode (instant if prefetched)
+  const streamsData = await fetchEpisodeStreamsCached(ep.episode_id, anime.anime_id);
   state.currentStreams = streamsData || { sub: [], dub: [] };
   state.activeServerIndex = 0;
 
@@ -3815,6 +3852,7 @@ function loadStreamIntoPlayer(targetTime = 0) {
         showToast(`No ${targetAudio.toUpperCase()} stream available for this episode`);
       }
     },
+    onPrefetchNext: () => prefetchNextEpisodeStream(),
     onBack: () => {
       const detailReady = document.querySelector('#detail-container .detail-body');
       if (state.playerEnteredFrom === 'home' || !detailReady) {

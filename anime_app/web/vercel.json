@@ -69,11 +69,11 @@
       "destination": "/api/index.py"
     },
     {
-      "source": "/api/(.*)",
+      "source": "/api/((?!player/segment$|player/hls$|player/vtt$).*)",
       "destination": "/api/index.py"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]

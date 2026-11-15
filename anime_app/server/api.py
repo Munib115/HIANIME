@@ -29,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # ─── Persistent HTTP Pool for Fast HLS Segment Proxying ─────────────
 _STREAM_SESSION = _requests.Session()
-_STREAM_ADAPTER = HTTPAdapter(pool_connections=30, pool_maxsize=30)
+_STREAM_ADAPTER = HTTPAdapter(pool_connections=64, pool_maxsize=64)
 _STREAM_SESSION.mount("https://", _STREAM_ADAPTER)
 _STREAM_SESSION.mount("http://", _STREAM_ADAPTER)
 _STREAM_HEADERS = {
@@ -1381,22 +1381,36 @@ def player_resolve(url: str = Query(...)):
         if not master_url:
             raise HTTPException(status_code=422, detail="No HLS source URL in payload")
 
-        # Fetch master.m3u8 to discover quality variants & pre-cache rewritten playlist
+        # Fetch master.m3u8 to discover quality variants & pre-warm rewritten playlists inline
         qualities = []
+        master_playlist_text = ""
         try:
-            mr = _STREAM_SESSION.get(master_url, headers=_STREAM_HEADERS, timeout=8)
+            mr = _STREAM_SESSION.get(master_url, headers=_STREAM_HEADERS, timeout=(2.5, 6.0))
             if mr.status_code == 200 and "#EXTM3U" in mr.text:
-                _HLS_PLAYLIST_CACHE[master_url] = (_time.time(), _rewrite_hls_playlist(mr.text, master_url))
+                master_playlist_text = _rewrite_hls_playlist(mr.text, master_url)
+                _HLS_PLAYLIST_CACHE[master_url] = (_time.time(), master_playlist_text)
                 qualities = _parse_master_variants(mr.text, master_url)
-                # Pre-warm the primary variant playlist (e.g. 1080p) so hls.js loads it in 0ms
                 if qualities:
-                    top_raw = qualities[0]["raw_url"]
-                    try:
-                        vr = _STREAM_SESSION.get(top_raw, headers=_STREAM_HEADERS, timeout=6)
-                        if vr.status_code == 200 and "#EXTM3U" in vr.text:
-                            _HLS_PLAYLIST_CACHE[top_raw] = (_time.time(), _rewrite_hls_playlist(vr.text, top_raw))
-                    except Exception:
-                        pass
+                    from concurrent.futures import ThreadPoolExecutor
+
+                    def _warm_variant(q_item):
+                        raw_v = q_item["raw_url"]
+                        try:
+                            vr = _STREAM_SESSION.get(raw_v, headers=_STREAM_HEADERS, timeout=(2.5, 5.5))
+                            if vr.status_code == 200 and "#EXTM3U" in vr.text:
+                                rewritten = _rewrite_hls_playlist(vr.text, raw_v)
+                                _HLS_PLAYLIST_CACHE[raw_v] = (_time.time(), rewritten)
+                                return rewritten
+                        except Exception:
+                            pass
+                        return ""
+
+                    # Pre-fetch top 2 variants in parallel so client has 0ms playlist startup for Auto, 1080p, or 720p
+                    targets = qualities[:2]
+                    with ThreadPoolExecutor(max_workers=len(targets)) as ex:
+                        for q_item, pl_text in zip(targets, ex.map(_warm_variant, targets)):
+                            if pl_text:
+                                q_item["playlist_text"] = pl_text
         except Exception:
             pass
 
@@ -1419,6 +1433,7 @@ def player_resolve(url: str = Query(...)):
             "embed_url": url,
             "raw_master_url": master_url,
             "master_url": f"/api/player/hls?url={urllib.parse.quote(master_url, safe='')}",
+            "master_playlist": master_playlist_text,
             "qualities": qualities,
             "subtitles": subtitles,
             "skip": payload.get("skip") or {"intro": None, "outro": None},
@@ -1483,44 +1498,94 @@ def player_hls(url: str = Query(...)):
 
 
 @router.get("/player/segment")
-def player_segment(url: str = Query(...)):
-    """Proxy an individual MPEG-TS video segment with chunked streaming and automatic edge failover."""
+def player_segment(request: Request, url: str = Query(...)):
+    """Proxy an individual MPEG-TS video segment with fast chunked streaming, Range pass-through, and mirror failover."""
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="Invalid segment URL")
 
     parsed = urllib.parse.urlparse(url)
     candidate_urls = [url]
     if parsed.path.startswith("/s/"):
-        for fallback_host in ("https://hls1.drama1.cfd", "https://hls.dramahot.top", "https://hls1.zoko1.cfd", "https://hls1.proxy1.cfd"):
+        for fallback_host in ("https://hls1.drama1.cfd", "https://hls1.zoko1.cfd", "https://hls1.proxy1.cfd", "https://hls.dramahot.top"):
             alt = f"{fallback_host}{parsed.path}{'?' + parsed.query if parsed.query else ''}"
             if alt not in candidate_urls:
                 candidate_urls.append(alt)
 
-    last_status = 502
-    for target in candidate_urls:
-        try:
-            r = _STREAM_SESSION.get(target, headers=_STREAM_HEADERS, timeout=(3.5, 12), stream=True)
-            last_status = r.status_code
-            if r.status_code == 200:
-                def _iter_chunks(resp=r):
-                    try:
-                        for chunk in resp.iter_content(chunk_size=65536):
-                            if chunk:
-                                yield chunk
-                    finally:
-                        resp.close()
+    req_hdrs = dict(_STREAM_HEADERS)
+    range_hdr = request.headers.get("range")
+    if range_hdr:
+        req_hdrs["Range"] = range_hdr
 
-                return StreamingResponse(
-                    _iter_chunks(),
-                    media_type="video/mp2t",
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Cache-Control": "public, max-age=86400, immutable",
-                    },
-                )
+    def _build_stream_response(resp):
+        resp_hdrs = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+            "Cache-Control": "public, max-age=86400, s-maxage=86400, immutable",
+            "CDN-Cache-Control": "public, max-age=86400",
+        }
+        for hk, hv in (("Content-Length", "content-length"), ("Content-Range", "content-range"), ("Accept-Ranges", "accept-ranges")):
+            val = resp.headers.get(hv)
+            if val:
+                resp_hdrs[hk] = val
+
+        def _iter_chunks(upstream=resp):
+            try:
+                for chunk in upstream.iter_content(chunk_size=131072):
+                    if chunk:
+                        yield chunk
+            finally:
+                upstream.close()
+
+        return StreamingResponse(
+            _iter_chunks(),
+            status_code=resp.status_code,
+            media_type=resp.headers.get("content-type") or "video/mp2t",
+            headers=resp_hdrs,
+        )
+
+    last_status = 502
+    # Try primary host with fast TTFB timeout; only race mirrors if primary fails or stalls
+    try:
+        r0 = _STREAM_SESSION.get(candidate_urls[0], headers=req_hdrs, timeout=(2.0, 5.5), stream=True)
+        last_status = r0.status_code
+        if r0.status_code in (200, 206):
+            return _build_stream_response(r0)
+        r0.close()
+    except Exception:
+        pass
+
+    mirrors = candidate_urls[1:]
+    if mirrors:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _try_mirror(target):
+            r = _STREAM_SESSION.get(target, headers=req_hdrs, timeout=(2.5, 6.0), stream=True)
+            if r.status_code in (200, 206):
+                return r
+            code = r.status_code
             r.close()
-        except Exception:
-            continue
+            raise RuntimeError(f"HTTP {code}")
+
+        winner = None
+        winner_fut = None
+        ex = ThreadPoolExecutor(max_workers=len(mirrors))
+        futures = []
+        try:
+            futures = [ex.submit(_try_mirror, m) for m in mirrors]
+            for fut in as_completed(futures):
+                try:
+                    winner = fut.result()
+                    winner_fut = fut
+                    break
+                except Exception:
+                    continue
+            if winner is not None:
+                for f in futures:
+                    if f is not winner_fut:
+                        f.add_done_callback(lambda done_f: done_f.result().close() if (not done_f.cancelled() and not done_f.exception()) else None)
+                return _build_stream_response(winner)
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
 
     raise HTTPException(status_code=last_status, detail="Failed to fetch video segment")
 

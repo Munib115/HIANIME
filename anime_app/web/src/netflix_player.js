@@ -10,6 +10,64 @@
  */
 import Hls from 'hls.js';
 
+const _RESOLVE_CACHE_TTL_MS = 10 * 60 * 1000;
+const _clientResolveCache = new Map();
+const _inflightResolves = new Map();
+
+function _toAbsApiBase(apiBase) {
+  const base = apiBase || '/api';
+  if (base.startsWith('http://') || base.startsWith('https://')) return base.replace(/\/$/, '');
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}${base.startsWith('/') ? '' : '/'}${base}`.replace(/\/$/, '');
+}
+
+async function _fetchResolvePayload(apiBase, embedUrl, { signal, bypassCache = false } = {}) {
+  if (!embedUrl || embedUrl.includes('flixcloud.cc')) return null;
+  const now = Date.now();
+  if (!bypassCache) {
+    const cached = _clientResolveCache.get(embedUrl);
+    if (cached && (now - cached.ts) < _RESOLVE_CACHE_TTL_MS) {
+      return cached.data;
+    }
+    if (_inflightResolves.has(embedUrl)) {
+      return await _inflightResolves.get(embedUrl);
+    }
+  } else {
+    _clientResolveCache.delete(embedUrl);
+  }
+
+  const reqPromise = (async () => {
+    const res = await fetch(`${apiBase}/player/resolve?url=${encodeURIComponent(embedUrl)}`, { signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data || !data.ok || !data.master_url) {
+      throw new Error('Invalid stream payload');
+    }
+    if (_clientResolveCache.size >= 25) {
+      const oldestKey = _clientResolveCache.keys().next().value;
+      if (oldestKey) _clientResolveCache.delete(oldestKey);
+    }
+    _clientResolveCache.set(embedUrl, { ts: Date.now(), data });
+    return data;
+  })();
+
+  if (!bypassCache) {
+    _inflightResolves.set(embedUrl, reqPromise);
+  }
+  try {
+    return await reqPromise;
+  } finally {
+    _inflightResolves.delete(embedUrl);
+  }
+}
+
+export function prefetchStreamResolve(apiBase, embedUrl) {
+  if (!embedUrl || embedUrl.includes('flixcloud.cc')) return;
+  const cached = _clientResolveCache.get(embedUrl);
+  if (cached && (Date.now() - cached.ts) < _RESOLVE_CACHE_TTL_MS) return;
+  _fetchResolvePayload(apiBase, embedUrl).catch(() => {});
+}
+
 function formatTime(sec) {
   if (!Number.isFinite(sec) || sec < 0) return '0:00';
   const total = Math.floor(sec);
@@ -87,6 +145,7 @@ export class NetflixPlayer {
     this.onNextEpisode = options.onNextEpisode || (() => {});
     this.onPrevEpisode = options.onPrevEpisode || (() => {});
     this.onSwitchAudio = options.onSwitchAudio || (() => {});
+    this.onPrefetchNext = options.onPrefetchNext || null;
     this.onToast = options.onToast || (() => {});
     this.onProgress = options.onProgress || null;
 
@@ -108,6 +167,18 @@ export class NetflixPlayer {
     this.lastTapSide = null;
     this._unmuteGestureCleanup = null;
     this._lastMediaErrorAt = 0;
+    this._resolveAbortCtrl = null;
+    this._resolveSeq = 0;
+    this._activeBlobUrls = [];
+    this._stallTimer = null;
+    this._stallStartAt = 0;
+    this._stallSnapshot = -1;
+    this._stallStage = 0;
+    this._reattachRetries = 0;
+    this._netErrorRetries = 0;
+    this._mediaErrorRetries = 0;
+    this._prefetchDone = false;
+    this._prefetchTimer = null;
     this.resumeKey = `kuro_pos_${this.animeId}_${this.episodeId}`;
 
     // Live sync with the global Settings modal
@@ -593,16 +664,36 @@ export class NetflixPlayer {
       showControls();
     });
     this.video.addEventListener('pause', () => {
+      this._clearStallWatchdog();
       this.updatePlayUI();
       this.root?.classList.add('controls-visible');
     });
     this.video.addEventListener('waiting', () => {
       this.setLoader(true, 'Buffering stream...');
+      this._armStallWatchdog();
+    });
+    this.video.addEventListener('stalled', () => {
+      if (!this.video?.paused) {
+        this._armStallWatchdog();
+      }
     });
     this.video.addEventListener('playing', () => {
+      this._clearStallWatchdog();
+      this._netErrorRetries = 0;
       this.setLoader(false);
+      // Warm next episode metadata & resolve once current episode streams smoothly
+      if (!this._prefetchDone && typeof this.onPrefetchNext === 'function') {
+        clearTimeout(this._prefetchTimer);
+        this._prefetchTimer = setTimeout(() => {
+          if (!this.isDestroyed && this.video && !this.video.paused && !this._prefetchDone) {
+            this._prefetchDone = true;
+            try { this.onPrefetchNext(); } catch {}
+          }
+        }, 4000);
+      }
     });
     this.video.addEventListener('canplay', () => {
+      this._clearStallWatchdog();
       this.setLoader(false);
     });
     this.video.addEventListener('loadedmetadata', () => {
@@ -611,6 +702,11 @@ export class NetflixPlayer {
       this.renderIntroMarker();
     });
     this.video.addEventListener('timeupdate', () => {
+      const cur = this.video?.currentTime || 0;
+      if (this._stallTimer && Math.abs(cur - this._stallSnapshot) > 0.2) {
+        this._clearStallWatchdog();
+        this.setLoader(false);
+      }
       this.updateTimeUI();
       this.updateSubtitles();
       this.updateSkipButtons();
@@ -620,6 +716,7 @@ export class NetflixPlayer {
       this.updateBufferedUI();
     });
     this.video.addEventListener('ended', () => {
+      this._clearStallWatchdog();
       const autoplayOn = localStorage.getItem('kuro_setting_autoplay') !== 'false';
       if (this.hasNextEp && autoplayOn) {
         this.onToast('Playing Next Episode...');
@@ -890,21 +987,141 @@ export class NetflixPlayer {
     this.root.querySelector('#nf-popover-settings')?.classList.remove('open');
   }
 
-  async resolveAndPlay() {
+  _createBlobPlaylistUrl(playlistText) {
+    if (!playlistText) return null;
+    try {
+      const absBase = _toAbsApiBase(this.apiBase);
+      const normalized = playlistText.replace(
+        /\/api\/player\/(segment|hls|vtt)\?url=/g,
+        `${absBase}/player/$1?url=`
+      );
+      const blob = new Blob([normalized], { type: 'application/vnd.apple.mpegurl' });
+      const blobUrl = URL.createObjectURL(blob);
+      this._activeBlobUrls.push(blobUrl);
+      return blobUrl;
+    } catch {
+      return null;
+    }
+  }
+
+  _revokeBlobUrls() {
+    if (!this._activeBlobUrls?.length) return;
+    for (const u of this._activeBlobUrls) {
+      try { URL.revokeObjectURL(u); } catch {}
+    }
+    this._activeBlobUrls = [];
+  }
+
+  _clearStallWatchdog() {
+    if (this._stallTimer) {
+      clearInterval(this._stallTimer);
+      this._stallTimer = null;
+    }
+    this._stallStartAt = 0;
+    this._stallStage = 0;
+  }
+
+  _tryNudgeBufferedHole(kickLoad = false) {
+    if (this.isDestroyed || !this.video) return false;
+    const cur = this.video.currentTime || 0;
+    const buf = this.video.buffered;
+    if (buf && buf.length) {
+      for (let i = 0; i < buf.length; i++) {
+        const start = buf.start(i);
+        const end = buf.end(i);
+        if (start > cur + 0.04 && start - cur <= 3.0) {
+          this.video.currentTime = start + 0.05;
+          this.video.play().catch(() => {});
+          return true;
+        }
+        if (cur >= start && cur < end - 0.15) {
+          // Inside a buffered range already; ensure playback resumes
+          if (this.video.paused === false && this.video.readyState >= 3) {
+            this.video.play().catch(() => {});
+            return true;
+          }
+        }
+      }
+    }
+    if (kickLoad && this.hls) {
+      try {
+        this.hls.startLoad(cur > 0 ? cur : -1);
+      } catch {}
+    }
+    return false;
+  }
+
+  _armStallWatchdog() {
+    if (this.isDestroyed || !this.video || this.video.paused || this.video.ended) return;
+    if (this._stallTimer) return;
+    this._stallStartAt = Date.now();
+    this._stallSnapshot = this.video.currentTime || 0;
+    this._stallStage = 0;
+
+    this._stallTimer = setInterval(() => {
+      if (this.isDestroyed || !this.video || this.video.paused || this.video.ended) {
+        this._clearStallWatchdog();
+        return;
+      }
+      const cur = this.video.currentTime || 0;
+      if (Math.abs(cur - this._stallSnapshot) > 0.25) {
+        this._clearStallWatchdog();
+        this.setLoader(false);
+        return;
+      }
+      const elapsed = Date.now() - this._stallStartAt;
+      if (elapsed >= 3200 && this._stallStage < 1) {
+        this._stallStage = 1;
+        this.setLoader(true, 'Reconnecting stream...');
+        this._tryNudgeBufferedHole(true);
+      } else if (elapsed >= 7200 && this._stallStage < 2) {
+        this._stallStage = 2;
+        if (this.hls) {
+          try { this.hls.recoverMediaError(); } catch {}
+        }
+        if (!this._tryNudgeBufferedHole(true) && cur > 0) {
+          try { this.video.currentTime = cur + 0.15; } catch {}
+        }
+        this.video.play().catch(() => {});
+      } else if (elapsed >= 13500 && this._stallStage < 3) {
+        this._stallStage = 3;
+        this._clearStallWatchdog();
+        if (this._reattachRetries < 2) {
+          this._reattachRetries += 1;
+          this.resolveAndPlay({ seekTime: cur > 1 ? cur : null, bypassCache: true });
+        } else {
+          this.switchToIframeFallback();
+        }
+      }
+    }, 1000);
+  }
+
+  async resolveAndPlay({ seekTime = null, bypassCache = false } = {}) {
     if (this.embedUrl && this.embedUrl.includes('flixcloud.cc')) {
       this.switchToIframeFallback();
       return;
     }
-    this.setLoader(true, 'Extracting Ad-Free 1080p Stream...');
-    try {
-      const res = await fetch(`${this.apiBase}/player/resolve?url=${encodeURIComponent(this.embedUrl)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (!data || !data.ok || !data.master_url) {
-        throw new Error('Invalid stream payload');
-      }
 
-      if (this.isDestroyed) return;
+    if (this._resolveAbortCtrl) {
+      try { this._resolveAbortCtrl.abort(); } catch {}
+    }
+    const ctrl = new AbortController();
+    this._resolveAbortCtrl = ctrl;
+    const seq = ++this._resolveSeq;
+
+    if (!bypassCache && _clientResolveCache.has(this.embedUrl)) {
+      this.setLoader(true, 'Starting stream...');
+    } else {
+      this.setLoader(true, bypassCache ? 'Reconnecting faster CDN...' : 'Extracting Ad-Free 1080p Stream...');
+    }
+
+    try {
+      const data = await _fetchResolvePayload(this.apiBase, this.embedUrl, {
+        signal: ctrl.signal,
+        bypassCache,
+      });
+
+      if (this.isDestroyed || seq !== this._resolveSeq || !data) return;
       this.streamData = data;
 
       this.populateQualityMenu(data.qualities || []);
@@ -912,15 +1129,17 @@ export class NetflixPlayer {
       this.populateDownloadOptions(data.qualities || []);
 
       // Honour the "Preferred Quality" setting from the Settings modal
-      this.applyQuality(this.getPreferredQualityIdx(), { seekTime: null, silent: true });
+      this.applyQuality(this.getPreferredQualityIdx(), { seekTime, silent: true });
     } catch (err) {
+      if (err?.name === 'AbortError' || this.isDestroyed || seq !== this._resolveSeq) return;
       console.warn('[NetflixPlayer] Direct stream resolve failed, switching to Clean Embed fallback:', err);
       this.switchToIframeFallback();
     }
   }
 
-  attachHlsSource(playlistUrl, seekTime = null) {
+  attachHlsSource(playlistUrl, seekTime = null, nativeHttpUrl = null) {
     if (this.isDestroyed || !this.video) return;
+    this._clearStallWatchdog();
     this.setLoader(true, 'Loading video stream...');
 
     if (this.hls) {
@@ -932,15 +1151,38 @@ export class NetflixPlayer {
     this.unlockVideoAudio();
 
     if (Hls.isSupported()) {
+      const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
       const hls = new Hls({
-        maxBufferLength: 18,
-        maxMaxBufferLength: 40,
-        backBufferLength: 15,
-        maxBufferSize: 30 * 1000 * 1000,
+        maxBufferLength: isMobile ? 35 : 50,
+        maxMaxBufferLength: isMobile ? 90 : 120,
+        backBufferLength: 20,
+        maxBufferSize: (isMobile ? 60 : 100) * 1000 * 1000,
+        maxBufferHole: 0.8,
+        maxFragLookUpTolerance: 0.25,
+        nudgeOffset: 0.25,
+        nudgeMaxRetry: 10,
+        highBufferWatchdogPeriod: 1,
         startFragPrefetch: true,
-        highBufferWatchdogPeriod: 2,
-        nudgeMaxRetry: 5,
+        progressive: true,
         enableWorker: true,
+        lowLatencyMode: false,
+        abrEwmaDefaultEstimate: 5500000,
+        fragLoadPolicy: {
+          default: {
+            maxTimeToFirstByteMs: 5500,
+            maxLoadTimeMs: 18000,
+            timeoutRetry: { maxNumRetry: 6, retryDelayMs: 150, maxRetryDelayMs: 1200 },
+            errorRetry: { maxNumRetry: 6, retryDelayMs: 250, maxRetryDelayMs: 2500 },
+          },
+        },
+        manifestLoadPolicy: {
+          default: {
+            maxTimeToFirstByteMs: 6000,
+            maxLoadTimeMs: 12000,
+            timeoutRetry: { maxNumRetry: 3, retryDelayMs: 200, maxRetryDelayMs: 1200 },
+            errorRetry: { maxNumRetry: 3, retryDelayMs: 300, maxRetryDelayMs: 1500 },
+          },
+        },
       });
       this.hls = hls;
       hls.loadSource(playlistUrl);
@@ -953,7 +1195,9 @@ export class NetflixPlayer {
           this.video.currentTime = targetSeek;
           this.initialTime = 0;
           this.updateTimeUI();
-          if (typeof this.onToast === 'function') this.onToast(`Resumed at ${formatTime(targetSeek)}`);
+          if (typeof this.onToast === 'function' && seekTime === null) {
+            this.onToast(`Resumed at ${formatTime(targetSeek)}`);
+          }
         } else {
           this.restoreSavedPosition();
         }
@@ -976,30 +1220,55 @@ export class NetflixPlayer {
       });
 
       hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        if (this.isDestroyed) return;
+        if (!data.fatal) {
+          if (
+            data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
+            data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL
+          ) {
+            this._tryNudgeBufferedHole(false);
+          }
+          return;
+        }
+
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          this._netErrorRetries += 1;
+          if (this._netErrorRetries <= 3) {
             hls.startLoad();
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            const now = Date.now();
-            if (this._lastMediaErrorAt && (now - this._lastMediaErrorAt) < 5000) {
-              hls.swapAudioCodec();
-            }
-            this._lastMediaErrorAt = now;
+          } else if (this._reattachRetries < 2) {
+            this._reattachRetries += 1;
+            const cur = this.video?.currentTime || 0;
+            this.resolveAndPlay({ seekTime: cur > 1 ? cur : null, bypassCache: true });
+          } else {
+            this.switchToIframeFallback();
+          }
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          this._mediaErrorRetries += 1;
+          const now = Date.now();
+          if (this._lastMediaErrorAt && (now - this._lastMediaErrorAt) < 5000) {
+            hls.swapAudioCodec();
+          }
+          this._lastMediaErrorAt = now;
+          if (this._mediaErrorRetries <= 4) {
             hls.recoverMediaError();
           } else {
             this.switchToIframeFallback();
           }
+        } else {
+          this.switchToIframeFallback();
         }
       });
     } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
-      this.video.src = playlistUrl;
+      this.video.src = nativeHttpUrl || playlistUrl;
       this.video.addEventListener('loadedmetadata', () => {
         const targetSeek = (seekTime !== null && seekTime > 0) ? seekTime : (this.initialTime > 0 ? this.initialTime : null);
         if (targetSeek !== null && targetSeek > 0) {
           this.video.currentTime = targetSeek;
           this.initialTime = 0;
           this.updateTimeUI();
-          if (typeof this.onToast === 'function') this.onToast(`Resumed at ${formatTime(targetSeek)}`);
+          if (typeof this.onToast === 'function' && seekTime === null) {
+            this.onToast(`Resumed at ${formatTime(targetSeek)}`);
+          }
         } else {
           this.restoreSavedPosition();
         }
@@ -1056,6 +1325,13 @@ export class NetflixPlayer {
     this.audioType = options.audioType || this.audioType;
     this.hasSub = options.hasSub !== false;
     this.hasDub = Boolean(options.hasDub);
+    this.initialTime = options.initialTime > 0 ? Number(options.initialTime) : 0;
+    this._prefetchDone = false;
+    this._reattachRetries = 0;
+    this._netErrorRetries = 0;
+    this._mediaErrorRetries = 0;
+    clearTimeout(this._prefetchTimer);
+    this._clearStallWatchdog();
     this.resumeKey = `kuro_pos_${this.animeId}_${this.episodeId}`;
 
     // If previously switched to iframe fallback, restore Netflix player shell
@@ -1221,11 +1497,12 @@ export class NetflixPlayer {
     if (key === 'auto') {
       if (qTag) qTag.textContent = topLabel;
       this.activeQuality = 'auto';
-      // When only 1 variant exists (standard on ZokoAnime), attach the pre-warmed variant playlist directly to skip an extra roundtrip
-      const targetPlaylist = (this.qualities && this.qualities.length === 1 && this.qualities[0].url)
-        ? toAbs(this.qualities[0].url)
-        : toAbs(this.streamData.master_url);
-      this.attachHlsSource(targetPlaylist, seekTime);
+      // Prefer inline rewritten variant playlist (Blob URL) when 1 variant exists (or master_playlist when multi-variant) to eliminate /api/player/hls roundtrip
+      const singleVariant = (this.qualities && this.qualities.length === 1) ? this.qualities[0] : null;
+      const httpUrl = singleVariant?.url ? toAbs(singleVariant.url) : toAbs(this.streamData.master_url);
+      const inlineText = singleVariant?.playlist_text || (singleVariant ? '' : this.streamData.master_playlist);
+      const targetUrl = (Hls.isSupported() && inlineText) ? (this._createBlobPlaylistUrl(inlineText) || httpUrl) : httpUrl;
+      this.attachHlsSource(targetUrl, seekTime, httpUrl);
       if (!silent) this.onToast(`Quality: Auto (${topLabel})`);
       return;
     }
@@ -1234,7 +1511,11 @@ export class NetflixPlayer {
     if (!chosen) return;
     if (qTag) qTag.textContent = `${chosen.height}p`;
     this.activeQuality = Number(chosen.height);
-    this.attachHlsSource(toAbs(chosen.url), seekTime);
+    const chosenHttpUrl = toAbs(chosen.url);
+    const targetUrl = (Hls.isSupported() && chosen.playlist_text)
+      ? (this._createBlobPlaylistUrl(chosen.playlist_text) || chosenHttpUrl)
+      : chosenHttpUrl;
+    this.attachHlsSource(targetUrl, seekTime, chosenHttpUrl);
     if (!silent) this.onToast(`Quality: ${chosen.label}`);
   }
 
@@ -1708,6 +1989,9 @@ export class NetflixPlayer {
 
   switchToIframeFallback() {
     if (this.isDestroyed || !this.container) return;
+    this._clearStallWatchdog();
+    clearTimeout(this._prefetchTimer);
+    this._revokeBlobUrls();
     if (this.hls) {
       this.hls.destroy();
       this.hls = null;
@@ -1765,6 +2049,13 @@ export class NetflixPlayer {
 
   destroy() {
     this.clearAutoUnmuteGesture();
+    this._clearStallWatchdog();
+    clearTimeout(this._prefetchTimer);
+    if (this._resolveAbortCtrl) {
+      try { this._resolveAbortCtrl.abort(); } catch {}
+      this._resolveAbortCtrl = null;
+    }
+    this._revokeBlobUrls();
     if (this.settingsHandler) {
       window.removeEventListener('kuro:settings-changed', this.settingsHandler);
       this.settingsHandler = null;
