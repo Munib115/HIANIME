@@ -2,6 +2,138 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <!-- Anime Detail Pages Part 2 -->
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/peerless-martial-spirit</loc>
+    <lastmod>1792402134</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/sakigake-otokojuku-movie</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/new-gods-yang-jian</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/himitsu-no-aipri-ring-hen</loc>
+    <lastmod>2026-11-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/the-white-whale-of-mu</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/techno-police</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/chokin-senshi-cashman</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/hime-dorei</loc>
+    <lastmod>1793021993</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/daigunder</loc>
+    <lastmod>2026-11-05</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/explorer-woman-ray</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/elf-no-futagohime-willan-to-arsura</loc>
+    <lastmod>1793022106</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/alice-in-dream-land</loc>
+    <lastmod>2026-11-05</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/shin-ringetsu</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/so-low</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/patalliro-stardust-keikaku</loc>
+    <lastmod>2026-11-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/newmanoid-cam</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/aikatsu-x-pripara-the-movie-deai-no-kiseki</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/triangle-heart</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/natsu-to-hako</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/crimson-climax</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/grandeek-gaiden</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/ushio-and-tora-comically-deformed-theater</loc>
+    <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/samurai-hunt-for-the-sword</loc>
     <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
@@ -2248,6 +2380,12 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/kaitei-sanman-mile</loc>
     <lastmod>1793267079</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/awol-absent-without-leave</loc>
+    <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -9236,6 +9374,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/soul-eater-late-night-show</loc>
+    <lastmod>2026-11-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/psycho-pass-sinners-of-the-system-case-1-tsumi-to-bachi</loc>
     <lastmod>2026-10-18</lastmod>
     <changefreq>weekly</changefreq>
@@ -10508,6 +10652,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/oneechan-ga-kita-hajimete-no-kitaa</loc>
+    <lastmod>2026-11-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/gurren-lagann-there-are-some-things-i-just-have-to-see</loc>
     <lastmod>2026-10-18</lastmod>
     <changefreq>weekly</changefreq>
@@ -10628,6 +10778,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/baka-and-test-summon-the-beasts-magical-hideyoshi-hideyoshi</loc>
+    <lastmod>2026-11-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/please-take-my-brother-away-5</loc>
     <lastmod>2026-11-12</lastmod>
     <changefreq>weekly</changefreq>
@@ -10684,6 +10840,12 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/love-hina-final-selection</loc>
     <lastmod>2026-11-08</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/solo-leveling-specials</loc>
+    <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -10822,6 +10984,12 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/min-diao-ju-yi-wen-lu</loc>
     <lastmod>2026-11-13</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/boku-no-hero-academia-memories</loc>
+    <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -11120,6 +11288,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/is-it-wrong-to-try-to-pick-up-girls-in-a-dungeon-iv-play-back</loc>
+    <lastmod>2026-11-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/bio-hunter-5470</loc>
     <lastmod>2026-11-10</lastmod>
     <changefreq>weekly</changefreq>
@@ -11128,6 +11302,12 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/pandora-hearts-omake</loc>
     <lastmod>2026-10-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/hoshizora-e-kakaru-hashi-kakaru-ka-gakuensai-ni-koi-no-hashi</loc>
+    <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -11246,6 +11426,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/ore-ga-ojousama-gakkou-ni-shomin-sample-toshite-getssareta-ken-specials</loc>
+    <lastmod>2026-11-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/mononoke-movie-karakasa</loc>
     <lastmod>2026-10-18</lastmod>
     <changefreq>weekly</changefreq>
@@ -11260,6 +11446,12 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/master-of-martial-hearts-6252</loc>
     <lastmod>2026-11-10</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/yuruyuri-for-whatever-reason-never-ending-heart-throbbing-pitter-patter-paradox-eternal</loc>
+    <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -11338,6 +11530,12 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/duel-masters-king-raw</loc>
     <lastmod>1792402682</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/sunday-without-god-memories</loc>
+    <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -12872,13 +13070,25 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/code-geass-lelouch-of-the-rebellion-r2-picture-dramas</loc>
+    <lastmod>2026-11-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/special-powered-armor-troop-dorvack</loc>
+    <lastmod>2026-11-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/special-powered-armor-troop-dorvack-10619</loc>
     <lastmod>1793615947</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/anime/code-geass-lelouch-of-the-rebellion-r2-picture-dramas</loc>
+    <loc>https://kuroanime-flax.vercel.app/anime/code-geass-lelouch-of-the-rebellion-r2-picture-dramas-10620</loc>
     <lastmod>1793615896</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
