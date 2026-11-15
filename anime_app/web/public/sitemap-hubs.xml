@@ -164,13 +164,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/harem</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/magic</loc>
     <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/magic</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/harem</loc>
     <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -236,13 +236,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/mythology</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/space</loc>
     <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/space</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/mythology</loc>
     <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -302,13 +302,19 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/genre/police</loc>
+    <lastmod>2026-11-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/genre/video-game</loc>
     <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/police</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/samurai</loc>
     <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -321,12 +327,6 @@
   </url>
   <url>
     <loc>https://kuroanime-flax.vercel.app/genre/detective</loc>
-    <lastmod>2026-11-15</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/samurai</loc>
     <lastmod>2026-11-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
