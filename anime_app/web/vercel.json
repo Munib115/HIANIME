@@ -10,14 +10,6 @@
     "api/index.py": {
       "includeFiles": "api/*.{db*,json.gz,npz,html}",
       "maxDuration": 60
-    },
-    "api/*.py": {
-      "includeFiles": "api/*.{db*,json.gz,npz,html}",
-      "maxDuration": 60
-    },
-    "api/**/*.py": {
-      "includeFiles": "api/*.{db*,json.gz,npz,html}",
-      "maxDuration": 60
     }
   },
   "headers": [
