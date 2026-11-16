@@ -2537,6 +2537,78 @@ def _find_exact_or_fuzzy_title(user_msg: str, kb_items: list):
 
 
 _CHAR_VISUAL_CACHE: dict = {"loaded": False, "features": None, "meta": None}
+_VEGETA_BRAIN_CACHE: dict = {"loaded": False, "ready": False}
+_VG_HAIR_COLOR_ORDER = (
+    "pink hair", "black hair", "brown hair", "blonde hair", "blue hair",
+    "red hair", "green hair", "white hair", "silver hair", "grey hair",
+    "purple hair", "orange hair", "aqua hair",
+)
+_VG_HAIR_BITS = {tag: (1 << idx) for idx, tag in enumerate(_VG_HAIR_COLOR_ORDER)}
+_VG_HAIR_BRIDGE = {
+    "pink hair": [("red hair", 0.40)],
+    "red hair": [("pink hair", 0.35), ("orange hair", 0.25)],
+    "white hair": [("silver hair", 0.48), ("grey hair", 0.40)],
+    "silver hair": [("white hair", 0.48), ("grey hair", 0.42)],
+    "grey hair": [("silver hair", 0.40), ("white hair", 0.35)],
+    "blue hair": [("aqua hair", 0.45)],
+    "aqua hair": [("blue hair", 0.45)],
+    "brown eyes": [("black eyes", 0.28)],
+    "black eyes": [("brown eyes", 0.25)],
+}
+
+
+def _vg_load_char_brain() -> dict | None:
+    """Lazy-load Vegeta's trained sparse TF-IDF anime character appearance brain."""
+    if _VEGETA_BRAIN_CACHE["loaded"]:
+        return _VEGETA_BRAIN_CACHE if _VEGETA_BRAIN_CACHE["ready"] else None
+    _VEGETA_BRAIN_CACHE["loaded"] = True
+    try:
+        import numpy as np
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        cand_paths = [
+            os.path.join(base_dir, "vegeta_char_brain.npz"),
+            os.path.join(os.getcwd(), "api", "vegeta_char_brain.npz"),
+            os.path.join(os.getcwd(), "anime_app", "web", "api", "vegeta_char_brain.npz"),
+        ]
+        brain_path = next((p for p in cand_paths if os.path.exists(p)), None)
+        _, meta = _load_char_visuals()
+        if not brain_path or not meta:
+            return None
+        npz = np.load(brain_path, allow_pickle=False)
+        indptr = npz["indptr"].astype(np.int32)
+        indices = npz["indices"].astype(np.int32)
+        data_f32 = npz["data"].astype(np.float32)
+        idf = npz["idf"].astype(np.float32)
+        vocab = [str(v) for v in npz["vocab"]]
+        gender = npz["gender"].astype(np.int8)
+        hair_mask = npz["hair_mask"].astype(np.uint32)
+        fav = npz["favourites"].astype(np.float32)
+        role = npz["role"].astype(np.float32)
+        n_chars = len(indptr) - 1
+        if n_chars != len(meta):
+            return None
+        nnz = np.diff(indptr).astype(np.float32)
+        sparsity_scale = np.clip(np.sqrt(nnz / 14.0), 0.25, 1.0).astype(np.float32)
+        row_idx = np.repeat(np.arange(n_chars, dtype=np.int32), np.diff(indptr))
+        pop_bonus = np.clip(np.log1p(np.maximum(fav, 0.0)) / 10.6, 0.0, 1.0).astype(np.float32)
+        _VEGETA_BRAIN_CACHE.update({
+            "ready": True,
+            "n_chars": n_chars,
+            "row_idx": row_idx,
+            "indices": indices,
+            "data_f32": data_f32,
+            "idf": idf,
+            "vocab_map": {t: i for i, t in enumerate(vocab)},
+            "gender": gender,
+            "hair_mask": hair_mask,
+            "pop_bonus": pop_bonus,
+            "role": role,
+            "sparsity_scale": sparsity_scale,
+        })
+        return _VEGETA_BRAIN_CACHE
+    except Exception as err:
+        print(f"Character brain load error: {err}")
+        return None
 
 
 def _load_char_visuals() -> tuple:
@@ -2723,9 +2795,9 @@ def _match_character_visual(raw_bytes: bytes, kb: dict, top_k: int = 3) -> list[
 
 
 _VG_WD_TAGGER_BACKENDS = [
-    ("https://smilingwolf-wd-tagger.hf.space", "SmilingWolf/wd-swinv2-tagger-v3", 0.35, False, 0.22, False),
-    ("https://ashen-sensored-wd-eva02-tagger-2026-canary.hf.space", "ashen-sensored/wd-eva02-tagger-2026-canary", 0.50, False, 0.25, False),
-    ("https://smilingwolf-wd-tagger.hf.space", "SmilingWolf/wd-vit-tagger-v3", 0.35, False, 0.22, False),
+    ("https://smilingwolf-wd-tagger.hf.space", "SmilingWolf/wd-swinv2-tagger-v3", 0.12, False, 0.22, False),
+    ("https://ashen-sensored-wd-eva02-tagger-2026-canary.hf.space", "ashen-sensored/wd-eva02-tagger-2026-canary", 0.14, False, 0.25, False),
+    ("https://smilingwolf-wd-tagger.hf.space", "SmilingWolf/wd-vit-tagger-v3", 0.12, False, 0.22, False),
 ]
 
 _VG_CHAR_SORTED_CACHE: dict = {"ready": False, "map": {}}
@@ -2867,15 +2939,23 @@ def _vg_call_gradio_tagger(base_url: str, model_repo: str, g_thresh: float, g_mc
                             chars = payload[2].get("confidences") or []
                             if not chars and payload[2].get("label"):
                                 chars = [{"label": payload[2]["label"], "confidence": 0.75}]
+                        tag_scores = []
                         tags = []
                         if isinstance(payload[3], dict):
-                            tags = [x.get("label") for x in (payload[3].get("confidences") or []) if x.get("label")]
+                            for x in (payload[3].get("confidences") or []):
+                                lbl = str(x.get("label") or "").strip().lower()
+                                conf_val = float(x.get("confidence") or 0.0)
+                                if lbl:
+                                    tag_scores.append((lbl, conf_val))
+                                    if conf_val >= 0.28:
+                                        tags.append(lbl)
                         return {
                             "characters": [
                                 {"label": str(c.get("label") or "").strip(), "confidence": float(c.get("confidence") or 0.0)}
                                 for c in chars if c.get("label")
                             ],
                             "tags": tags,
+                            "tag_scores": tag_scores,
                             "engine": model_repo,
                         }
                     break
@@ -3008,7 +3088,147 @@ def _vg_lookup_char_in_kb(char_label: str, kb: dict) -> tuple[str, str | None, o
     return base_name.title(), series_hint or None, None, 0.0
 
 
-def _vg_resolve_wd_results(wd_out: dict, kb: dict) -> dict | None:
+def _vg_predict_character_from_brain(wd_out: dict, kb: dict, img_bytes: bytes | None = None) -> dict | None:
+    """Match an uploaded anime artwork/fanart/closeup against the trained semantic+visual character brain."""
+    brain = _vg_load_char_brain()
+    feats, meta = _load_char_visuals()
+    if not brain or not meta:
+        return None
+    tag_scores = wd_out.get("tag_scores") or [(t, 0.65) for t in (wd_out.get("tags") or [])]
+    if not tag_scores:
+        return None
+
+    import numpy as np
+    vmap = brain["vocab_map"]
+    idf = brain["idf"]
+    n_chars = brain["n_chars"]
+    q_map: dict[int, float] = {}
+    raw_tag_dict: dict[str, float] = {}
+
+    for lbl, conf in tag_scores:
+        raw_tag_dict[lbl] = max(raw_tag_dict.get(lbl, 0.0), float(conf))
+        if lbl in vmap:
+            idx = vmap[lbl]
+            q_map[idx] = max(q_map.get(idx, 0.0), float(conf))
+        for alt_lbl, mult in _VG_HAIR_BRIDGE.get(lbl, ()):
+            if alt_lbl in vmap and raw_tag_dict.get(alt_lbl, 0.0) < conf * mult:
+                alt_idx = vmap[alt_lbl]
+                q_map[alt_idx] = max(q_map.get(alt_idx, 0.0), float(conf) * mult)
+
+    if len(q_map) < 2:
+        return None
+
+    q_vec = np.zeros(len(idf), dtype=np.float32)
+    for ti, val in q_map.items():
+        q_vec[ti] = val * idf[ti]
+    q_norm = float(np.linalg.norm(q_vec))
+    if q_norm < 1e-6:
+        return None
+    q_vec /= q_norm
+
+    cos_sem = np.bincount(
+        brain["row_idx"],
+        weights=brain["data_f32"] * q_vec[brain["indices"]],
+        minlength=n_chars,
+    ).astype(np.float32)
+    cos_sem = cos_sem * brain["sparsity_scale"]
+
+    score = cos_sem.copy()
+
+    # Gender consistency gate
+    p_boy = raw_tag_dict.get("1boy", 0.0) + raw_tag_dict.get("male focus", 0.0)
+    p_girl = raw_tag_dict.get("1girl", 0.0) + raw_tag_dict.get("female focus", 0.0)
+    if p_boy >= 1.25 and raw_tag_dict.get("1girl", 0.0) < 0.25:
+        score = np.where(brain["gender"] == 2, score - 0.35, score)
+        score = np.where(brain["gender"] == 1, score + 0.04, score)
+    elif p_girl >= 1.25 and raw_tag_dict.get("1boy", 0.0) < 0.25:
+        score = np.where(brain["gender"] == 1, score - 0.35, score)
+        score = np.where(brain["gender"] == 2, score + 0.04, score)
+
+    # Hair-color affinity with warm/cool family tolerance
+    q_hair_exact = 0
+    q_hair_compat = 0
+    max_hair_p = 0.0
+    for htag, hbit in _VG_HAIR_BITS.items():
+        hp = raw_tag_dict.get(htag, 0.0)
+        if hp >= 0.40:
+            max_hair_p = max(max_hair_p, hp)
+            q_hair_exact |= hbit
+            q_hair_compat |= hbit
+            for alt_h, _ in _VG_HAIR_BRIDGE.get(htag, ()):
+                q_hair_compat |= _VG_HAIR_BITS.get(alt_h, 0)
+    if q_hair_exact:
+        hm = brain["hair_mask"]
+        has_exact = (hm & q_hair_exact) != 0
+        has_compat = (hm & q_hair_compat) != 0
+        score = np.where(has_exact, score + 0.11, np.where(has_compat, score + 0.05, score))
+        if max_hair_p >= 0.65:
+            score = np.where(~has_compat, score - 0.16, score)
+
+    # Visual portrait affinity tie-breaker
+    if img_bytes and feats is not None and len(feats) == n_chars:
+        try:
+            import cv2
+            im = cv2.imdecode(np.frombuffer(img_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+            dv = _extract_visual_descriptor(im)
+            if dv is not None:
+                cos_vis = feats @ dv
+                score = score + 0.06 * np.clip(cos_vis, 0.0, 1.0)
+        except Exception:
+            pass
+
+    score = score + 0.06 * brain["pop_bonus"] + 0.025 * brain["role"]
+
+    top_idxs = np.argsort(score)[::-1][:10]
+    by_al = kb.get("by_anilist_id") or {}
+    by_mal = kb.get("by_mal_id") or {}
+    best_i = int(top_idxs[0])
+    if float(cos_sem[best_i]) < 0.24 or float(score[best_i]) < 0.34:
+        return None
+
+    def _resolve_meta_item(m_row: dict):
+        cands = []
+        if m_row.get("al") and int(m_row["al"]) in by_al:
+            cands.append(by_al[int(m_row["al"])])
+        if m_row.get("mal") and int(m_row["mal"]) in by_mal:
+            cands.append(by_mal[int(m_row["mal"])])
+        if m_row.get("t"):
+            t_it, _ = _find_exact_or_fuzzy_title(m_row["t"], kb["items"])
+            if t_it:
+                cands.append(t_it)
+        if not cands:
+            return None
+        cands.sort(key=_vg_anime_entry_priority, reverse=True)
+        return cands[0]
+
+    m_best = meta[best_i]
+    matched_item = _resolve_meta_item(m_best)
+    if not matched_item:
+        for alt_idx in top_idxs[1:4]:
+            cand_m = meta[int(alt_idx)]
+            cand_it = _resolve_meta_item(cand_m)
+            if cand_it and float(cos_sem[int(alt_idx)]) >= 0.25:
+                m_best = cand_m
+                matched_item = cand_it
+                best_i = int(alt_idx)
+                break
+    if not matched_item:
+        return None
+
+    conf_pct = min(0.96, max(0.72, 0.45 + float(score[best_i]) * 0.65))
+    return {
+        "score": conf_pct,
+        "character": m_best.get("n") or "Identified Character",
+        "characters_list": [m_best.get("n") or "Identified Character"],
+        "anime_title": matched_item.get("title_english") or matched_item.get("title") or m_best.get("t"),
+        "anilist_id": m_best.get("al"),
+        "mal_id": m_best.get("mal"),
+        "matched_item": matched_item,
+        "source": "vegeta-neural-brain",
+    }
+
+
+def _vg_resolve_wd_results(wd_out: dict, kb: dict, img_bytes: bytes | None = None) -> dict | None:
     """Resolve WD-Tagger character & tag predictions into a structured KuroAnime visual match."""
     if not wd_out:
         return None
@@ -3070,7 +3290,13 @@ def _vg_resolve_wd_results(wd_out: dict, kb: dict) -> dict | None:
                 "matched_item": it,
                 "source": wd_out.get("engine") or "wd-tagger",
             }
-    elif tags:
+    if not best_char_match:
+        brain_hit = _vg_predict_character_from_brain(wd_out, kb, img_bytes=img_bytes)
+        if brain_hit:
+            best_char_match = brain_hit
+            detected_names = [(brain_hit["character"], brain_hit["score"])]
+
+    if not best_char_match and tags:
         # Check distinctive franchise-specific tags if characters missed threshold
         sig_tags = [t for t in tags if t not in _VG_GENERIC_WD_TAGS and not re.match(r"^\d+(?:boy|girl)s?$", t)]
         tag_cands = _vg_identify_scene_candidates(" ".join(sig_tags[:10]), kb["items"], kb=kb, limit=2) if len(sig_tags) >= 3 else []
@@ -3184,10 +3410,10 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision:
         vision_res = None
         if not local_char_lock and use_remote_vision:
             wd_raw = _vg_hf_wd_tagger_identify(raw_jpg)
-            vision_res = _vg_resolve_wd_results(wd_raw, kb)
+            vision_res = _vg_resolve_wd_results(wd_raw, kb, img_bytes=raw_jpg)
             if (not vision_res or not vision_res.get("best_char_match")) and cropped_bytes:
                 wd_crop = _vg_hf_wd_tagger_identify(cropped_bytes)
-                crop_res = _vg_resolve_wd_results(wd_crop, kb)
+                crop_res = _vg_resolve_wd_results(wd_crop, kb, img_bytes=cropped_bytes)
                 if crop_res and (crop_res.get("best_char_match") or not vision_res):
                     vision_res = crop_res
 
@@ -3487,6 +3713,9 @@ _VG_SCENE_CONCEPT_EXPANSIONS = [
 
 def _vg_is_scene_or_plot_query(msg_low: str) -> bool:
     if not msg_low:
+        return False
+    # Never hijack explicit voice-actor/seiyuu or studio queries as plot descriptions
+    if re.search(r"\b(voice\s+actor|seiyuu|who\s+voice[ds]?|voiced?\s*(?:by|in|for|of)?|voices|voicing|studio|animated\s+by)\b", msg_low):
         return False
     # Explicit identification triggers
     if any(k in msg_low for k in [
@@ -5038,8 +5267,59 @@ def _vg_handle_saiyan_banter(low):
     return None
 
 
+def _vg_find_char_lore_matches(low: str, kb: dict, active_anime: dict | None = None, limit: int = 3) -> list[dict]:
+    """Resolve character lore dossiers from AniList/MAL trained knowledge across name variants."""
+    lore_map = kb.get("char_lore_by_key") or {}
+    if not lore_map or not low:
+        return []
+    clean_q = re.sub(
+        r"\b(who is|whos|who's|tell me about|what anime is|which anime is|from|the character|character|anime|voice actor|seiyuu|who voices|who voice|voiced by|voice of|japanese voice|of|does|did)\b",
+        " ",
+        low,
+    )
+    clean_q = re.sub(r"[^a-z0-9\s]", " ", clean_q).strip()
+    clean_q = re.sub(r"\s+", " ", clean_q)
+    toks = [t for t in clean_q.split() if len(t) >= 2 and t not in _VEGETA_STOPWORDS]
+    if not toks and not clean_q:
+        return []
+
+    raw_hits = []
+    seen_cids = set()
+    cands_to_try = []
+    if clean_q in lore_map:
+        cands_to_try.append(clean_q)
+    if len(toks) >= 2:
+        for idx in range(len(toks) - 1):
+            p = f"{toks[idx]} {toks[idx + 1]}"
+            p_rev = f"{toks[idx + 1]} {toks[idx]}"
+            cands_to_try.extend([p, p_rev])
+    for t in toks:
+        if len(t) >= 4:
+            cands_to_try.append(t)
+
+    for key in dict.fromkeys(cands_to_try):
+        for rec in lore_map.get(key, [])[:6]:
+            cid = rec.get("cid") or id(rec)
+            if cid not in seen_cids:
+                seen_cids.add(cid)
+                raw_hits.append(rec)
+
+    if active_anime and raw_hits:
+        act_fran = active_anime.get("franchise")
+        act_aid = active_anime.get("anime_id")
+        raw_hits.sort(
+            key=lambda r: (
+                1 if (r.get("item") and (r["item"]["anime_id"] == act_aid or (act_fran and r["item"].get("franchise") == act_fran))) else 0,
+                1 if r.get("r") == "M" else 0,
+                int(r.get("fav") or 0),
+            ),
+            reverse=True,
+        )
+    return raw_hits[:limit]
+
+
 def _vg_handle_character_inquiry(low, active_anime, kb):
-    # 1. Check direct character matches
+    # 1. Check direct curated character matches
     matched_char = None
     for k, c in ANIME_CHARACTER_LORE.items():
         for al in c["aliases"]:
@@ -5076,9 +5356,46 @@ def _vg_handle_character_inquiry(low, active_anime, kb):
                 matched_char = ANIME_CHARACTER_LORE["itachi"]
 
     if not matched_char:
-        # 3. Fallback to MAL/AniList-trained character_index across both servers
+        # 3. Check MAL/AniList trained deep character lore database (4,500+ rich profiles)
+        is_char_intent = any(k in low for k in [
+            "who is", "whos", "who's", "tell me about", "what anime is", "which anime is",
+            "character", "backstory", "abilities", "powers", "magic of",
+        ])
+        if is_char_intent:
+            lore_hits = _vg_find_char_lore_matches(low, kb, active_anime=active_anime, limit=1)
+            if lore_hits and lore_hits[0].get("item"):
+                rc = lore_hits[0]
+                it = rc["item"]
+                an_title = it.get("title_english") or it.get("title") or rc.get("t") or "Anime"
+                role_label = "Main Character" if rc.get("r") == "M" else "Supporting Character"
+                nat = f" ({rc['nat']})" if rc.get("nat") else ""
+                meta_bits = [f"**{role_label}** in **{an_title}** (★ {it.get('score')}/10, {it.get('episode_count')} eps)"]
+                if rc.get("g"):
+                    meta_bits.append(f"**Gender:** {rc['g']}")
+                if rc.get("age"):
+                    meta_bits.append(f"**Age:** {rc['age']}")
+                if rc.get("va"):
+                    meta_bits.append(f"**Japanese Seiyuu:** {rc['va']}")
+                aliases = ", ".join((rc.get("a") or [])[:3])
+                alias_line = f"- **Known Aliases:** {aliases}\n" if aliases else ""
+                bio = (rc.get("bio") or "").strip()
+                bio = re.sub(r"^(?:Details\s+Clubs\s+Pictures\s*)+", "", bio, flags=re.I).strip()
+                bio_line = f"\n{bio}\n" if bio else f"\n{(it.get('synopsis') or '')[:260]}\n"
+                reply = (
+                    f"## Prince Vegeta's Saiyan Scouter • {rc['n']}{nat}\n\n"
+                    f"Hmph! Look closely at the archives for **{rc['n']}**:\n\n"
+                    f"- {' • '.join(meta_bits)}\n"
+                    f"{alias_line}"
+                    f"{bio_line}\n"
+                    f"Stream their battles on KuroAnime now:\n\n"
+                    f"- [Watch {an_title} on KuroAnime](#anime/{it['anime_id']})"
+                )
+                action = {"type": "play", "anime_id": it["anime_id"], "episode": 1, "time": 0, "title": an_title}
+                return reply, action
+
+        # 4. Fallback to full MAL/AniList character_index (16,000+ characters)
         char_idx = kb.get("character_index") or {}
-        if char_idx and any(k in low for k in ["who is", "whos", "who's", "tell me about", "what anime is", "which anime is", "character"]):
+        if char_idx and is_char_intent:
             clean_q = re.sub(
                 r"\b(who is|whos|who's|tell me about|what anime is|which anime is|from|the character|character|anime)\b",
                 " ",
@@ -5090,7 +5407,6 @@ def _vg_handle_character_inquiry(low, active_anime, kb):
             if clean_q in char_idx:
                 best_char_hit = char_idx[clean_q][0]
             elif q_tokens:
-                # Try 2-word and 1-word combinations against character_index
                 for n in (2, 1):
                     for idx in range(len(q_tokens) - n + 1):
                         cand = " ".join(q_tokens[idx : idx + n])
@@ -5578,7 +5894,9 @@ def _vg_handle_quote_inquiry(low: str, kb: dict):
 
 
 def _vg_handle_seiyuu_inquiry(low: str, kb: dict):
-    is_va_phrase = any(k in low for k in ["voice actor", "seiyuu", "who voices", "who voice", "voiced by", "voice of", "japanese voice", "english voice", "actor"])
+    is_va_phrase = bool(re.search(r"\b(voice\s+actor|seiyuu|voiced?|voices|voicing|who\s+voice[ds]?)\b", low)) or any(
+        k in low for k in ["voice actor", "seiyuu", "who voices", "who voice", "voiced by", "voice of", "japanese voice", "english voice"]
+    )
     for k, va in VOICE_ACTOR_LORE.items():
         if k in low or (is_va_phrase and any(tok in low for tok in k.split() if len(tok) >= 4)):
             matched_item = kb.get("by_id", {}).get(va["top_anime_id"])
@@ -5595,6 +5913,67 @@ def _vg_handle_seiyuu_inquiry(low: str, kb: dict):
             lines.append(f"\n{va['vegeta_take']}\n\nStream their peak battle performance on KuroAnime:\n\n- [Watch {va['top_anime_title']} on KuroAnime](#anime/{aid})")
             act = {"type": "play", "anime_id": aid, "episode": 1, "time": 0, "title": va["top_anime_title"]}
             return "\n".join(lines), act
+
+    # Dynamic MAL/AniList Seiyuu & "Who voices character?" Lookup across 4,500+ trained characters
+    if is_va_phrase:
+        seiyuu_idx = kb.get("seiyuu_index") or {}
+        clean_q = re.sub(
+            r"\b(voice actor|seiyuu|who voices|who voice|voiced by|voice of|japanese voice|english voice|actor|is|the|in|anime|did|does)\b",
+            " ",
+            low,
+        )
+        clean_q = re.sub(r"[^a-z0-9\s]", " ", clean_q).strip()
+        va_toks = [t for t in clean_q.split() if len(t) >= 3]
+        matched_va_roles = None
+        if clean_q in seiyuu_idx:
+            matched_va_roles = seiyuu_idx[clean_q]
+        elif len(va_toks) >= 2:
+            for idx in range(len(va_toks) - 1):
+                p1 = f"{va_toks[idx]} {va_toks[idx + 1]}"
+                p2 = f"{va_toks[idx + 1]} {va_toks[idx]}"
+                matched_va_roles = seiyuu_idx.get(p1) or seiyuu_idx.get(p2)
+                if matched_va_roles:
+                    break
+        if matched_va_roles:
+            va_name = matched_va_roles[0][0]
+            first_it = matched_va_roles[0][2]
+            top_title = first_it.get("title_english") or first_it.get("title")
+            lines = [
+                f"## Prince Vegeta's Saiyan Scouter • {va_name} Seiyuu Dossier\n\n"
+                f"Hmph! **{va_name}** commands the voices of these warriors in KuroAnime's archives:\n"
+            ]
+            seen_an = set()
+            for _, ch_name, an_it, _ in matched_va_roles:
+                if an_it["anime_id"] in seen_an:
+                    continue
+                seen_an.add(an_it["anime_id"])
+                an_t = an_it.get("title_english") or an_it.get("title")
+                lines.append(f"- **{ch_name}** in **{an_t}** • [Watch on KuroAnime](#anime/{an_it['anime_id']})")
+                if len(seen_an) >= 6:
+                    break
+            act = {"type": "play", "anime_id": first_it["anime_id"], "episode": 1, "time": 0, "title": top_title}
+            return "\n".join(lines), act
+
+        # Otherwise check if user asked "who voices <character>?"
+        lore_hits = _vg_find_char_lore_matches(low, kb, limit=1)
+        if lore_hits and lore_hits[0].get("va") and lore_hits[0].get("item"):
+            rc = lore_hits[0]
+            va_name = rc["va"]
+            an_it = rc["item"]
+            an_t = an_it.get("title_english") or an_it.get("title")
+            va_key = re.sub(r"[^a-z0-9\s]", " ", va_name.lower()).strip()
+            other_roles = [
+                f"**{cn}** (*{oit.get('title_english') or oit.get('title')}*)"
+                for _, cn, oit, _ in seiyuu_idx.get(va_key, [])[:5]
+                if cn != rc["n"]
+            ][:3]
+            other_str = ("\n\nOther notable roles by **" + va_name + "**: " + ", ".join(other_roles) + ".") if other_roles else ""
+            reply = (
+                f"Hmph! **{rc['n']}** in **{an_t}** is voiced in Japanese by **{va_name}**!{other_str}\n\n"
+                f"- [Watch {an_t} on KuroAnime](#anime/{an_it['anime_id']})"
+            )
+            act = {"type": "play", "anime_id": an_it["anime_id"], "episode": 1, "time": 0, "title": an_t}
+            return reply, act
     return None
 
 
@@ -6180,6 +6559,92 @@ def get_vegeta_full_knowledge():
     for ck in char_index:
         char_index[ck].sort(key=lambda x: (1 if x[1] == "M" else 0, x[2].get("popularity") or 0), reverse=True)
 
+    # Enrich with deep MAL/AniList character lore & Japanese Seiyuu index
+    char_lore_by_key: dict = {}
+    seiyuu_index: dict = {}
+    lore_list = []
+    for lore_path in [
+        os.path.join(CURRENT_DIR, "vegeta_char_lore.json.gz"),
+        os.path.join(PARENT_DIR, "vegeta_char_lore.json.gz"),
+        os.path.join(CURRENT_DIR, "api", "vegeta_char_lore.json.gz"),
+        os.path.join(os.getcwd(), "api", "vegeta_char_lore.json.gz"),
+        os.path.join(os.getcwd(), "anime_app", "web", "api", "vegeta_char_lore.json.gz"),
+    ]:
+        if os.path.exists(lore_path):
+            try:
+                import gzip as _gzip
+                with _gzip.open(lore_path, "rb") as _lf:
+                    lore_list = json.loads(_lf.read().decode("utf-8"))
+                break
+            except Exception as _le:
+                print(f"Character lore load error ({lore_path}): {_le}")
+
+    if lore_list:
+        by_norm_title: dict = {}
+        for _it_t in items:
+            for _nt in (_it_t.get("all_titles_norm") or ()):
+                if not _nt or len(_nt) < 2:
+                    continue
+                prev_it = by_norm_title.get(_nt)
+                if prev_it is None or _vg_anime_entry_priority(_it_t) > _vg_anime_entry_priority(prev_it):
+                    by_norm_title[_nt] = _it_t
+
+        for rc in lore_list:
+            cands_it = []
+            if rc.get("al") and int(rc["al"]) in by_al:
+                cands_it.append(by_al[int(rc["al"])])
+            if rc.get("mal") and int(rc["mal"]) in by_mal_id:
+                cands_it.append(by_mal_id[int(rc["mal"])])
+            if rc.get("t"):
+                _t_key = _normalize_str(rc["t"])
+                if _t_key in by_norm_title:
+                    cands_it.append(by_norm_title[_t_key])
+            if not cands_it:
+                continue
+            cands_it.sort(key=_vg_anime_entry_priority, reverse=True)
+            an_it = cands_it[0]
+            rec_obj = dict(rc)
+            rec_obj["item"] = an_it
+            cname = rc.get("n") or ""
+            keys_add = [cname.lower()] + [a.lower() for a in (rc.get("a") or []) if a]
+            for ck in dict.fromkeys(keys_add):
+                ck_clean = re.sub(r"[^a-z0-9\s]", " ", ck).strip()
+                ck_clean = re.sub(r"\s+", " ", ck_clean)
+                if len(ck_clean) >= 3:
+                    char_lore_by_key.setdefault(ck_clean, []).append(rec_obj)
+                    toks_c = ck_clean.split()
+                    if len(toks_c) == 2:
+                        char_lore_by_key.setdefault(f"{toks_c[1]} {toks_c[0]}", []).append(rec_obj)
+                    if rc.get("r") == "M":
+                        for tk in toks_c:
+                            if len(tk) >= 4:
+                                char_lore_by_key.setdefault(tk, []).append(rec_obj)
+            # Feed rich bio + aliases into anime's scene search tokens
+            bio_snip = (rc.get("bio") or "")[:360]
+            extra_txt = " ".join([cname, " ".join(rc.get("a") or []), rc.get("va") or "", bio_snip]).lower().strip()
+            if extra_txt:
+                prev_cl = an_it.get("char_lore_lower") or ""
+                if len(prev_cl) < 2800:
+                    an_it["char_lore_lower"] = (prev_cl + " " + extra_txt).strip()
+            va_raw = (rc.get("va") or "").strip()
+            if va_raw:
+                va_clean = re.sub(r"[^a-z0-9\s]", " ", va_raw.lower()).strip()
+                va_toks = va_clean.split()
+                va_keys = [va_clean]
+                if len(va_toks) == 2:
+                    va_keys.append(f"{va_toks[1]} {va_toks[0]}")
+                for vk in dict.fromkeys(va_keys):
+                    if len(vk) >= 4:
+                        seiyuu_index.setdefault(vk, []).append((va_raw, cname, an_it, int(rc.get("fav") or 0)))
+
+        for k_cl in char_lore_by_key:
+            char_lore_by_key[k_cl].sort(key=lambda x: (1 if x.get("r") == "M" else 0, int(x.get("fav") or 0)), reverse=True)
+        for k_va in seiyuu_index:
+            seiyuu_index[k_va].sort(key=lambda x: x[3], reverse=True)
+
+    kb["char_lore_by_key"] = char_lore_by_key
+    kb["seiyuu_index"] = seiyuu_index
+
     # Load named episode titles from hianime.db for episode-level scene recognition
     try:
         ep_rows = rows(
@@ -6216,6 +6681,7 @@ def get_vegeta_full_knowledge():
                 (it_obj.get("synonyms") or "").lower(),
                 it_obj.get("synopsis_lower") or "",
                 it_obj.get("characters_lower") or "",
+                it_obj.get("char_lore_lower") or "",
                 it_obj.get("tags_lower") or "",
                 it_obj.get("ep_titles_lower") or "",
             ])
@@ -6371,7 +6837,21 @@ def _vegeta_retrieve(user_msg, history, kb, image_search_result=None, has_image=
             "- Action Directive: Present the #1 match confidently with its clickable `#anime/ID?ep=EP` link, synopsis, and episode match, and mention runner-up matches if relevant!"
         )
 
-    # 0.5. Character Index Match (from MyAnimeList/AniList trained character database)
+    # 0.5. Character Index & Deep Lore Match (from MyAnimeList/AniList trained character database)
+    lore_rag_hits = _vg_find_char_lore_matches(msg_low, kb, limit=3)
+    if lore_rag_hits:
+        lore_lines = []
+        for lr in lore_rag_hits:
+            lit = lr.get("item")
+            if not lit:
+                continue
+            add(lit)
+            va_note = f" | Seiyuu: {lr['va']}" if lr.get("va") else ""
+            bio_s = (lr.get("bio") or "")[:300]
+            lore_lines.append(f"- {lr['n']} ({lit.get('title_english') or lit.get('title')} [ID {lit['anime_id']}]{va_note}): {bio_s}")
+        if lore_lines:
+            blocks.append("TRAINED CHARACTER LORE & SEIYUU DOSSIERS:\n" + "\n".join(lore_lines))
+
     char_idx = kb.get("character_index") or {}
     if char_idx and msg_low:
         q_tokens = re.findall(r"[a-z]{3,}", msg_low)
