@@ -326,13 +326,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/detective</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/josei</loc>
     <lastmod>2026-11-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/josei</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/detective</loc>
     <lastmod>2026-11-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -440,25 +440,25 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/unknown</loc>
-    <lastmod>2026-11-16</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
     <loc>https://kuroanime-flax.vercel.app/genre/cgdct</loc>
     <lastmod>2026-11-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/dementia</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/unknown</loc>
     <lastmod>2026-11-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://kuroanime-flax.vercel.app/genre/iyashikei</loc>
+    <lastmod>2026-11-16</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/genre/dementia</loc>
     <lastmod>2026-11-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
