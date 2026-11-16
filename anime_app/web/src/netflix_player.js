@@ -422,27 +422,24 @@ export class NetflixPlayer {
 
         <!-- Double-Tap Seek Ripple Feedback -->
         <div class="nf-seek-ripple left" id="nf-ripple-left">
-          <div class="nf-ripple-icon">⏪ 10s</div>
+          <div class="nf-ripple-icon">-10s</div>
         </div>
         <div class="nf-seek-ripple right" id="nf-ripple-right">
-          <div class="nf-ripple-icon">10s ⏩</div>
+          <div class="nf-ripple-icon">+10s</div>
         </div>
 
         <!-- Center Loading / Buffering Glass Spinner -->
         <div class="nf-loader-overlay active" id="nf-loader-overlay">
           <div class="nf-spinner-ring"></div>
-          <div class="nf-loader-text" id="nf-loader-text">Extracting Ad-Free 1080p Stream...</div>
+          <div class="nf-loader-text" id="nf-loader-text">Loading stream...</div>
         </div>
 
-        <!-- Top Glass Bar -->
+        <!-- Top Bar -->
         <div class="nf-top-bar" id="nf-top-bar">
           <div class="nf-top-left">
-            <button type="button" class="nf-glass-icon-btn nf-player-back-btn" id="nf-player-back-btn" title="Back">
-              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            <button type="button" class="nf-glass-icon-btn nf-player-back-btn" id="nf-player-back-btn" title="Back" aria-label="Back">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             </button>
-            <span class="nf-badge-adfree">
-              <span class="nf-live-dot"></span> AD-FREE
-            </span>
             <div class="nf-top-titles">
               <span class="nf-top-anime">${this.animeTitle}</span>
               <span class="nf-top-ep">${epLabel}</span>
@@ -453,10 +450,6 @@ export class NetflixPlayer {
               <button type="button" class="nf-audio-pill ${this.audioType === 'sub' ? 'active' : ''}" data-audio="sub" ${!this.hasSub ? 'disabled' : ''}>SUB</button>
               <button type="button" class="nf-audio-pill ${this.audioType === 'dub' ? 'active' : ''}" data-audio="dub" ${!this.hasDub ? 'disabled' : ''}>DUB</button>
             </div>
-            <button type="button" class="nf-glass-pill-btn" id="nf-top-download-btn" title="Download Episode">
-              <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              <span>Download</span>
-            </button>
             <button type="button" class="nf-glass-pill-btn nf-embed-fallback-btn" id="nf-fallback-embed-btn" title="Switch to Embed Server">
               <span>Embed</span>
             </button>
@@ -488,9 +481,9 @@ export class NetflixPlayer {
         </div>
 
         <!-- Autoplay Muted Unmute Pill -->
-        <button type="button" id="nf-unmute-banner" style="display:none;position:absolute;top:64px;left:18px;z-index:45;background:rgba(229,9,20,0.94);color:#fff;border:1px solid rgba(255,255,255,0.28);border-radius:999px;padding:7px 14px;font-size:0.82rem;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,0.45);backdrop-filter:blur(8px);align-items:center;gap:6px;">
-          <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.3" fill="none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-          <span>Tap to Unmute</span>
+        <button type="button" class="nf-unmute-banner" id="nf-unmute-banner" style="display:none">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.8" fill="none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+          <span>Tap to unmute</span>
         </button>
 
         <!-- Netflix Skip Intro / Skip Outro Floating Button -->
@@ -550,13 +543,24 @@ export class NetflixPlayer {
           <div class="nf-popover-section">
             <div class="nf-popover-header">
               <span>Sound Booster</span>
-              <span class="nf-popover-meta" id="nf-boost-status">${Math.round(this.soundBoost * 100)}%</span>
+              <span class="nf-popover-meta ${this.soundBoost > 1 ? 'active' : ''}" id="nf-boost-status">${Math.round(this.soundBoost * 100)}%</span>
             </div>
             <div class="nf-boost-pills" id="nf-boost-pills">
               ${[{ val: 1, label: '100%' }, { val: 1.5, label: '150%' }, { val: 2, label: '200%' }].map(b => `
                 <button type="button" class="nf-boost-btn ${Math.abs(this.soundBoost - b.val) < 0.01 ? 'active' : ''}" data-boost="${b.val}">${b.label}</button>
               `).join('')}
             </div>
+          </div>
+
+          <div class="nf-popover-actions">
+            <button type="button" class="nf-popover-action-btn" id="nf-pop-share-btn">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.6" fill="none"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+              <span>Share</span>
+            </button>
+            <button type="button" class="nf-popover-action-btn" id="nf-pop-download-btn">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.6" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Download</span>
+            </button>
           </div>
         </div>
 
@@ -568,7 +572,9 @@ export class NetflixPlayer {
                 <div class="nf-download-title">Download Episode ${this.episodeNumber}</div>
                 <div class="nf-download-sub">${this.animeTitle} • ${this.audioType.toUpperCase()}</div>
               </div>
-              <button type="button" class="nf-modal-close" id="nf-download-close" aria-label="Close download menu">✕</button>
+              <button type="button" class="nf-modal-close" id="nf-download-close" aria-label="Close download menu">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.8" fill="none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
 
             <div class="nf-download-body" id="nf-download-options">
@@ -609,25 +615,24 @@ export class NetflixPlayer {
           <div class="nf-controls-row">
             <div class="nf-controls-left">
               <button type="button" class="nf-ctrl-btn" id="nf-btn-play" aria-label="Play/Pause">
-                <svg class="icon-play" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <svg class="icon-pause" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+                <svg class="icon-play" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <svg class="icon-pause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
               </button>
 
-              <button type="button" class="nf-ctrl-btn nf-hide-xs" id="nf-btn-rw" title="Rewind 10s">
-                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+              <button type="button" class="nf-ctrl-btn nf-hide-mobile" id="nf-btn-rw" title="Rewind 10s" aria-label="Rewind 10 seconds">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
               </button>
 
-              <button type="button" class="nf-ctrl-btn nf-hide-xs" id="nf-btn-ff" title="Forward 10s">
-                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+              <button type="button" class="nf-ctrl-btn nf-hide-mobile" id="nf-btn-ff" title="Forward 10s" aria-label="Forward 10 seconds">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
               </button>
 
               <div class="nf-volume-group">
                 <button type="button" class="nf-ctrl-btn" id="nf-btn-mute" aria-label="Mute/Unmute">
-                  <svg class="icon-vol-high" viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-                  <svg class="icon-vol-mute" viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none" style="display:none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                  <svg class="icon-vol-high" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                  <svg class="icon-vol-mute" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none" style="display:none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
                 </button>
-                <input type="range" class="nf-volume-slider nf-hide-mobile" id="nf-volume-slider" min="0" max="2" step="0.05" value="${this.soundBoost > 1 ? this.soundBoost : this.userVolume}" aria-label="Volume and Sound Booster" />
-                <button type="button" class="nf-boost-badge" id="nf-boost-badge" title="Click to toggle 200% Sound Booster" style="display:${this.soundBoost > 1 ? 'inline-flex' : 'none'}">${Math.round(this.soundBoost * 100)}%</button>
+                <input type="range" class="nf-volume-slider nf-hide-mobile" id="nf-volume-slider" min="0" max="2" step="0.05" value="${this.soundBoost > 1 ? this.soundBoost : this.userVolume}" aria-label="Volume" />
               </div>
 
               <div class="nf-time-display">
@@ -638,37 +643,35 @@ export class NetflixPlayer {
             </div>
 
             <div class="nf-controls-right">
-              <button type="button" class="nf-ctrl-btn nf-badge-trigger" id="nf-btn-subs" title="Subtitles (CC)">
-                <svg viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></svg>
-                <span class="nf-mini-tag" id="nf-cc-tag">CC</span>
+              <button type="button" class="nf-ctrl-btn" id="nf-btn-subs" title="Subtitles (CC)" aria-label="Subtitles">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></svg>
               </button>
 
-              <button type="button" class="nf-ctrl-btn nf-badge-trigger" id="nf-btn-settings" title="Quality & Speed">
-                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                <span class="nf-mini-tag" id="nf-quality-tag">HD</span>
+              <button type="button" class="nf-ctrl-btn" id="nf-btn-settings" title="Settings" aria-label="Player Settings">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               </button>
 
-              <button type="button" class="nf-ctrl-btn" id="nf-btn-share" title="Share Episode with Timestamp" aria-label="Share">
-                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+              <button type="button" class="nf-ctrl-btn nf-hide-mobile" id="nf-btn-share" title="Share Episode" aria-label="Share">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
               </button>
 
-              <button type="button" class="nf-ctrl-btn" id="nf-btn-download" title="Download Episode">
-                <svg viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <button type="button" class="nf-ctrl-btn nf-hide-mobile" id="nf-btn-download" title="Download Episode" aria-label="Download">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               </button>
 
               ${this.hasNextEp ? `
-                <button type="button" class="nf-ctrl-btn" id="nf-btn-next" title="Next Episode">
-                  <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.2"/></svg>
+                <button type="button" class="nf-ctrl-btn" id="nf-btn-next" title="Next Episode" aria-label="Next Episode">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2"/></svg>
                 </button>
               ` : ''}
 
-              <button type="button" class="nf-ctrl-btn nf-hide-xs" id="nf-btn-pip" title="Picture-in-Picture">
-                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="4" width="20" height="15" rx="2"/><rect x="12" y="11" width="8" height="6" rx="1"/></svg>
+              <button type="button" class="nf-ctrl-btn nf-hide-mobile" id="nf-btn-pip" title="Picture-in-Picture" aria-label="Picture-in-Picture">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><rect x="2" y="4" width="20" height="15" rx="2"/><rect x="12" y="11" width="8" height="6" rx="1"/></svg>
               </button>
 
               <button type="button" class="nf-ctrl-btn" id="nf-btn-fs" aria-label="Fullscreen">
-                <svg class="icon-fs-enter" viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-                <svg class="icon-fs-exit" viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none" style="display:none"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+                <svg class="icon-fs-enter" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                <svg class="icon-fs-exit" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="1.6" fill="none" style="display:none"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
               </button>
             </div>
           </div>
@@ -803,10 +806,9 @@ export class NetflixPlayer {
       });
     });
 
-    // Volume, Mute & 200% Sound Booster
+    // Volume & Mute
     const muteBtn = this.root.querySelector('#nf-btn-mute');
     const volSlider = this.root.querySelector('#nf-volume-slider');
-    const boostBadge = this.root.querySelector('#nf-boost-badge');
     const unmuteBanner = this.root.querySelector('#nf-unmute-banner');
     unmuteBanner?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -829,11 +831,6 @@ export class NetflixPlayer {
         this.clearAutoUnmuteGesture();
       }
       this.updateVolumeUI();
-    });
-    boostBadge?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const nextBoost = this.soundBoost < 2 ? 2 : 1;
-      this.setSoundBoost(nextBoost, { fromGesture: true });
     });
     volSlider?.addEventListener('input', (e) => {
       e.stopPropagation();
@@ -1100,7 +1097,7 @@ export class NetflixPlayer {
 
     // Download Modal Triggers
     const dlModal = this.root.querySelector('#nf-download-modal');
-    [this.root.querySelector('#nf-top-download-btn'), this.root.querySelector('#nf-btn-download')].forEach(btn => {
+    [this.root.querySelector('#nf-btn-download'), this.root.querySelector('#nf-pop-download-btn')].forEach(btn => {
       btn?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.closeAllPopovers();
@@ -1122,17 +1119,19 @@ export class NetflixPlayer {
     });
 
     // Share Episode & Timestamp Trigger
-    this.root.querySelector('#nf-btn-share')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.closeAllPopovers();
-      if (typeof this.onShare === 'function') {
-        this.onShare({
-          currentTime: this.getCurrentTime(),
-          duration: this.getDuration(),
-          episodeNumber: this.episodeNumber,
-          episodeTitle: this.episodeTitle,
-        });
-      }
+    [this.root.querySelector('#nf-btn-share'), this.root.querySelector('#nf-pop-share-btn')].forEach(btn => {
+      btn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closeAllPopovers();
+        if (typeof this.onShare === 'function') {
+          this.onShare({
+            currentTime: this.getCurrentTime(),
+            duration: this.getDuration(),
+            episodeNumber: this.episodeNumber,
+            episodeTitle: this.episodeTitle,
+          });
+        }
+      });
     });
 
     // Fallback to Embed Server Button
@@ -1359,7 +1358,7 @@ export class NetflixPlayer {
     if (!bypassCache && _clientResolveCache.has(this.embedUrl)) {
       this.setLoader(true, 'Starting stream...');
     } else {
-      this.setLoader(true, bypassCache ? 'Reconnecting faster CDN...' : 'Extracting Ad-Free 1080p Stream...');
+      this.setLoader(true, bypassCache ? 'Reconnecting stream...' : 'Loading stream...');
     }
 
     try {
@@ -1744,7 +1743,6 @@ export class NetflixPlayer {
   applyQuality(qIdx, { seekTime = null, silent = false } = {}) {
     if (!this.streamData || this.isDestroyed) return;
     const qList = this.root?.querySelector('#nf-quality-list');
-    const qTag = this.root?.querySelector('#nf-quality-tag');
     const topLabel = this.topQualityLabel || 'HD';
     const key = String(qIdx);
 
@@ -1755,7 +1753,6 @@ export class NetflixPlayer {
     const toAbs = (u) => (u.startsWith('http') ? u : `${this.apiBase}${u.replace(/^\/api/, '')}`);
 
     if (key === 'auto') {
-      if (qTag) qTag.textContent = topLabel;
       this.activeQuality = 'auto';
       // Prefer inline rewritten variant playlist (Blob URL) when 1 variant exists (or master_playlist when multi-variant) to eliminate /api/player/hls roundtrip
       const singleVariant = (this.qualities && this.qualities.length === 1) ? this.qualities[0] : null;
@@ -1769,7 +1766,6 @@ export class NetflixPlayer {
 
     const chosen = (this.qualities || [])[Number(key)];
     if (!chosen) return;
-    if (qTag) qTag.textContent = `${chosen.height}p`;
     this.activeQuality = Number(chosen.height);
     const chosenHttpUrl = toAbs(chosen.url);
     const targetUrl = (Hls.isSupported() && chosen.playlist_text)
@@ -1804,7 +1800,7 @@ export class NetflixPlayer {
 
   populateSubtitlesMenu(subtitles) {
     const sList = this.root?.querySelector('#nf-subs-list');
-    const ccTag = this.root?.querySelector('#nf-cc-tag');
+    const subsBtn = this.root?.querySelector('#nf-btn-subs');
     if (!sList) return;
 
     // Prioritize English and popular languages at the top
@@ -1832,9 +1828,9 @@ export class NetflixPlayer {
 
     if (defaultIdx >= 0) {
       this.loadSubtitleTrack(defaultIdx);
-      if (ccTag) ccTag.textContent = sorted[defaultIdx].lang.toUpperCase().slice(0, 2);
-    } else if (ccTag) {
-      ccTag.textContent = 'OFF';
+      subsBtn?.classList.add('is-active');
+    } else {
+      subsBtn?.classList.remove('is-active');
     }
 
     sList.querySelectorAll('.nf-popover-item').forEach(btn => {
@@ -1848,12 +1844,12 @@ export class NetflixPlayer {
           this.cues = [];
           const subLayer = this.root?.querySelector('#nf-subtitle-layer');
           if (subLayer) subLayer.innerHTML = '';
-          if (ccTag) ccTag.textContent = 'OFF';
+          subsBtn?.classList.remove('is-active');
           this.onToast('Subtitles: Off');
         } else {
           this.loadSubtitleTrack(idx);
           const chosen = this.sortedSubtitles[idx];
-          if (ccTag && chosen) ccTag.textContent = chosen.lang.toUpperCase().slice(0, 2);
+          subsBtn?.classList.add('is-active');
           if (chosen) this.onToast(`Subtitles: ${chosen.label}`);
         }
         this.closeAllPopovers();
@@ -2173,7 +2169,6 @@ export class NetflixPlayer {
     const highIcon = this.root.querySelector('.icon-vol-high');
     const muteIcon = this.root.querySelector('.icon-vol-mute');
     const slider = this.root.querySelector('#nf-volume-slider');
-    const boostBadge = this.root.querySelector('#nf-boost-badge');
     const boostStatus = this.root.querySelector('#nf-boost-status');
 
     if (highIcon) highIcon.style.display = muted ? 'none' : 'block';
@@ -2182,12 +2177,6 @@ export class NetflixPlayer {
       slider.value = String(effVol);
       slider.title = `Volume: ${effPct}%`;
       slider.setAttribute('aria-valuetext', `${effPct}%`);
-    }
-    if (boostBadge) {
-      const showBadge = !muted && this.soundBoost > 1;
-      boostBadge.style.display = showBadge ? 'inline-flex' : 'none';
-      boostBadge.textContent = `${pct}%`;
-      boostBadge.classList.toggle('is-max', this.soundBoost >= 2);
     }
     if (boostStatus) {
       boostStatus.textContent = `${pct}%`;
