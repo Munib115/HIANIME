@@ -26,6 +26,113 @@ from requests.adapters import HTTPAdapter
 from fastapi import FastAPI, HTTPException, Query, APIRouter, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+import ipaddress as _ipaddress
+import socket as _socket
+import threading as _threading
+
+# ─── Resilient DoH DNS Fallback (handles flaky upstream NS like zokoanime.video) ─
+_ORIG_GETADDRINFO = _socket.getaddrinfo
+_DOH_LOCK = _threading.Lock()
+_DOH_TLS = _threading.local()
+_DOH_CACHE: dict[str, tuple[float, list[str]]] = {}
+_OS_DNS_BAD: dict[str, float] = {}
+_DOH_STALE: dict[str, list[str]] = {
+    "zokoanime.video": ["5.253.86.249"],
+}
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        _ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _doh_lookup(host: str) -> list[str]:
+    if not host or _is_ip_literal(host) or host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local"):
+        return []
+    now = _time.time()
+    with _DOH_LOCK:
+        cached = _DOH_CACHE.get(host)
+        if cached and now < cached[0]:
+            return cached[1]
+
+    ips: list[str] = []
+    _DOH_TLS.active = True
+    try:
+        for doh_url, hdrs in (
+            (f"https://8.8.8.8/resolve?name={urllib.parse.quote(host)}&type=A", {"Accept": "application/dns-json"}),
+            (f"https://8.8.4.4/resolve?name={urllib.parse.quote(host)}&type=A", {"Accept": "application/dns-json"}),
+            (f"https://1.1.1.1/dns-query?name={urllib.parse.quote(host)}&type=A", {"Accept": "application/dns-json"}),
+        ):
+            try:
+                dr = _requests.get(doh_url, headers=hdrs, timeout=3.0)
+                if dr.status_code != 200:
+                    continue
+                payload = dr.json()
+                for ans in payload.get("Answer") or []:
+                    if ans.get("type") == 1 and ans.get("data"):
+                        cand = str(ans["data"]).strip()
+                        try:
+                            if _ipaddress.ip_address(cand).is_global and cand not in ips:
+                                ips.append(cand)
+                        except ValueError:
+                            pass
+                if ips:
+                    break
+            except Exception:
+                continue
+    finally:
+        _DOH_TLS.active = False
+
+    with _DOH_LOCK:
+        if ips:
+            _DOH_CACHE[host] = (now + 3600.0, ips)
+            _DOH_STALE[host] = ips
+            return ips
+        stale = _DOH_STALE.get(host)
+        if stale:
+            return stale
+    return []
+
+
+def _resilient_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    norm_host = host.decode("ascii", "ignore") if isinstance(host, bytes) else host
+    host_key = norm_host.strip().lower() if isinstance(norm_host, str) else ""
+
+    # Skip slow failing OS DNS lookups if recently known broken and cached in DoH
+    if (
+        host_key
+        and not getattr(_DOH_TLS, "active", False)
+        and (_OS_DNS_BAD.get(host_key, 0.0) > _time.time())
+    ):
+        ips = _doh_lookup(host_key)
+        for ip in ips:
+            try:
+                return _ORIG_GETADDRINFO(ip, port, family, type, proto, flags)
+            except _socket.gaierror:
+                continue
+
+    try:
+        return _ORIG_GETADDRINFO(host, port, family, type, proto, flags)
+    except _socket.gaierror:
+        if getattr(_DOH_TLS, "active", False) or not host_key or _is_ip_literal(host_key):
+            raise
+        with _DOH_LOCK:
+            _OS_DNS_BAD[host_key] = _time.time() + 600.0
+        ips = _doh_lookup(host_key)
+        if not ips:
+            raise
+        for ip in ips:
+            try:
+                return _ORIG_GETADDRINFO(ip, port, family, type, proto, flags)
+            except _socket.gaierror:
+                continue
+        raise
+
+
+_socket.getaddrinfo = _resilient_getaddrinfo
 
 # ─── Persistent HTTP Pool for Fast HLS Segment Proxying ─────────────
 _STREAM_SESSION = _requests.Session()
@@ -1074,8 +1181,8 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
                         "SELECT type, server_name, provider, embed_url FROM streams WHERE anilist_id = ? AND episode_number = ?",
                         (al_id, ep_no),
                     )
-                    # Live fallback to reanime.to flix API only if no local stream exists yet
-                    if not data and not munib_data and ep_no is not None:
+                    # Live fallback to reanime.to flix API whenever Munib Server DB has no entry for this episode
+                    if not munib_data and ep_no is not None:
                         try:
                             fr = _STREAM_SESSION.get(
                                 f"https://reanime.to/api/flix/{al_id}/{ep_no}",
@@ -1114,6 +1221,14 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
                             pass
 
     combined = data + munib_data
+    if not combined:
+        # Last-resort fallback to HD-1 / MegaPlay if neither ZokoAnime nor Munib Server has this episode
+        fallback_sql = "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ?"
+        fallback_params = [episode_id]
+        if anime_id is not None:
+            fallback_sql += " AND anime_id = ?"
+            fallback_params.append(anime_id)
+        combined = rows(fallback_sql + " ORDER BY type, server_name", fallback_params)
     return {
         "sub": [s for s in combined if s["type"] == "sub"],
         "dub": [s for s in combined if s["type"] == "dub"],
@@ -1712,14 +1827,17 @@ def clean_stream(url: str = Query(...)):
         raise HTTPException(status_code=400, detail="Invalid stream URL")
     
     try:
-        import urllib.request
-
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": url,
-        })
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
+        resp = _STREAM_SESSION.get(
+            url,
+            headers={
+                "User-Agent": _STREAM_HEADERS["User-Agent"],
+                "Referer": "https://hianime.at/",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200 or not resp.text:
+            raise RuntimeError(f"Upstream embed returned HTTP {resp.status_code}")
+        html = resp.text
 
         parsed = urllib.parse.urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -1768,7 +1886,24 @@ def clean_stream(url: str = Query(...)):
 
         return HTMLResponse(content=html, media_type="text/html")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch clean stream: {str(e)}")
+        safe_err = _html.escape(str(e)[:180])
+        fallback_html = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{{margin:0;width:100%;height:100%;background:#0b0d14;color:#eef0f5;font-family:Inter,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center}}
+  .box{{max-width:380px;padding:24px;border-radius:12px;background:#12151e;border:1px solid rgba(238,240,245,0.08)}}
+  h3{{margin:0 0 8px;font-size:16px;font-weight:600}}
+  p{{margin:0 0 16px;font-size:13px;line-height:1.5;color:#a3a9b8}}
+  button{{background:#e50914;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer}}
+</style></head><body>
+  <div class="box">
+    <h3>Stream server unavailable</h3>
+    <p>This video mirror did not respond cleanly ({safe_err}). Try another server below or retry.</p>
+    <button onclick="location.reload()">Retry stream</button>
+  </div>
+  <script>try{{window.parent&&window.parent.postMessage({{type:'kuro-stream-error'}},'*');}}catch(e){{}}</script>
+</body></html>"""
+        return HTMLResponse(content=fallback_html, status_code=502)
 
 
 

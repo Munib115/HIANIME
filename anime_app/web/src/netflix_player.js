@@ -13,6 +13,13 @@ import Hls from 'hls.js';
 const _RESOLVE_CACHE_TTL_MS = 10 * 60 * 1000;
 const _clientResolveCache = new Map();
 const _inflightResolves = new Map();
+const _audioGraphByVideo = new WeakMap();
+
+function _normalizeSoundBoost(val) {
+  const num = parseFloat(val);
+  if (!Number.isFinite(num) || num <= 1) return 1;
+  return Math.min(2, Math.round(num * 20) / 20);
+}
 
 function _toAbsApiBase(apiBase) {
   const base = apiBase || '/api';
@@ -146,6 +153,7 @@ export class NetflixPlayer {
     this.onPrevEpisode = options.onPrevEpisode || (() => {});
     this.onSwitchAudio = options.onSwitchAudio || (() => {});
     this.onPrefetchNext = options.onPrefetchNext || null;
+    this.onServerFallback = options.onServerFallback || null;
     this.onToast = options.onToast || (() => {});
     this.onProgress = options.onProgress || null;
 
@@ -158,6 +166,7 @@ export class NetflixPlayer {
     this.autoSkip = localStorage.getItem('kuro_auto_skip') === 'true';
     this.playbackSpeed = 1;
     this.userVolume = Math.max(0.1, Math.min(1, parseFloat(localStorage.getItem('kuro_volume') || '1') || 1));
+    this.soundBoost = _normalizeSoundBoost(localStorage.getItem('kuro_sound_boost') || '1');
     this.activeQuality = 'auto'; // 'auto' or height number
     this.controlsTimeout = null;
     this.isDestroyed = false;
@@ -166,6 +175,9 @@ export class NetflixPlayer {
     this.lastTapTime = 0;
     this.lastTapSide = null;
     this._unmuteGestureCleanup = null;
+    this._audioGraph = null;
+    this._audioInitPromise = null;
+    this._pendingBoostCleanup = null;
     this._lastMediaErrorAt = 0;
     this._resolveAbortCtrl = null;
     this._resolveSeq = 0;
@@ -201,7 +213,10 @@ export class NetflixPlayer {
     try {
       this.clearAutoUnmuteGesture();
       this.video.muted = false;
-      this.video.volume = this.userVolume || 1;
+      this.video.volume = this.soundBoost > 1 ? 1 : (this.userVolume || 1);
+      if (this.soundBoost > 1) {
+        this._applyAudioBoostGain({ fromGesture: false });
+      }
       this.updateVolumeUI();
     } catch (e) {}
   }
@@ -216,7 +231,10 @@ export class NetflixPlayer {
       if (this.isDestroyed || !this.video) return;
       try {
         this.video.muted = false;
-        this.video.volume = this.userVolume || 1;
+        this.video.volume = this.soundBoost > 1 ? 1 : (this.userVolume || 1);
+        if (this.soundBoost > 1) {
+          this._applyAudioBoostGain({ fromGesture: true });
+        }
         this.updateVolumeUI();
         if (this.video.paused) {
           this.video.play().catch(() => {});
@@ -240,6 +258,148 @@ export class NetflixPlayer {
     }
     const banner = this.root?.querySelector('#nf-unmute-banner');
     if (banner) banner.style.display = 'none';
+  }
+
+  _clearPendingBoostGesture() {
+    if (this._pendingBoostCleanup) {
+      try { this._pendingBoostCleanup(); } catch {}
+      this._pendingBoostCleanup = null;
+    }
+  }
+
+  _armPendingBoostGesture() {
+    if (this._pendingBoostCleanup || this.isDestroyed) return;
+    const activateOnGesture = () => {
+      this._clearPendingBoostGesture();
+      if (!this.isDestroyed && this.soundBoost > 1) {
+        this._applyAudioBoostGain({ fromGesture: true });
+      }
+    };
+    const events = ['pointerdown', 'touchstart', 'click', 'keydown'];
+    events.forEach(ev => window.addEventListener(ev, activateOnGesture, { once: true, capture: true, passive: true }));
+    this._pendingBoostCleanup = () => {
+      events.forEach(ev => window.removeEventListener(ev, activateOnGesture, { capture: true }));
+    };
+  }
+
+  async _ensureAudioBooster({ fromGesture = false } = {}) {
+    if (this.isDestroyed || !this.video) return null;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+
+    const existing = this._audioGraph || _audioGraphByVideo.get(this.video);
+    if (existing && existing.ctx.state !== 'closed') {
+      this._audioGraph = existing;
+      if (existing.ctx.state === 'suspended') {
+        try { await existing.ctx.resume(); } catch {}
+      }
+      return existing;
+    }
+
+    if (this._audioInitPromise) return this._audioInitPromise;
+
+    this._audioInitPromise = (async () => {
+      let ctx = null;
+      try {
+        ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          await ctx.resume().catch(() => {});
+        }
+        // Avoid wiring MediaElementAudioSourceNode into a suspended AudioContext
+        // without a user gesture, which would silence native <video> audio.
+        if (ctx.state !== 'running' && !fromGesture) {
+          try { await ctx.close(); } catch {}
+          this._armPendingBoostGesture();
+          return null;
+        }
+        if (this.isDestroyed || !this.video) {
+          try { await ctx.close(); } catch {}
+          return null;
+        }
+
+        const source = ctx.createMediaElementSource(this.video);
+        const gain = ctx.createGain();
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.value = -8;
+        compressor.knee.value = 12;
+        compressor.ratio.value = 12;
+        compressor.attack.value = 0.002;
+        compressor.release.value = 0.16;
+
+        gain.gain.value = 1;
+        source.connect(gain);
+        gain.connect(compressor);
+        compressor.connect(ctx.destination);
+
+        const graph = { ctx, source, gain, compressor };
+        _audioGraphByVideo.set(this.video, graph);
+        this._audioGraph = graph;
+        this._clearPendingBoostGesture();
+        return graph;
+      } catch {
+        if (ctx && ctx.state !== 'closed') {
+          try { await ctx.close(); } catch {}
+        }
+        return null;
+      } finally {
+        this._audioInitPromise = null;
+      }
+    })();
+
+    return this._audioInitPromise;
+  }
+
+  async _applyAudioBoostGain({ fromGesture = false } = {}) {
+    if (this.isDestroyed || !this.video) return;
+    if (this.soundBoost <= 1 && !this._audioGraph && !_audioGraphByVideo.get(this.video)) {
+      return;
+    }
+    const graph = await this._ensureAudioBooster({ fromGesture });
+    if (!graph || this.isDestroyed || graph.ctx.state === 'closed') return;
+    const now = graph.ctx.currentTime;
+    graph.gain.gain.setTargetAtTime(this.soundBoost, now, 0.015);
+    graph.compressor.threshold.setTargetAtTime(this.soundBoost > 1 ? -8 : 0, now, 0.02);
+  }
+
+  _teardownAudioBooster() {
+    this._clearPendingBoostGesture();
+    if (this._audioGraph) {
+      const { ctx, source, gain, compressor } = this._audioGraph;
+      this._audioGraph = null;
+      try { source.disconnect(); } catch {}
+      try { gain.disconnect(); } catch {}
+      try { compressor.disconnect(); } catch {}
+      if (ctx && ctx.state !== 'closed') {
+        ctx.close().catch(() => {});
+      }
+    }
+  }
+
+  setSoundBoost(val, { fromGesture = false, emit = true, silent = false } = {}) {
+    const normalized = _normalizeSoundBoost(val);
+    this.soundBoost = normalized;
+    if (normalized > 1 && this.video) {
+      this.userVolume = 1;
+      try {
+        this.video.muted = false;
+        this.video.volume = 1;
+        localStorage.setItem('kuro_volume', '1');
+      } catch {}
+      this.clearAutoUnmuteGesture();
+    }
+    try { localStorage.setItem('kuro_sound_boost', String(normalized)); } catch {}
+    this.updateVolumeUI();
+    this._applyAudioBoostGain({ fromGesture });
+
+    if (emit) {
+      window.dispatchEvent(new CustomEvent('kuro:settings-changed', {
+        detail: { key: 'soundBoost', value: normalized, source: 'player' }
+      }));
+    }
+    if (!silent) {
+      const pct = Math.round(normalized * 100);
+      this.onToast(normalized > 1 ? `Sound Booster: ${pct}%` : 'Sound Booster: Off (100%)');
+    }
   }
 
   renderShell() {
@@ -361,25 +521,42 @@ export class NetflixPlayer {
           </div>
         </div>
 
-        <!-- Popover Menu: Quality & Speed Settings -->
-        <div class="nf-popover" id="nf-popover-settings">
-          <div class="nf-popover-header">
-            <span>Video Quality</span>
-            <label class="nf-autoskip-toggle">
-              <input type="checkbox" id="nf-autoskip-cb" ${this.autoSkip ? 'checked' : ''} />
-              <span>Auto-Skip Intro</span>
-            </label>
+        <!-- Popover Menu: Quality, Speed & Sound Booster -->
+        <div class="nf-popover nf-popover-settings" id="nf-popover-settings">
+          <div class="nf-popover-section">
+            <div class="nf-popover-header">
+              <span>Video Quality</span>
+              <label class="nf-autoskip-toggle">
+                <input type="checkbox" id="nf-autoskip-cb" ${this.autoSkip ? 'checked' : ''} />
+                <span>Auto-Skip Intro</span>
+              </label>
+            </div>
+            <div class="nf-popover-list" id="nf-quality-list">
+              <button type="button" class="nf-popover-item active" data-quality="auto">Auto (1080p HD)</button>
+            </div>
           </div>
-          <div class="nf-popover-list" id="nf-quality-list">
-            <button type="button" class="nf-popover-item active" data-quality="auto">Auto (1080p HD)</button>
+
+          <div class="nf-popover-section">
+            <div class="nf-popover-header">
+              <span>Playback Speed</span>
+            </div>
+            <div class="nf-speed-pills" id="nf-speed-pills">
+              ${[0.5, 0.75, 1, 1.25, 1.5, 2].map(s => `
+                <button type="button" class="nf-speed-btn ${s === 1 ? 'active' : ''}" data-speed="${s}">${s}x</button>
+              `).join('')}
+            </div>
           </div>
-          <div class="nf-popover-header" style="margin-top:8px">
-            <span>Playback Speed</span>
-          </div>
-          <div class="nf-speed-pills" id="nf-speed-pills">
-            ${[0.5, 0.75, 1, 1.25, 1.5, 2].map(s => `
-              <button type="button" class="nf-speed-btn ${s === 1 ? 'active' : ''}" data-speed="${s}">${s}x</button>
-            `).join('')}
+
+          <div class="nf-popover-section">
+            <div class="nf-popover-header">
+              <span>Sound Booster</span>
+              <span class="nf-popover-meta" id="nf-boost-status">${Math.round(this.soundBoost * 100)}%</span>
+            </div>
+            <div class="nf-boost-pills" id="nf-boost-pills">
+              ${[{ val: 1, label: '100%' }, { val: 1.5, label: '150%' }, { val: 2, label: '200%' }].map(b => `
+                <button type="button" class="nf-boost-btn ${Math.abs(this.soundBoost - b.val) < 0.01 ? 'active' : ''}" data-boost="${b.val}">${b.label}</button>
+              `).join('')}
+            </div>
           </div>
         </div>
 
@@ -449,7 +626,8 @@ export class NetflixPlayer {
                   <svg class="icon-vol-high" viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
                   <svg class="icon-vol-mute" viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none" style="display:none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
                 </button>
-                <input type="range" class="nf-volume-slider nf-hide-mobile" id="nf-volume-slider" min="0" max="1" step="0.05" value="1" aria-label="Volume" />
+                <input type="range" class="nf-volume-slider nf-hide-mobile" id="nf-volume-slider" min="0" max="2" step="0.05" value="${this.soundBoost > 1 ? this.soundBoost : this.userVolume}" aria-label="Volume and Sound Booster" />
+                <button type="button" class="nf-boost-badge" id="nf-boost-badge" title="Click to toggle 200% Sound Booster" style="display:${this.soundBoost > 1 ? 'inline-flex' : 'none'}">${Math.round(this.soundBoost * 100)}%</button>
               </div>
 
               <div class="nf-time-display">
@@ -625,14 +803,18 @@ export class NetflixPlayer {
       });
     });
 
-    // Volume & Mute
+    // Volume, Mute & 200% Sound Booster
     const muteBtn = this.root.querySelector('#nf-btn-mute');
     const volSlider = this.root.querySelector('#nf-volume-slider');
+    const boostBadge = this.root.querySelector('#nf-boost-badge');
     const unmuteBanner = this.root.querySelector('#nf-unmute-banner');
     unmuteBanner?.addEventListener('click', (e) => {
       e.stopPropagation();
       this.video.muted = false;
-      this.video.volume = this.userVolume || 1;
+      this.video.volume = this.soundBoost > 1 ? 1 : (this.userVolume || 1);
+      if (this.soundBoost > 1) {
+        this._applyAudioBoostGain({ fromGesture: true });
+      }
       this.clearAutoUnmuteGesture();
       this.updateVolumeUI();
     });
@@ -640,20 +822,47 @@ export class NetflixPlayer {
       e.stopPropagation();
       this.video.muted = !this.video.muted;
       if (!this.video.muted) {
-        this.video.volume = this.userVolume || 1;
+        this.video.volume = this.soundBoost > 1 ? 1 : (this.userVolume || 1);
+        if (this.soundBoost > 1) {
+          this._applyAudioBoostGain({ fromGesture: true });
+        }
         this.clearAutoUnmuteGesture();
       }
       this.updateVolumeUI();
     });
+    boostBadge?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const nextBoost = this.soundBoost < 2 ? 2 : 1;
+      this.setSoundBoost(nextBoost, { fromGesture: true });
+    });
     volSlider?.addEventListener('input', (e) => {
       e.stopPropagation();
-      const val = parseFloat(e.target.value);
-      this.video.volume = val;
-      this.video.muted = val === 0;
-      if (val > 0) {
-        this.userVolume = val;
-        try { localStorage.setItem('kuro_volume', String(val)); } catch (err) {}
+      const rawVal = Math.max(0, Math.min(2, parseFloat(e.target.value) || 0));
+      const prevBoost = this.soundBoost;
+      if (rawVal <= 1) {
+        this.video.volume = rawVal;
+        this.video.muted = rawVal === 0;
+        this.soundBoost = 1;
+        if (rawVal > 0) {
+          this.userVolume = rawVal;
+          try { localStorage.setItem('kuro_volume', String(rawVal)); } catch (err) {}
+          this.clearAutoUnmuteGesture();
+        }
+      } else {
+        this.userVolume = 1;
+        this.soundBoost = _normalizeSoundBoost(rawVal);
+        this.video.muted = false;
+        this.video.volume = 1;
+        try { localStorage.setItem('kuro_volume', '1'); } catch (err) {}
         this.clearAutoUnmuteGesture();
+      }
+
+      if (this.soundBoost !== prevBoost) {
+        try { localStorage.setItem('kuro_sound_boost', String(this.soundBoost)); } catch (err) {}
+        this._applyAudioBoostGain({ fromGesture: true });
+        window.dispatchEvent(new CustomEvent('kuro:settings-changed', {
+          detail: { key: 'soundBoost', value: this.soundBoost, source: 'player' }
+        }));
       }
       this.updateVolumeUI();
     });
@@ -661,6 +870,9 @@ export class NetflixPlayer {
     // Video Media Events
     this.video.addEventListener('play', () => {
       this.updatePlayUI();
+      if (this.soundBoost > 1 && this._audioGraph?.ctx?.state === 'suspended') {
+        this._audioGraph.ctx.resume().catch(() => {});
+      }
       showControls();
     });
     this.video.addEventListener('pause', () => {
@@ -810,6 +1022,15 @@ export class NetflixPlayer {
         this.video.playbackRate = spd;
         this.root.querySelectorAll('.nf-speed-btn').forEach(b => b.classList.toggle('active', b === btn));
         this.onToast(`Playback speed: ${spd}x`);
+      });
+    });
+
+    // Sound Booster Preset Buttons (100% / 150% / 200%)
+    this.root.querySelectorAll('.nf-boost-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const boost = parseFloat(btn.dataset.boost || '1');
+        this.setSoundBoost(boost, { fromGesture: true });
       });
     });
 
@@ -966,7 +1187,33 @@ export class NetflixPlayer {
       } else if (e.key === 'm' || e.key === 'M') {
         e.preventDefault();
         this.video.muted = !this.video.muted;
+        if (!this.video.muted) {
+          this.video.volume = this.soundBoost > 1 ? 1 : (this.userVolume || 1);
+          if (this.soundBoost > 1) this._applyAudioBoostGain({ fromGesture: true });
+        }
         this.updateVolumeUI();
+      } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && (document.fullscreenElement || this.root?.contains(document.activeElement))) {
+        e.preventDefault();
+        const curEff = (this.video.muted || this.video.volume === 0)
+          ? 0
+          : (this.soundBoost > 1 ? this.soundBoost : this.video.volume);
+        const delta = e.key === 'ArrowUp' ? 0.1 : -0.1;
+        const nextEff = Math.max(0, Math.min(2, Math.round((curEff + delta) * 20) / 20));
+        if (nextEff <= 1) {
+          this.video.volume = nextEff;
+          this.video.muted = nextEff === 0;
+          this.soundBoost = 1;
+          if (nextEff > 0) {
+            this.userVolume = nextEff;
+            try { localStorage.setItem('kuro_volume', String(nextEff)); } catch {}
+          }
+          try { localStorage.setItem('kuro_sound_boost', '1'); } catch {}
+          this._applyAudioBoostGain({ fromGesture: true });
+        } else {
+          this.setSoundBoost(nextEff, { fromGesture: true, silent: true });
+        }
+        this.updateVolumeUI();
+        this.onToast(`Volume: ${Math.round(nextEff * 100)}%`);
       }
     };
     window.addEventListener('keydown', this.keyHandler);
@@ -1097,7 +1344,7 @@ export class NetflixPlayer {
   }
 
   async resolveAndPlay({ seekTime = null, bypassCache = false } = {}) {
-    if (this.embedUrl && this.embedUrl.includes('flixcloud.cc')) {
+    if (this.embedUrl && (this.embedUrl.includes('flixcloud.cc') || this.embedUrl.includes('megaplay.buzz'))) {
       this.switchToIframeFallback();
       return;
     }
@@ -1132,7 +1379,14 @@ export class NetflixPlayer {
       this.applyQuality(this.getPreferredQualityIdx(), { seekTime, silent: true });
     } catch (err) {
       if (err?.name === 'AbortError' || this.isDestroyed || seq !== this._resolveSeq) return;
-      console.warn('[NetflixPlayer] Direct stream resolve failed, switching to Clean Embed fallback:', err);
+      console.warn('[NetflixPlayer] Direct stream resolve failed:', err);
+      const curTime = this.getCurrentTime();
+      if (!bypassCache && typeof this.onServerFallback === 'function') {
+        try {
+          const switched = await this.onServerFallback(this.embedUrl, curTime);
+          if (switched) return;
+        } catch {}
+      }
       this.switchToIframeFallback();
     }
   }
@@ -1203,7 +1457,10 @@ export class NetflixPlayer {
         }
         this.video.playbackRate = this.playbackSpeed;
         this.video.muted = false;
-        this.video.volume = this.userVolume || 1;
+        this.video.volume = this.soundBoost > 1 ? 1 : (this.userVolume || 1);
+        if (this.soundBoost > 1) {
+          this._applyAudioBoostGain({ fromGesture: false });
+        }
         this.updateVolumeUI();
         this.video.play().catch(async () => {
           // Modern browser autoplay policy safeguard: retry muted and auto-unmute on first tap/click
@@ -1273,7 +1530,10 @@ export class NetflixPlayer {
           this.restoreSavedPosition();
         }
         this.video.muted = false;
-        this.video.volume = this.userVolume || 1;
+        this.video.volume = this.soundBoost > 1 ? 1 : (this.userVolume || 1);
+        if (this.soundBoost > 1) {
+          this._applyAudioBoostGain({ fromGesture: false });
+        }
         this.updateVolumeUI();
         this.video.play().catch(async () => {
           try {
@@ -1531,6 +1791,8 @@ export class NetflixPlayer {
       if (this.streamData && String(idx) !== String(this.activeQualityKey())) {
         this.applyQuality(idx, { seekTime: this.video?.currentTime || 0, silent: true });
       }
+    } else if (key === 'soundBoost') {
+      this.setSoundBoost(value, { fromGesture: true, emit: false, silent: true });
     }
   }
 
@@ -1904,12 +2166,37 @@ export class NetflixPlayer {
   updateVolumeUI() {
     if (!this.root || !this.video) return;
     const muted = this.video.muted || this.video.volume === 0;
+    const effVol = muted ? 0 : (this.soundBoost > 1 ? this.soundBoost : this.video.volume);
+    const pct = Math.round(this.soundBoost * 100);
+    const effPct = Math.round(effVol * 100);
+
     const highIcon = this.root.querySelector('.icon-vol-high');
     const muteIcon = this.root.querySelector('.icon-vol-mute');
     const slider = this.root.querySelector('#nf-volume-slider');
+    const boostBadge = this.root.querySelector('#nf-boost-badge');
+    const boostStatus = this.root.querySelector('#nf-boost-status');
+
     if (highIcon) highIcon.style.display = muted ? 'none' : 'block';
     if (muteIcon) muteIcon.style.display = muted ? 'block' : 'none';
-    if (slider) slider.value = muted ? '0' : String(this.video.volume);
+    if (slider) {
+      slider.value = String(effVol);
+      slider.title = `Volume: ${effPct}%`;
+      slider.setAttribute('aria-valuetext', `${effPct}%`);
+    }
+    if (boostBadge) {
+      const showBadge = !muted && this.soundBoost > 1;
+      boostBadge.style.display = showBadge ? 'inline-flex' : 'none';
+      boostBadge.textContent = `${pct}%`;
+      boostBadge.classList.toggle('is-max', this.soundBoost >= 2);
+    }
+    if (boostStatus) {
+      boostStatus.textContent = `${pct}%`;
+      boostStatus.classList.toggle('active', this.soundBoost > 1);
+    }
+    this.root.querySelectorAll('.nf-boost-btn').forEach(btn => {
+      const val = parseFloat(btn.dataset.boost || '1');
+      btn.classList.toggle('active', Math.abs(val - this.soundBoost) < 0.01);
+    });
   }
 
   updateTimeUI() {
@@ -1992,6 +2279,7 @@ export class NetflixPlayer {
     this._clearStallWatchdog();
     clearTimeout(this._prefetchTimer);
     this._revokeBlobUrls();
+    this._teardownAudioBooster();
     if (this.hls) {
       this.hls.destroy();
       this.hls = null;
@@ -1999,7 +2287,7 @@ export class NetflixPlayer {
     this.root = null;
     this.video = null;
 
-    if (this.embedUrl && this.embedUrl.includes('flixcloud.cc')) {
+    if (this.embedUrl && (this.embedUrl.includes('flixcloud.cc') || this.embedUrl.includes('megaplay.buzz'))) {
       const sep = this.embedUrl.includes('?') ? '&' : '?';
       const flixSrc = this.embedUrl.includes('autoplay=')
         ? this.embedUrl
@@ -2049,6 +2337,7 @@ export class NetflixPlayer {
 
   destroy() {
     this.clearAutoUnmuteGesture();
+    this._teardownAudioBooster();
     this._clearStallWatchdog();
     clearTimeout(this._prefetchTimer);
     if (this._resolveAbortCtrl) {

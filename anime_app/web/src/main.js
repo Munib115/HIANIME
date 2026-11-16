@@ -3646,6 +3646,7 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
   // Fetch streams for this episode (instant if prefetched)
   const streamsData = await fetchEpisodeStreamsCached(ep.episode_id, anime.anime_id);
   state.currentStreams = streamsData || { sub: [], dub: [] };
+  state.failedServerUrls = new Set();
   state.activeServerIndex = 0;
 
   syncAudioLanguageUI(state.activeAudioType);
@@ -3853,6 +3854,20 @@ function loadStreamIntoPlayer(targetTime = 0) {
       }
     },
     onPrefetchNext: () => prefetchNextEpisodeStream(),
+    onServerFallback: (failedUrl, resumeTime = 0) => {
+      const list = state.currentStreams?.[state.activeAudioType] || [];
+      if (!state.failedServerUrls) state.failedServerUrls = new Set();
+      if (failedUrl) state.failedServerUrls.add(failedUrl);
+      const prevSrv = list[state.activeServerIndex];
+      const nextIdx = list.findIndex(s => s?.embed_url && !state.failedServerUrls.has(s.embed_url));
+      if (nextIdx === -1) return false;
+      state.activeServerIndex = nextIdx;
+      renderServerChips();
+      const nextSrv = list[nextIdx];
+      showToast(`${prevSrv?.server_name || 'Primary server'} unavailable — switched to ${nextSrv?.server_name || 'backup server'}`);
+      loadStreamIntoPlayer(resumeTime || 0);
+      return true;
+    },
     onBack: () => {
       const detailReady = document.querySelector('#detail-container .detail-body');
       if (state.playerEnteredFrom === 'home' || !detailReady) {
@@ -6459,6 +6474,12 @@ function initUserMenuAndSettings() {
     document.querySelectorAll('#setting-quality-control .segment-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.quality === currentQuality);
     });
+
+    const currentBoost = parseFloat(localStorage.getItem('kuro_sound_boost') || '1') || 1;
+    document.querySelectorAll('#setting-boost-control .segment-btn').forEach(btn => {
+      const val = parseFloat(btn.dataset.boost || '1');
+      btn.classList.toggle('active', Math.abs(val - currentBoost) < 0.01);
+    });
   }
 
   // Keep the modal in sync when the player itself changes a setting
@@ -6512,6 +6533,18 @@ function initUserMenuAndSettings() {
       localStorage.setItem('kuro_setting_quality', qVal);
       emitSetting('quality', qVal);
       showToast(`Preferred quality set to ${qVal === 'auto' ? 'Auto' : qVal}`);
+    });
+  });
+
+  document.querySelectorAll('#setting-boost-control .segment-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#setting-boost-control .segment-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const boostVal = Math.max(1, Math.min(2, parseFloat(btn.dataset.boost || '1') || 1));
+      localStorage.setItem('kuro_sound_boost', String(boostVal));
+      emitSetting('soundBoost', boostVal);
+      const pct = Math.round(boostVal * 100);
+      showToast(boostVal > 1 ? `Sound Booster set to ${pct}%` : 'Sound Booster off (100%)');
     });
   });
 
