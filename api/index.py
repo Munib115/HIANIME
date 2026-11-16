@@ -6366,17 +6366,149 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
     ), None
 
 
+_CLINE_API_BASE = "https://api.cline.bot/api/v1"
+_CLINE_MODELS_CACHE = {"models": [], "ts": 0.0, "total": 0}
+_CLINE_BAD_MODELS = {}
+_CLINE_MODELS_TTL_SEC = 1800.0
+_CLINE_BAD_MODEL_TTL_SEC = 600.0
+_OPENAI_TOOLS_CACHE = None
+
+
+def _vg_load_local_env() -> None:
+    """Load local .env files safely (without overwriting explicit system env vars when non-empty)."""
+    env_files = [".env.local", ".env", "anime_app/web/.env.local", "anime_app/web/.env"]
+    try:
+        from dotenv import load_dotenv
+        for _ef in env_files:
+            if os.path.exists(_ef):
+                load_dotenv(_ef, override=False)
+    except Exception:
+        pass
+    for _ef in env_files:
+        if not os.path.exists(_ef):
+            continue
+        try:
+            with open(_ef, "r", encoding="utf-8", errors="ignore") as _f:
+                for _raw in _f:
+                    _line = _raw.strip()
+                    if not _line or _line.startswith("#") or "=" not in _line:
+                        continue
+                    _k, _v = _line.split("=", 1)
+                    _k = _k.strip()
+                    _v = _v.strip().strip('"').strip("'")
+                    if _k and _v and not os.environ.get(_k):
+                        os.environ[_k] = _v
+        except Exception:
+            pass
+
+
+def _vg_get_cline_api_key(body: Optional[dict] = None) -> str:
+    """Resolve Cline API key from optional request body or environment."""
+    if isinstance(body, dict):
+        client_cline = (body.get("clineKey") or "").strip()
+        if client_cline:
+            return client_cline
+    return (
+        os.environ.get("CLINE_API_KEY")
+        or os.environ.get("VITE_CLINE_API_KEY")
+        or ""
+    ).strip()
+
+
+def _vg_fetch_cline_free_models(api_key: str, force_refresh: bool = False) -> list:
+    """Dynamically fetch and rank `:free` chat models from Cline `/api/v1/models`."""
+    if not api_key:
+        return []
+    now = _time.time()
+    cached = _CLINE_MODELS_CACHE.get("models") or []
+    if not force_refresh and cached and (now - float(_CLINE_MODELS_CACHE.get("ts") or 0.0)) < _CLINE_MODELS_TTL_SEC:
+        return cached
+
+    raw_models = []
+    try:
+        res = _STREAM_SESSION.get(
+            f"{_CLINE_API_BASE}/models",
+            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+            timeout=10,
+        )
+        if res.status_code == 200:
+            payload = res.json()
+            raw_models = payload.get("data") or payload.get("models") or []
+            _CLINE_MODELS_CACHE["total"] = len(raw_models)
+    except Exception as err:
+        print(f"Cline /models fetch failed: {err}")
+        if cached:
+            return cached
+        return []
+
+    preferred_ids = (
+        "baidu/ernie-5.5-flash-preview:free",
+        "particle-ai/particle-1:free",
+        "liquid/lfm-3-1.7b:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+    )
+    preferred_rank = {mid: idx for idx, mid in enumerate(preferred_ids)}
+
+    free_models = []
+    for item in raw_models:
+        if not isinstance(item, dict):
+            continue
+        mid = str(item.get("id") or "").strip()
+        if not mid:
+            continue
+        pricing = item.get("pricing") or {}
+        is_zero_price = str(pricing.get("prompt", "")).strip() == "0" and str(pricing.get("completion", "")).strip() == "0"
+        if not (mid.endswith(":free") or is_zero_price):
+            continue
+        arch = item.get("architecture") or {}
+        in_mods = [str(m).lower() for m in (arch.get("input_modalities") or [])]
+        sup_params = [str(p).lower() for p in (item.get("supported_parameters") or [])]
+        supports_images = ("image" in in_mods) or any(tok in mid.lower() for tok in ("-vl", "omni", "vision"))
+        supports_tools = ("tools" in sup_params) or (mid in ("baidu/ernie-5.5-flash-preview:free", "particle-ai/particle-1:free"))
+        free_models.append({
+            "id": mid,
+            "name": str(item.get("name") or mid),
+            "supports_images": supports_images,
+            "supports_tools": supports_tools,
+            "context_length": int(item.get("context_length") or 0),
+        })
+
+    def _sort_key(entry: dict):
+        mid = entry["id"]
+        if mid in preferred_rank:
+            return (0, preferred_rank[mid], mid)
+        tool_tier = 1 if entry["supports_tools"] else 2
+        speed_hint = 0 if any(t in mid.lower() for t in ("flash", "mini", "nano", "lightning", "1.7b", "1:")) else 1
+        return (tool_tier, speed_hint, mid)
+
+    free_models.sort(key=_sort_key)
+    _CLINE_MODELS_CACHE["models"] = free_models
+    _CLINE_MODELS_CACHE["ts"] = now
+    return free_models
+
+
 @router.get("/ai/status")
 def ai_status():
+    _vg_load_local_env()
     kb = get_vegeta_full_knowledge()
     env_gemini_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("VITE_GEMINI_API_KEY") or "").strip()
+    env_cline_key = _vg_get_cline_api_key()
+    cline_free = _vg_fetch_cline_free_models(env_cline_key) if env_cline_key else []
+    has_gemini = bool(env_gemini_key and not env_gemini_key.startswith("0x"))
+    default_provider = "cline" if env_cline_key else ("gemini" if has_gemini else "local")
     return {
         "status": "ready",
         "name": "Prince Vegeta Anime Advisor",
         "total_anime": kb["total_anime"],
         "total_episodes": kb["total_episodes"],
         "stats": kb.get("stats", {}),
-        "has_gemini_key": bool(env_gemini_key and not env_gemini_key.startswith("0x")),
+        "has_cline_key": bool(env_cline_key),
+        "has_gemini_key": has_gemini,
+        "default_provider": default_provider,
+        "cline_total_models": int(_CLINE_MODELS_CACHE.get("total") or 0),
+        "cline_free_models_count": len(cline_free),
+        "cline_free_models": [m["id"] for m in cline_free],
     }
 
 
@@ -7016,21 +7148,321 @@ _GEMINI_SAFETY_SETTINGS = [
 ]
 
 
+def _vg_lowercase_json_schema(node):
+    """Convert Gemini uppercase schema types (OBJECT/STRING/...) to standard lowercase JSON Schema."""
+    if isinstance(node, list):
+        return [_vg_lowercase_json_schema(x) for x in node]
+    if isinstance(node, dict):
+        out = {}
+        for k, v in node.items():
+            if k == "type" and isinstance(v, str):
+                out[k] = v.lower()
+            else:
+                out[k] = _vg_lowercase_json_schema(v)
+        return out
+    return node
+
+
+def _vg_openai_tools_from_gemini() -> list:
+    """Build and cache OpenAI-compatible function tool declarations from `_GEMINI_TOOLS_DECLARATIONS`."""
+    global _OPENAI_TOOLS_CACHE
+    if _OPENAI_TOOLS_CACHE is None:
+        _OPENAI_TOOLS_CACHE = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": _vg_lowercase_json_schema(t.get("parameters") or {"type": "object", "properties": {}}),
+                },
+            }
+            for t in _GEMINI_TOOLS_DECLARATIONS
+        ]
+    return _OPENAI_TOOLS_CACHE
+
+
+def _vg_extract_cline_choice(resp_json: dict) -> tuple[dict, list, str]:
+    """Extract (message_dict, tool_calls, content_text) from Cline/OpenAI chat completion payloads."""
+    choices = resp_json.get("choices") or (resp_json.get("data") or {}).get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return {}, [], ""
+    msg = choices[0].get("message") or {}
+    if not isinstance(msg, dict):
+        return {}, [], ""
+    raw_content = msg.get("content")
+    if isinstance(raw_content, list):
+        text_out = "".join(
+            str(part.get("text") or "")
+            for part in raw_content
+            if isinstance(part, dict)
+        ).strip()
+    else:
+        text_out = str(raw_content or "").strip()
+    tool_calls = msg.get("tool_calls") or []
+    if not isinstance(tool_calls, list):
+        tool_calls = []
+    return msg, tool_calls, text_out
+
+
+def _vg_finalize_ai_result(
+    final_reply: str,
+    collected_actions: list,
+    kb: dict,
+    image_result: Optional[dict],
+    provider: str,
+    model: str,
+) -> dict:
+    """Normalize <!--ACTION:...-->, attach confirmed vision playback, validate actions, and build response."""
+    reply_clean = str(final_reply or "").strip()
+    reply_clean = re.sub(
+        r'^\s*\{"(?:command|name|tool)"\s*:\s*"[^"]+"[^\n]*\}\s*\n*',
+        "",
+        reply_clean,
+    ).strip()
+    reply_clean = re.sub(
+        r"https?://(?:www\.)?kuroanime\.[a-z]+/(?:#?(?:anime|watch)/)(\d+)",
+        r"#anime/\1",
+        reply_clean,
+        flags=re.I,
+    )
+    actions = list(collected_actions or [])
+    m = re.search(r"<!--ACTION:(.*?)-->", reply_clean)
+    if m:
+        try:
+            act = json.loads(m.group(1).strip())
+            if isinstance(act, dict):
+                actions.append(act)
+            reply_clean = re.sub(r"<!--ACTION:.*?-->", "", reply_clean).strip()
+        except Exception:
+            pass
+
+    if not actions and image_result and image_result.get("matched_item") and image_result.get("confident"):
+        it = image_result["matched_item"]
+        actions.append({
+            "type": "play",
+            "anime_id": it["anime_id"],
+            "episode": image_result.get("episode") or 1,
+            "time": int(image_result.get("from_seconds") or 0),
+            "title": _vg_title(it),
+        })
+
+    valid_actions = _vg_validate_actions(actions, kb)
+    return {
+        "ok": True,
+        "reply": reply_clean,
+        "action": valid_actions[0] if valid_actions else None,
+        "actions": valid_actions,
+        "used_gemini": provider == "gemini",
+        "used_cline": provider == "cline",
+        "provider": provider,
+        "model": model,
+    }
+
+
+def _vg_build_cline_messages(
+    system_instruction: str,
+    history: list,
+    prompt_txt: str,
+    image_uri: str = "",
+) -> list:
+    """Build OpenAI/Cline `messages` array with optional multimodal `image_url` block."""
+    msgs = [{"role": "system", "content": system_instruction}]
+    for h in history:
+        role = "assistant" if h.get("role") == "model" else "user"
+        txt = str(h.get("text") or "").strip()
+        if not txt:
+            continue
+        if len(msgs) > 1 and msgs[-1]["role"] == role and isinstance(msgs[-1].get("content"), str):
+            msgs[-1]["content"] += "\n" + txt
+        else:
+            msgs.append({"role": role, "content": txt})
+
+    if image_uri:
+        user_content = [
+            {"type": "text", "text": prompt_txt},
+            {"type": "image_url", "image_url": {"url": image_uri}},
+        ]
+        msgs.append({"role": "user", "content": user_content})
+    elif len(msgs) > 1 and msgs[-1]["role"] == "user" and isinstance(msgs[-1].get("content"), str):
+        msgs[-1]["content"] += "\n" + prompt_txt
+    else:
+        msgs.append({"role": "user", "content": prompt_txt})
+    return msgs
+
+
+def _vg_call_cline_chat(
+    api_key: str,
+    system_instruction: str,
+    history: list,
+    user_msg: str,
+    kb: dict,
+    user_context: dict,
+    image_data: str = "",
+    image_result: Optional[dict] = None,
+) -> tuple[str, list, str]:
+    """Call Cline dynamically discovered `:free` models with OpenAI tool calling and automatic failover."""
+    free_models = _vg_fetch_cline_free_models(api_key)
+    if not free_models:
+        return "", [], ""
+
+    now = _time.time()
+    has_scouter_match = bool(image_result and (image_result.get("matched_item") or image_result.get("best_char_match")))
+    prompt_txt = user_msg or "Identify which anime and character this image is from, Prince Vegeta!"
+
+    image_uri = ""
+    if image_data:
+        if image_data.startswith("data:"):
+            image_uri = image_data
+        else:
+            image_uri = f"data:image/jpeg;base64,{image_data}"
+
+    healthy = []
+    for entry in free_models:
+        bad_info = _CLINE_BAD_MODELS.get(entry["id"])
+        if bad_info and float(bad_info[0]) > now:
+            continue
+        healthy.append(entry)
+
+    if not healthy:
+        # Retry rate-limited entries before giving up completely
+        healthy = [e for e in free_models if (_CLINE_BAD_MODELS.get(e["id"]) or (0, ""))[1] != "http_402"]
+
+    if image_data:
+        vl_first = [m for m in healthy if m.get("supports_images")]
+        text_fallback = [m for m in healthy if not m.get("supports_images")] if has_scouter_match else []
+        candidates = vl_first[:2] + text_fallback[:4]
+    else:
+        candidates = healthy[:6]
+
+    openai_tools = _vg_openai_tools_from_gemini()
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    for cand in candidates:
+        model_id = cand["id"]
+        send_image = bool(image_uri and cand.get("supports_images"))
+        if image_uri and not send_image and not has_scouter_match:
+            continue
+
+        working_messages = _vg_build_cline_messages(
+            system_instruction, history, prompt_txt, image_uri=image_uri if send_image else ""
+        )
+        use_tools = bool(cand.get("supports_tools", True))
+        collected_actions = []
+        final_reply = ""
+        last_tool_text = ""
+        retry_no_image_used = False
+
+        for _round in range(3):
+            payload = {
+                "model": model_id,
+                "messages": working_messages,
+                "temperature": 0.85,
+                "top_p": 0.95,
+                "max_tokens": 1100,
+            }
+            if use_tools:
+                payload["tools"] = openai_tools
+                payload["tool_choice"] = "auto"
+
+            try:
+                res = _STREAM_SESSION.post(
+                    f"{_CLINE_API_BASE}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=22,
+                )
+            except Exception as net_err:
+                print(f"Cline request error ({model_id}): {net_err}")
+                break
+
+            if res.status_code in (402, 404):
+                _CLINE_BAD_MODELS[model_id] = (_time.time() + _CLINE_BAD_MODEL_TTL_SEC, f"http_{res.status_code}")
+                print(f"Cline HTTP {res.status_code} ({model_id}): {res.text[:160]}")
+                break
+
+            if res.status_code == 429:
+                _CLINE_BAD_MODELS[model_id] = (_time.time() + 60.0, "rate_limit")
+                print(f"Cline rate-limited ({model_id})")
+                break
+
+            if res.status_code != 200:
+                err_low = res.text[:260].lower()
+                if send_image and not retry_no_image_used and ("image" in err_low or "vision" in err_low or "multimodal" in err_low):
+                    cand["supports_images"] = False
+                    if not has_scouter_match:
+                        break
+                    retry_no_image_used = True
+                    send_image = False
+                    working_messages = _vg_build_cline_messages(system_instruction, history, prompt_txt, image_uri="")
+                    continue
+                if use_tools and ("tool" in err_low or "function" in err_low):
+                    use_tools = False
+                    continue
+                print(f"Cline HTTP {res.status_code} ({model_id}): {res.text[:200]}")
+                break
+
+            try:
+                resp_json = res.json()
+            except Exception:
+                break
+
+            msg, tool_calls, content_txt = _vg_extract_cline_choice(resp_json)
+            if not tool_calls:
+                if content_txt:
+                    final_reply = content_txt
+                break
+            if content_txt:
+                last_tool_text = content_txt
+
+            assistant_msg = {
+                "role": "assistant",
+                "content": msg.get("content") if msg.get("content") is not None else "",
+                "tool_calls": tool_calls,
+            }
+            working_messages.append(assistant_msg)
+
+            for idx, tc in enumerate(tool_calls):
+                fn = tc.get("function") or {}
+                fname = str(fn.get("name") or "").strip()
+                raw_args = fn.get("arguments") or "{}"
+                if isinstance(raw_args, dict):
+                    fargs = raw_args
+                else:
+                    try:
+                        fargs = json.loads(raw_args)
+                    except Exception:
+                        fargs = {}
+                fres = _vg_execute_tool(fname, fargs, kb, user_context)
+                if fres.get("action_queued"):
+                    collected_actions.append(fres)
+                working_messages.append({
+                    "role": "tool",
+                    "tool_call_id": str(tc.get("id") or f"call_{_round}_{idx}"),
+                    "name": fname,
+                    "content": json.dumps(fres, ensure_ascii=False),
+                })
+
+        if not final_reply and last_tool_text:
+            final_reply = last_tool_text
+
+        if final_reply:
+            return final_reply, collected_actions, model_id
+
+    return "", [], ""
+
+
 @router.post("/ai/chat")
 async def ai_chat(req: Request):
-    """Prince Vegeta AI Advisor: Gemini grounded in the full KuroAnime catalog (both servers) with conversation memory, reverse image search, and agentic auto-play."""
+    """Prince Vegeta AI Advisor: Cline free models / Gemini grounded in KuroAnime + MAL/AniList Vision & Lore."""
     try:
         body = await req.json()
     except Exception:
         body = {}
 
-    try:
-        from dotenv import load_dotenv
-        for _env_file in [".env.local", ".env", "anime_app/web/.env.local", "anime_app/web/.env"]:
-            if os.path.exists(_env_file):
-                load_dotenv(_env_file, override=True)
-    except Exception:
-        pass
+    _vg_load_local_env()
 
     user_msg = (body.get("message") or "").strip()[:2000]
     image_data = (body.get("image") or "").strip()
@@ -7048,9 +7480,10 @@ async def ai_chat(req: Request):
             if text:
                 history.append({"role": role, "text": text})
 
+    cline_key = _vg_get_cline_api_key(body)
     env_gemini_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("VITE_GEMINI_API_KEY") or "").strip()
     client_key = (body.get("apiKey") or "").strip()
-    api_key = env_gemini_key or client_key
+    api_key = client_key or env_gemini_key
 
     kb = get_vegeta_full_knowledge()
     user_context = body.get("context") or {}
@@ -7071,142 +7504,138 @@ async def ai_chat(req: Request):
                 "reply": reply_text,
                 "action": valid_actions[0] if valid_actions else None,
                 "actions": valid_actions,
-                "used_gemini": False
+                "used_gemini": False,
+                "used_cline": False,
             }
 
-    if api_key and not api_key.startswith("0x"):
+    # Build grounded prompt context once when any LLM provider (Cline default or Gemini) is active
+    has_gemini = bool(api_key and not api_key.startswith("0x"))
+    if cline_key or has_gemini:
         context = _vegeta_retrieve(user_msg, history, kb, image_search_result=image_result, has_image=bool(image_data))
         system_instruction = _vegeta_system_prompt(kb, context, user_context)
 
-        contents = []
-        for h in history:
-            if contents and contents[-1]["role"] == h["role"]:
-                contents[-1]["parts"][0]["text"] += "\n" + h["text"]
-            else:
-                contents.append({"role": h["role"], "parts": [{"text": h["text"]}]})
-        if contents and contents[0]["role"] == "model":
-            contents.insert(0, {"role": "user", "parts": [{"text": "Hey Vegeta"}]})
-
-        user_parts = []
-        if image_data:
-            clean_b64 = image_data
-            mime_type = "image/jpeg"
-            if "," in clean_b64:
-                header, clean_b64 = clean_b64.split(",", 1)
-                if "png" in header.lower():
-                    mime_type = "image/png"
-                elif "webp" in header.lower():
-                    mime_type = "image/webp"
-            user_parts.append({
-                "inlineData": {
-                    "mimeType": mime_type,
-                    "data": clean_b64
-                }
-            })
-        prompt_txt = user_msg or "Identify which anime and character this image is from, Prince Vegeta!"
-        user_parts.append({"text": prompt_txt})
-
-        if contents and contents[-1]["role"] == "user":
-            contents[-1]["parts"].extend(user_parts)
-        else:
-            contents.append({"role": "user", "parts": user_parts})
-
-        for model in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        # Default LLM Provider: Cline API dynamically fetching `:free` models
+        if cline_key and not client_key:
             try:
-                collected_actions = []
-                working_contents = list(contents)
-                final_reply = ""
-                gen_cfg = {
-                    "temperature": 0.85,
-                    "topP": 0.95,
-                    "maxOutputTokens": 1400,
-                }
-                if "2.5" in model:
-                    gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
-                
-                # Multi-turn tool execution loop (max 3 rounds)
-                for _round in range(3):
-                    cur_payload = {
-                        "contents": working_contents,
-                        "systemInstruction": {"parts": [{"text": system_instruction}]},
-                        "tools": [{"functionDeclarations": _GEMINI_TOOLS_DECLARATIONS}],
-                        "safetySettings": _GEMINI_SAFETY_SETTINGS,
-                        "generationConfig": gen_cfg,
+                cline_reply, cline_actions, cline_model = _vg_call_cline_chat(
+                    cline_key,
+                    system_instruction,
+                    history,
+                    user_msg,
+                    kb,
+                    user_context,
+                    image_data=image_data,
+                    image_result=image_result,
+                )
+                if cline_reply:
+                    return _vg_finalize_ai_result(
+                        cline_reply, cline_actions, kb, image_result, provider="cline", model=cline_model
+                    )
+            except Exception as cline_err:
+                print(f"Cline chat error: {cline_err}")
+
+        if has_gemini:
+            contents = []
+            for h in history:
+                if contents and contents[-1]["role"] == h["role"]:
+                    contents[-1]["parts"][0]["text"] += "\n" + h["text"]
+                else:
+                    contents.append({"role": h["role"], "parts": [{"text": h["text"]}]})
+            if contents and contents[0]["role"] == "model":
+                contents.insert(0, {"role": "user", "parts": [{"text": "Hey Vegeta"}]})
+
+            user_parts = []
+            if image_data:
+                clean_b64 = image_data
+                mime_type = "image/jpeg"
+                if "," in clean_b64:
+                    header, clean_b64 = clean_b64.split(",", 1)
+                    if "png" in header.lower():
+                        mime_type = "image/png"
+                    elif "webp" in header.lower():
+                        mime_type = "image/webp"
+                user_parts.append({
+                    "inlineData": {
+                        "mimeType": mime_type,
+                        "data": clean_b64
                     }
-                    res = _STREAM_SESSION.post(url, json=cur_payload, headers={"Content-Type": "application/json"}, timeout=18)
-                    if res.status_code != 200:
-                        print(f"Gemini HTTP {res.status_code} ({model}): {res.text[:200]}")
-                        break
-                    data = res.json()
-                    cands = data.get("candidates") or []
-                    if not cands:
-                        break
-                    candidate_content = cands[0].get("content") or {}
-                    parts = candidate_content.get("parts") or []
-                    
-                    fn_calls = [p.get("functionCall") for p in parts if p.get("functionCall")]
-                    text_parts = [p.get("text", "") for p in parts if p.get("text")]
-                    
-                    if text_parts:
-                        final_reply += "".join(text_parts).strip()
-                    
-                    if not fn_calls:
-                        break
-                    
-                    # Execute tool calls
-                    response_parts = []
-                    for fc in fn_calls:
-                        fname = fc.get("name")
-                        fargs = fc.get("args") or {}
-                        fres = _vg_execute_tool(fname, fargs, kb, user_context)
-                        if fres.get("action_queued"):
-                            collected_actions.append(fres)
-                        response_parts.append({
-                            "functionResponse": {
-                                "name": fname,
-                                "response": {"name": fname, "content": fres}
-                            }
-                        })
-                    
-                    working_contents.append({"role": "model", "parts": parts})
-                    working_contents.append({"role": "user", "parts": response_parts})
-                
-                if final_reply:
-                    # Also parse any <!--ACTION:(.*?)--> in text
-                    m = re.search(r"<!--ACTION:(.*?)-->", final_reply)
-                    if m:
-                        try:
-                            act = json.loads(m.group(1).strip())
-                            if isinstance(act, dict):
-                                collected_actions.append(act)
-                            final_reply = re.sub(r"<!--ACTION:.*?-->", "", final_reply).strip()
-                        except Exception:
-                            pass
-                    
-                    if not collected_actions:
-                        if image_result and image_result.get("matched_item") and image_result.get("confident"):
-                            it = image_result["matched_item"]
-                            collected_actions.append({
-                                "type": "play",
-                                "anime_id": it["anime_id"],
-                                "episode": image_result.get("episode") or 1,
-                                "time": int(image_result.get("from_seconds") or 0),
-                                "title": _vg_title(it),
+                })
+            prompt_txt = user_msg or "Identify which anime and character this image is from, Prince Vegeta!"
+            user_parts.append({"text": prompt_txt})
+
+            if contents and contents[-1]["role"] == "user":
+                contents[-1]["parts"].extend(user_parts)
+            else:
+                contents.append({"role": "user", "parts": user_parts})
+
+            for model in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                try:
+                    collected_actions = []
+                    working_contents = list(contents)
+                    final_reply = ""
+                    gen_cfg = {
+                        "temperature": 0.85,
+                        "topP": 0.95,
+                        "maxOutputTokens": 1400,
+                    }
+                    if "2.5" in model:
+                        gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
+
+                    # Multi-turn tool execution loop (max 3 rounds)
+                    for _round in range(3):
+                        cur_payload = {
+                            "contents": working_contents,
+                            "systemInstruction": {"parts": [{"text": system_instruction}]},
+                            "tools": [{"functionDeclarations": _GEMINI_TOOLS_DECLARATIONS}],
+                            "safetySettings": _GEMINI_SAFETY_SETTINGS,
+                            "generationConfig": gen_cfg,
+                        }
+                        res = _STREAM_SESSION.post(url, json=cur_payload, headers={"Content-Type": "application/json"}, timeout=18)
+                        if res.status_code != 200:
+                            print(f"Gemini HTTP {res.status_code} ({model}): {res.text[:200]}")
+                            break
+                        data = res.json()
+                        cands = data.get("candidates") or []
+                        if not cands:
+                            break
+                        candidate_content = cands[0].get("content") or {}
+                        parts = candidate_content.get("parts") or []
+
+                        fn_calls = [p.get("functionCall") for p in parts if p.get("functionCall")]
+                        text_parts = [p.get("text", "") for p in parts if p.get("text")]
+
+                        if text_parts:
+                            final_reply += "".join(text_parts).strip()
+
+                        if not fn_calls:
+                            break
+
+                        # Execute tool calls
+                        response_parts = []
+                        for fc in fn_calls:
+                            fname = fc.get("name")
+                            fargs = fc.get("args") or {}
+                            fres = _vg_execute_tool(fname, fargs, kb, user_context)
+                            if fres.get("action_queued"):
+                                collected_actions.append(fres)
+                            response_parts.append({
+                                "functionResponse": {
+                                    "name": fname,
+                                    "response": {"name": fname, "content": fres}
+                                }
                             })
-                    
-                    valid_actions = _vg_validate_actions(collected_actions, kb)
-                    return {
-                        "ok": True,
-                        "reply": final_reply,
-                        "action": valid_actions[0] if valid_actions else None,
-                        "actions": valid_actions,
-                        "used_gemini": True,
-                        "model": model
-                    }
-            except Exception as gemini_err:
-                print(f"Gemini API error ({model}): {gemini_err}")
-                continue
+
+                        working_contents.append({"role": "model", "parts": parts})
+                        working_contents.append({"role": "user", "parts": response_parts})
+
+                    if final_reply:
+                        return _vg_finalize_ai_result(
+                            final_reply, collected_actions, kb, image_result, provider="gemini", model=model
+                        )
+                except Exception as gemini_err:
+                    print(f"Gemini API error ({model}): {gemini_err}")
+                    continue
 
     # If image was uploaded and neither Gemini Vision nor trace.moe/WD-Tagger/MAL visual matcher locked onto an anime
     if image_data and not (image_result and (image_result.get("matched_item") or image_result.get("best_char_match"))):
