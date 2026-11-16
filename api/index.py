@@ -2597,15 +2597,21 @@ def _extract_artwork_crop(raw_bytes: bytes) -> bytes | None:
                         if ok:
                             return buf.tobytes()
 
-        # Case 2: Outer uniform white or black borders around an anime frame
-        non_border = ((gray > 18) & (gray < 236)).astype(np.uint8) * 255
-        opened = cv2.morphologyEx(non_border, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9)))
-        c3, _ = cv2.findContours(opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if c3:
-            art = max(c3, key=cv2.contourArea)
-            ax, ay, aw, ah = cv2.boundingRect(art)
-            if aw >= 60 and ah >= 60 and (aw * ah) < 0.88 * W * H and (aw * ah) >= 0.15 * W * H:
-                crop = img[ay:ay + ah, ax:ax + aw]
+        # Case 2: Only trim truly uniform solid black/white letterbox or phone borders around edges
+        row_std = gray.std(axis=1)
+        row_mean = gray.mean(axis=1)
+        col_std = gray.std(axis=0)
+        col_mean = gray.mean(axis=0)
+        is_border_row = (row_std < 6.0) & ((row_mean < 16.0) | (row_mean > 238.0))
+        is_border_col = (col_std < 6.0) & ((col_mean < 16.0) | (col_mean > 238.0))
+        valid_rows = np.where(~is_border_row)[0]
+        valid_cols = np.where(~is_border_col)[0]
+        if valid_rows.size > 0 and valid_cols.size > 0:
+            y0, y1 = int(valid_rows[0]), int(valid_rows[-1]) + 1
+            x0, x1 = int(valid_cols[0]), int(valid_cols[-1]) + 1
+            aw, ah = x1 - x0, y1 - y0
+            if aw >= 60 and ah >= 60 and (aw * ah) < 0.92 * W * H and (aw * ah) >= 0.18 * W * H:
+                crop = img[y0:y1, x0:x1]
                 ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 94])
                 if ok:
                     return buf.tobytes()
@@ -2716,8 +2722,379 @@ def _match_character_visual(raw_bytes: bytes, kb: dict, top_k: int = 3) -> list[
         return []
 
 
-def _vegeta_reverse_image_search(image_base64: str, kb: dict) -> dict:
-    """Reverse search an anime screenshot using trace.moe with auto-cropping & strict confidence gating."""
+_VG_WD_TAGGER_BACKENDS = [
+    ("https://smilingwolf-wd-tagger.hf.space", "SmilingWolf/wd-swinv2-tagger-v3", 0.35, False, 0.22, False),
+    ("https://ashen-sensored-wd-eva02-tagger-2026-canary.hf.space", "ashen-sensored/wd-eva02-tagger-2026-canary", 0.50, False, 0.25, False),
+    ("https://smilingwolf-wd-tagger.hf.space", "SmilingWolf/wd-vit-tagger-v3", 0.35, False, 0.22, False),
+]
+
+_VG_CHAR_SORTED_CACHE: dict = {"ready": False, "map": {}}
+_VG_GENERIC_WD_TAGS = {
+    "1girl", "1boy", "2girls", "2boys", "multiple girls", "multiple boys", "solo", "looking at viewer",
+    "smile", "open mouth", "blush", "short hair", "long hair", "black hair", "brown hair", "blonde hair",
+    "blue hair", "red hair", "white hair", "silver hair", "green hair", "pink hair", "purple hair",
+    "blue eyes", "red eyes", "brown eyes", "green eyes", "yellow eyes", "purple eyes", "upper body",
+    "portrait", "simple background", "white background", "black background", "blurry", "english text",
+    "japanese text", "fake screenshot", "text focus", "speech bubble", "phone", "smartphone", "cellphone",
+    "shirt", "jacket", "coat", "dress", "skirt", "pants", "gloves", "hat", "scar", "sword", "weapon",
+    "fire", "smoke", "building", "sky", "cloud", "night", "dark", "outdoors", "indoors", "monochrome",
+    "greyscale", "comic", "chibi", "full body", "cowboy shot", "close-up", "profile", "from behind",
+    "male focus", "female focus", "breasts", "cleavage", "teeth", "holding", "standing", "sitting",
+}
+
+
+def _vg_prepare_vision_jpeg(raw_bytes: bytes, max_dim: int = 960) -> bytes:
+    """Normalize arbitrary image bytes (PNG/WebP/large phone shots) into a compact JPEG for fast API upload."""
+    try:
+        import cv2
+        import numpy as np
+        arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None or img.size == 0:
+            return raw_bytes
+        h, w = img.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / float(max(h, w))
+            img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        if ok:
+            return buf.tobytes()
+    except Exception:
+        pass
+    return raw_bytes
+
+
+def _vg_query_trace_moe(payload_bytes: bytes) -> list[dict]:
+    """Query trace.moe with border auto-cropping enabled."""
+    import urllib.request as _urllib_req
+    req = _urllib_req.Request(
+        "https://api.trace.moe/search?cutBorders",
+        data=payload_bytes,
+        headers={
+            "Content-Type": "image/jpeg",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+    )
+    with _urllib_req.urlopen(req, timeout=9) as res:
+        data = json.loads(res.read().decode("utf-8"))
+        return data.get("result") or []
+
+
+def _vg_fold_romanization(token: str) -> str:
+    """Fold Japanese macron variants (ou->o, uu->u) for character-name matching."""
+    t = re.sub(r"[^a-z0-9]", "", token.lower())
+    t = t.replace("ou", "o").replace("uu", "u")
+    return t
+
+
+def _vg_get_sorted_char_index(kb: dict) -> dict:
+    """Build and cache token-sorted character lookup map to match Family-Given and Given-Family orders."""
+    char_idx = kb.get("character_index") or {}
+    if _VG_CHAR_SORTED_CACHE["ready"] and _VG_CHAR_SORTED_CACHE["map"]:
+        return _VG_CHAR_SORTED_CACHE["map"]
+    sorted_map: dict = {}
+    for ck, entries in char_idx.items():
+        toks = [t for t in ck.split() if len(t) >= 2] or ck.split()
+        if len(toks) >= 2:
+            k_norm = " ".join(sorted(toks))
+            k_fold = " ".join(sorted(_vg_fold_romanization(t) for t in toks))
+            sorted_map.setdefault(k_norm, []).extend(entries[:3])
+            if k_fold != k_norm:
+                sorted_map.setdefault(k_fold, []).extend(entries[:3])
+        elif len(toks) == 1:
+            k_fold = _vg_fold_romanization(toks[0])
+            if k_fold != toks[0]:
+                sorted_map.setdefault(k_fold, []).extend(entries[:3])
+    for k in sorted_map:
+        sorted_map[k].sort(key=lambda x: (1 if x[1] == "M" else 0, x[2].get("popularity") or 0), reverse=True)
+    if char_idx:
+        _VG_CHAR_SORTED_CACHE["ready"] = True
+        _VG_CHAR_SORTED_CACHE["map"] = sorted_map
+    return sorted_map
+
+
+def _vg_call_gradio_tagger(base_url: str, model_repo: str, g_thresh: float, g_mcut: bool, c_thresh: float, c_mcut: bool, img_bytes: bytes, wall_timeout: float = 18.0) -> dict | None:
+    """Invoke a CPU Gradio WD-Tagger Space via REST + SSE without any API key."""
+    try:
+        t0 = _time.time()
+        up = _STREAM_SESSION.post(
+            f"{base_url}/gradio_api/upload",
+            files={"files": ("frame.jpg", img_bytes, "image/jpeg")},
+            timeout=8,
+        )
+        if not up.ok:
+            return None
+        uploaded = up.json()
+        if not uploaded:
+            return None
+        call_res = _STREAM_SESSION.post(
+            f"{base_url}/gradio_api/call/predict",
+            json={
+                "data": [
+                    {"path": uploaded[0], "meta": {"_type": "gradio.FileData"}},
+                    model_repo,
+                    g_thresh,
+                    g_mcut,
+                    c_thresh,
+                    c_mcut,
+                ]
+            },
+            timeout=8,
+        )
+        if not call_res.ok:
+            return None
+        eid = (call_res.json() or {}).get("event_id")
+        if not eid:
+            return None
+        with _STREAM_SESSION.get(f"{base_url}/gradio_api/call/predict/{eid}", stream=True, timeout=max(6.0, wall_timeout)) as ev:
+            if not ev.ok:
+                return None
+            last_event = ""
+            for raw_ln in ev.iter_lines(decode_unicode=True):
+                if _time.time() - t0 > wall_timeout:
+                    break
+                if not raw_ln:
+                    continue
+                if raw_ln.startswith("event:"):
+                    last_event = raw_ln[6:].strip()
+                    if last_event == "error":
+                        return None
+                elif raw_ln.startswith("data:") and last_event == "complete":
+                    payload = json.loads(raw_ln[5:].strip())
+                    if isinstance(payload, list) and len(payload) >= 4:
+                        chars = []
+                        if isinstance(payload[2], dict):
+                            chars = payload[2].get("confidences") or []
+                            if not chars and payload[2].get("label"):
+                                chars = [{"label": payload[2]["label"], "confidence": 0.75}]
+                        tags = []
+                        if isinstance(payload[3], dict):
+                            tags = [x.get("label") for x in (payload[3].get("confidences") or []) if x.get("label")]
+                        return {
+                            "characters": [
+                                {"label": str(c.get("label") or "").strip(), "confidence": float(c.get("confidence") or 0.0)}
+                                for c in chars if c.get("label")
+                            ],
+                            "tags": tags,
+                            "engine": model_repo,
+                        }
+                    break
+    except Exception as err:
+        print(f"WD-Tagger error ({model_repo}): {err}")
+    return None
+
+
+def _vg_hf_wd_tagger_identify(img_bytes: bytes) -> dict | None:
+    """Identify anime characters and visual tags using zero-key CPU HuggingFace WD-Tagger Spaces."""
+    norm_jpg = _vg_prepare_vision_jpeg(img_bytes, max_dim=768)
+    for base_url, model_repo, g_th, g_mc, c_th, c_mc in _VG_WD_TAGGER_BACKENDS:
+        out = _vg_call_gradio_tagger(base_url, model_repo, g_th, g_mc, c_th, c_mc, norm_jpg, wall_timeout=18.0)
+        if out and (out.get("characters") or out.get("tags")):
+            return out
+    return None
+
+
+def _vg_anilist_char_lookup(char_name: str, kb: dict) -> tuple[str, object | None]:
+    """Resolve a character name via free AniList GraphQL into a KuroAnime catalog item."""
+    query = """
+    query ($s: String) {
+      Page(perPage: 4) {
+        characters(search: $s, sort: FAVOURITES_DESC) {
+          name { full }
+          media(sort: POPULARITY_DESC, perPage: 3, type: ANIME) {
+            nodes { id idMal title { romaji english } }
+          }
+        }
+      }
+    }
+    """
+    candidates = [char_name]
+    parts = char_name.split()
+    if len(parts) == 2:
+        candidates.append(f"{parts[1]} {parts[0]}")
+    by_al = kb.get("by_anilist_id") or {}
+    by_mal = kb.get("by_mal_id") or {}
+    for q_name in candidates:
+        try:
+            r = _STREAM_SESSION.post(
+                "https://graphql.anilist.co",
+                json={"query": query, "variables": {"s": q_name}},
+                timeout=4,
+            )
+            if not r.ok:
+                continue
+            chars = (((r.json() or {}).get("data") or {}).get("Page") or {}).get("characters") or []
+            for ch in chars:
+                full_name = ((ch.get("name") or {}).get("full") or q_name).strip()
+                nodes = ((ch.get("media") or {}).get("nodes") or [])
+                for m in nodes:
+                    al_id = m.get("id")
+                    mal_id = m.get("idMal")
+                    it = by_al.get(int(al_id)) if al_id and int(al_id) in by_al else None
+                    if not it and mal_id and int(mal_id) in by_mal:
+                        it = by_mal[int(mal_id)]
+                    if not it:
+                        m_titles = m.get("title") or {}
+                        for mt in (m_titles.get("english"), m_titles.get("romaji")):
+                            if mt:
+                                it, _ = _find_exact_or_fuzzy_title(mt, kb["items"])
+                                if it:
+                                    break
+                    if it:
+                        return full_name, it
+        except Exception:
+            continue
+    return char_name, None
+
+
+def _vg_anime_entry_priority(it: dict) -> tuple:
+    """Rank canonical base TV series above 1-episode stubs, OVAs, or sequels when multiple entries match."""
+    t_low = ((it.get("title_english") or "") + " " + (it.get("title") or "")).lower()
+    ep_cnt = int(it.get("episode_count") or 0)
+    is_tv = 1 if (it.get("type") or "").upper() == "TV" else 0
+    is_sequel = 1 if re.search(r"\b(season\s*[2-9]|part\s*[2-9]|2nd season|3rd season|4th season|cour\s*[2-9]|final season|film|movie|ova|special|recap)\b", t_low) else 0
+    multi_ep = 1 if ep_cnt > 1 else 0
+    return (is_tv, multi_ep, 1 - is_sequel, min(ep_cnt, 500), int(it.get("popularity") or 0))
+
+
+def _vg_lookup_char_in_kb(char_label: str, kb: dict) -> tuple[str, str | None, object | None, float]:
+    """Resolve a WD-Tagger character label (e.g. 'sanji (one piece)') into display name and KuroAnime item."""
+    raw = char_label.strip().lower().replace("_", " ")
+    m_par = re.match(r"^(.+?)\s*\(([^()]+)\)\s*$", raw)
+    base_name = (m_par.group(1) if m_par else raw).strip()
+    series_hint = (m_par.group(2) if m_par else "").strip()
+
+    series_item = None
+    if series_hint:
+        clean_series = re.sub(r"[-_:]", " ", series_hint).strip()
+        series_item, _ = _find_exact_or_fuzzy_title(clean_series, kb["items"])
+
+    char_idx = kb.get("character_index") or {}
+    sorted_idx = _vg_get_sorted_char_index(kb)
+
+    clean_key = re.sub(r"[^a-z0-9\s]", " ", base_name).strip()
+    clean_key = re.sub(r"\s+", " ", clean_key)
+    toks = [t for t in clean_key.split() if len(t) >= 2] or clean_key.split()
+    sorted_key = " ".join(sorted(toks))
+    folded_sorted = " ".join(sorted(_vg_fold_romanization(t) for t in toks)) if toks else ""
+    folded_single = _vg_fold_romanization(toks[0]) if len(toks) == 1 else ""
+
+    hits = []
+    for k in (clean_key, " ".join(toks), sorted_key, folded_sorted, folded_single):
+        if not k:
+            continue
+        if k in char_idx:
+            hits.extend(char_idx[k][:8])
+        if k in sorted_idx:
+            hits.extend(sorted_idx[k][:8])
+
+    hits.sort(
+        key=lambda x: (1 if x[1] == "M" else 0, *_vg_anime_entry_priority(x[2])),
+        reverse=True,
+    )
+
+    if series_item and hits:
+        s_fran = series_item.get("franchise")
+        for cn, role, it in hits:
+            if it["anime_id"] == series_item["anime_id"] or (s_fran and it.get("franchise") == s_fran):
+                return cn, series_hint, it, 1.0
+
+    if series_item:
+        return base_name.title(), series_hint, series_item, 0.95
+
+    if hits:
+        return hits[0][0], None, hits[0][2], 0.9
+
+    return base_name.title(), series_hint or None, None, 0.0
+
+
+def _vg_resolve_wd_results(wd_out: dict, kb: dict) -> dict | None:
+    """Resolve WD-Tagger character & tag predictions into a structured KuroAnime visual match."""
+    if not wd_out:
+        return None
+    raw_chars = wd_out.get("characters") or []
+    tags = wd_out.get("tags") or []
+
+    votes: dict[int, dict] = {}
+    detected_names: list[tuple[str, float]] = []
+    unresolved: list[tuple[str, float]] = []
+
+    for c in raw_chars[:8]:
+        lbl = c.get("label") or ""
+        conf = float(c.get("confidence") or 0.0)
+        if not lbl or conf < 0.25:
+            continue
+        disp_name, s_hint, it, rel_w = _vg_lookup_char_in_kb(lbl, kb)
+        if it is not None:
+            aid = it["anime_id"]
+            bucket = votes.setdefault(aid, {"item": it, "score": 0.0, "max_conf": 0.0, "chars": []})
+            bucket["score"] += conf * max(rel_w, 0.8)
+            bucket["max_conf"] = max(bucket["max_conf"], conf)
+            if disp_name not in bucket["chars"]:
+                bucket["chars"].append(disp_name)
+            detected_names.append((disp_name, conf))
+        elif conf >= 0.45 and len(unresolved) < 2:
+            unresolved.append((disp_name, conf))
+
+    # AniList GraphQL fallback ONLY if no strong local match locked yet
+    best_local = max((v["max_conf"] for v in votes.values()), default=0.0)
+    if best_local < 0.70 and unresolved:
+        for ch_name, conf in unresolved:
+            al_name, it = _vg_anilist_char_lookup(ch_name, kb)
+            if it is not None:
+                aid = it["anime_id"]
+                bucket = votes.setdefault(aid, {"item": it, "score": 0.0, "max_conf": 0.0, "chars": []})
+                bucket["score"] += conf
+                bucket["max_conf"] = max(bucket["max_conf"], conf)
+                if al_name not in bucket["chars"]:
+                    bucket["chars"].append(al_name)
+                detected_names.append((al_name, conf))
+
+    best_char_match = None
+    if votes:
+        ranked = sorted(
+            votes.values(),
+            key=lambda v: (v["score"], v["max_conf"], v["item"].get("popularity") or 0),
+            reverse=True,
+        )
+        top = ranked[0]
+        if top["score"] >= 0.45 or top["max_conf"] >= 0.45:
+            it = top["item"]
+            best_char_match = {
+                "score": min(0.99, max(top["max_conf"], min(0.98, top["score"]))),
+                "character": top["chars"][0] if top["chars"] else "Identified Character",
+                "characters_list": top["chars"][:6],
+                "anime_title": it.get("title_english") or it.get("title"),
+                "anilist_id": it.get("anilist_id"),
+                "mal_id": it.get("mal_id"),
+                "matched_item": it,
+                "source": wd_out.get("engine") or "wd-tagger",
+            }
+    elif tags:
+        # Check distinctive franchise-specific tags if characters missed threshold
+        sig_tags = [t for t in tags if t not in _VG_GENERIC_WD_TAGS and not re.match(r"^\d+(?:boy|girl)s?$", t)]
+        tag_cands = _vg_identify_scene_candidates(" ".join(sig_tags[:10]), kb["items"], kb=kb, limit=2) if len(sig_tags) >= 3 else []
+        if tag_cands and tag_cands[0][0] >= 35.0:
+            t_it = tag_cands[0][1]
+            best_char_match = {
+                "score": min(0.84, 0.55 + tag_cands[0][0] / 120.0),
+                "character": f"Visual elements ({', '.join(sig_tags[:3])})",
+                "characters_list": [],
+                "anime_title": t_it.get("title_english") or t_it.get("title"),
+                "matched_item": t_it,
+                "source": "wd-tags-scene",
+            }
+
+    return {
+        "best_char_match": best_char_match,
+        "vision_characters": detected_names[:6],
+        "vision_tags": [t for t in tags[:14] if t not in {"english text", "fake screenshot"}],
+        "vision_engine": wd_out.get("engine"),
+    }
+
+
+def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision: bool = True) -> dict:
+    """Reverse search anime screenshots/portraits via trace.moe (?cutBorders), local MAL index, and zero-key WD-Tagger."""
     if not image_base64:
         return None
     clean_b64 = image_base64
@@ -2730,78 +3107,134 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict) -> dict:
         return None
 
     try:
-        import urllib.request as _urllib_req
-        cropped_bytes = _extract_artwork_crop(img_bytes)
-        search_bytes = cropped_bytes if cropped_bytes else img_bytes
+        # Reject solid blank / nearly blank frames to avoid trace.moe fade-to-black false positives
+        try:
+            import cv2 as _cv2
+            import numpy as _np
+            _arr = _np.frombuffer(img_bytes, dtype=_np.uint8)
+            _im = _cv2.imdecode(_arr, _cv2.IMREAD_GRAYSCALE)
+            if _im is not None and float(_np.std(_im)) < 4.0:
+                return {"similarity": 0.0, "confident": False, "matched_item": None, "best_char_match": None, "vision_tags": []}
+        except Exception:
+            pass
 
-        def _query_trace_moe(payload_bytes: bytes) -> list[dict]:
-            req = _urllib_req.Request(
-                "https://api.trace.moe/search",
-                data=payload_bytes,
-                headers={
-                    "Content-Type": "image/jpeg",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                },
-            )
-            with _urllib_req.urlopen(req, timeout=9) as res:
-                data = json.loads(res.read().decode("utf-8"))
-                return data.get("result") or []
+        raw_jpg = _vg_prepare_vision_jpeg(img_bytes, max_dim=960)
+        cropped_bytes = _extract_artwork_crop(raw_jpg)
 
-        results = _query_trace_moe(search_bytes)
+        # Query trace.moe concurrently with raw + artwork-cropped frames for maximum lock accuracy
+        probe_list = [cropped_bytes, raw_jpg] if cropped_bytes else [raw_jpg]
+        all_results: list[dict] = []
+        if len(probe_list) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futs = [pool.submit(_vg_query_trace_moe, b) for b in probe_list]
+                for f in futs:
+                    try:
+                        all_results.extend(f.result() or [])
+                    except Exception:
+                        pass
+        else:
+            try:
+                all_results.extend(_vg_query_trace_moe(probe_list[0]) or [])
+            except Exception as err:
+                print(f"trace.moe search error: {err}")
+
+        all_results.sort(key=lambda x: float(x.get("similarity") or 0.0), reverse=True)
         by_al = kb.get("by_anilist_id", {})
-        best_sim = float(results[0].get("similarity") or 0.0) if results else 0.0
+        best_sim = float(all_results[0].get("similarity") or 0.0) if all_results else 0.0
 
-        # Only accept high-confidence (>= 0.87) trace.moe episode frame locks
+        def _resolve_trace_item(cand: dict):
+            al_id = cand.get("anilist")
+            filename = cand.get("filename") or ""
+            m_it = by_al.get(int(al_id)) if al_id and int(al_id) in by_al else None
+            if not m_it and filename:
+                clean_fn = re.sub(r"\[.*?\]|\(.*?\)|_|\.mp4|\.mkv|\d{3,4}p|x264|AAC", " ", filename, flags=re.I)
+                clean_fn = re.sub(r"-\s*\d+.*$", "", clean_fn).strip()
+                if clean_fn:
+                    m_it, _ = _find_exact_or_fuzzy_title(clean_fn, kb["items"])
+            return m_it
+
+        # High-confidence (>= 0.87) trace.moe episode frame lock
         if best_sim >= 0.87:
-            for cand in results[:3]:
+            for cand in all_results[:4]:
                 similarity = float(cand.get("similarity") or 0.0)
                 if similarity < 0.87:
                     continue
-                al_id = cand.get("anilist")
-                episode = cand.get("episode") or 1
-                from_sec = float(cand.get("from") or 0.0)
-                filename = cand.get("filename") or ""
-
-                matched_item = None
-                if al_id and int(al_id) in by_al:
-                    matched_item = by_al[int(al_id)]
-
-                if not matched_item and filename:
-                    clean_fn = re.sub(r"\[.*?\]|\(.*?\)|_|\.mp4|\.mkv|\d{3,4}p|x264|AAC", " ", filename, flags=re.I)
-                    clean_fn = re.sub(r"-\s*\d+.*$", "", clean_fn).strip()
-                    if clean_fn:
-                        matched_item, _ = _find_exact_or_fuzzy_title(clean_fn, kb["items"])
-
+                matched_item = _resolve_trace_item(cand)
                 if matched_item:
                     return {
                         "similarity": similarity,
                         "confident": True,
-                        "anilist_id": al_id,
-                        "episode": episode,
-                        "from_seconds": from_sec,
-                        "filename": filename,
+                        "anilist_id": cand.get("anilist"),
+                        "episode": cand.get("episode") or 1,
+                        "from_seconds": float(cand.get("from") or 0.0),
+                        "filename": cand.get("filename") or "",
                         "matched_item": matched_item,
                         "char_matches": [],
                         "cropped": bool(cropped_bytes),
                     }
 
-        # Fallback to MAL/AniList Character Portrait Visual Index
+        # Tier 2: Fast local MAL/AniList Character Portrait Visual Index
+        search_bytes = cropped_bytes if cropped_bytes else raw_jpg
         char_matches = _match_character_visual(search_bytes, kb, top_k=3)
         top_char = char_matches[0] if char_matches else None
+        local_char_lock = top_char if (top_char and top_char["score"] >= 0.90) else None
+
+        # Tier 3: Zero-key AI Anime Vision (always scan full raw_jpg first so dark/edge characters aren't lost)
+        vision_res = None
+        if not local_char_lock and use_remote_vision:
+            wd_raw = _vg_hf_wd_tagger_identify(raw_jpg)
+            vision_res = _vg_resolve_wd_results(wd_raw, kb)
+            if (not vision_res or not vision_res.get("best_char_match")) and cropped_bytes:
+                wd_crop = _vg_hf_wd_tagger_identify(cropped_bytes)
+                crop_res = _vg_resolve_wd_results(wd_crop, kb)
+                if crop_res and (crop_res.get("best_char_match") or not vision_res):
+                    vision_res = crop_res
+
+        best_char_match = local_char_lock
+        if not best_char_match and vision_res and vision_res.get("best_char_match"):
+            best_char_match = vision_res["best_char_match"]
+        elif not best_char_match and top_char and top_char["score"] >= 0.86:
+            best_char_match = top_char
+
+        # Cross-verify mid-confidence trace.moe (0.78 - 0.87) with vision tags/anime agreement
+        weak_trace_item = _resolve_trace_item(all_results[0]) if all_results else None
+        if best_char_match and weak_trace_item and best_sim >= 0.78:
+            bcm_item = best_char_match.get("matched_item")
+            if bcm_item and bcm_item["anime_id"] == weak_trace_item["anime_id"]:
+                return {
+                    "similarity": best_sim,
+                    "confident": True,
+                    "anilist_id": all_results[0].get("anilist"),
+                    "episode": all_results[0].get("episode") or 1,
+                    "from_seconds": float(all_results[0].get("from") or 0.0),
+                    "filename": all_results[0].get("filename") or "",
+                    "matched_item": weak_trace_item,
+                    "best_char_match": best_char_match,
+                    "char_matches": char_matches,
+                    "vision_characters": (vision_res or {}).get("vision_characters") or [],
+                    "vision_tags": (vision_res or {}).get("vision_tags") or [],
+                    "vision_engine": (vision_res or {}).get("vision_engine"),
+                    "cropped": bool(cropped_bytes),
+                }
+
         return {
             "similarity": best_sim,
             "confident": False,
-            "anilist_id": results[0].get("anilist") if results else None,
-            "episode": (results[0].get("episode") or 1) if results else 1,
-            "from_seconds": float(results[0].get("from") or 0.0) if results else 0.0,
-            "filename": (results[0].get("filename") or "") if results else "",
+            "anilist_id": all_results[0].get("anilist") if all_results else None,
+            "episode": (all_results[0].get("episode") or 1) if all_results else 1,
+            "from_seconds": float(all_results[0].get("from") or 0.0) if all_results else 0.0,
+            "filename": (all_results[0].get("filename") or "") if all_results else "",
             "matched_item": None,
             "char_matches": char_matches,
-            "best_char_match": top_char if (top_char and top_char["score"] >= 0.86) else None,
+            "best_char_match": best_char_match,
+            "vision_characters": (vision_res or {}).get("vision_characters") or [],
+            "vision_tags": (vision_res or {}).get("vision_tags") or [],
+            "vision_engine": (vision_res or {}).get("vision_engine"),
             "cropped": bool(cropped_bytes),
         }
     except Exception as err:
-        print(f"trace.moe search error: {err}")
+        print(f"Reverse image search error: {err}")
         return None
 
 
@@ -5242,16 +5675,28 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
     if image_search_result and image_search_result.get("best_char_match"):
         bcm = image_search_result["best_char_match"]
         score_pct = int(bcm["score"] * 100)
-        char_name = bcm["character"]
+        char_list = bcm.get("characters_list") or ([bcm["character"]] if bcm.get("character") else [])
+        if len(char_list) > 1:
+            char_display = ", ".join(f"**{c}**" for c in char_list[:-1]) + f", and **{char_list[-1]}**"
+        else:
+            char_display = f"**{bcm['character']}**"
         anime_name = bcm["anime_title"]
         it = bcm.get("matched_item")
+        tags_list = (image_search_result.get("vision_tags") or [])[:5]
+        tags_line = f"- **Visual Cues:** {', '.join(tags_list)}\n" if tags_list else ""
         if it:
             display_title = it["title_english"] or it["title"]
+            syn = re.sub(r"<[^>]+>", "", (it.get("synopsis") or "")).strip()
+            syn_snip = (syn[:210].rsplit(" ", 1)[0] + "...") if len(syn) > 210 else syn
+            syn_line = f"- **The Prince's Verdict:** {syn_snip}\n" if syn_snip else ""
             reply = (
-                f"## Prince Vegeta's Saiyan Scouter • Character Match Confirmed!\n\n"
-                f"Hmph! My MyAnimeList character database locks onto **{char_name}** from **{display_title}** (**{score_pct}%** portrait match)!\n\n"
-                f"- **Rating:** ★ {it['score']}/10\n"
+                f"## Prince Vegeta's Saiyan Scouter • Visual Match Confirmed!\n\n"
+                f"Hmph! Even a cropped frame or cluttered screenshot cannot deceive the Prince of Saiyans! "
+                f"My Scouter locks onto {char_display} from **{display_title}** (**{score_pct}%** neural vision match)!\n\n"
+                f"- **Rating:** ★ {it['score']}/10 • {it.get('episode_count') or '?'} Episodes ({it.get('type') or 'TV'})\n"
                 f"- **Genres:** {it['genres']}\n"
+                f"{tags_line}"
+                f"{syn_line}\n"
                 f"- [Watch on KuroAnime](#anime/{it['anime_id']}?ep=1)"
             )
             action = {
@@ -5262,7 +5707,7 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
                 "title": display_title,
             }
             return reply, action
-        reply = f"Hmph! My MyAnimeList character database locks onto **{char_name}** from **{anime_name}** (**{score_pct}%** portrait match)!"
+        reply = f"Hmph! My Scouter locks onto {char_display} from **{anime_name}** (**{score_pct}%** visual match)!"
         return reply, None
 
     # 0. Agentic Play Command Execution
@@ -5461,6 +5906,7 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
             return _vg_generate_human_anime_review(specific)
 
     # 8.5. Fallback Scene / Plot Identification before genre recommendations
+    is_rec_query = bool(re.search(r"\b(recommend|suggest|what should i watch|give me (?:an|some)|top anime|best anime to watch|what to watch|good anime to watch|surprise me)\b", msg_low))
     if not is_rec_query and len(msg_low.split()) >= 5:
         scene_cands = _vg_identify_scene_candidates(msg_low, items, kb=kb, limit=3)
         if scene_cands:
@@ -5484,10 +5930,9 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
             if len(scene_cands) > 1:
                 alts = [f"**[{_vg_title(r_it)}](#anime/{r_it['anime_id']}?ep={r_ep or 1})**" for _, r_it, r_ep, _ in scene_cands[1:3]]
                 out_txt += f"\n\n⚡ *Other closest Scouter matches:* {', '.join(alts)}"
-            return out_txt
+            return out_txt, None
 
     # 9. Explicit Recommendations Request (ONLY if user actually asked for recommendations!)
-    is_rec_query = bool(re.search(r"\b(recommend|suggest|what should i watch|give me (?:an|some)|top anime|best anime to watch|what to watch|good anime to watch|surprise me)\b", msg_low))
     detected_genres = _detect_query_genres(msg_low)
 
     if is_rec_query or detected_genres:
@@ -5882,16 +6327,33 @@ def _vegeta_retrieve(user_msg, history, kb, image_search_result=None, has_image=
                     f"- Detected Scene: Episode {ep} at {time_str} ({sec}s).\n"
                     f"- Action Directive: Visually verify the attached image actually matches this anime/character. If it is fanart or a different character, trust YOUR Gemini Vision instead and call search_anime!"
                 )
+        elif image_search_result and image_search_result.get("best_char_match"):
+            bcm = image_search_result["best_char_match"]
+            it = bcm.get("matched_item")
+            chars_str = ", ".join(bcm.get("characters_list") or [bcm.get("character") or "Unknown"])
+            tags_str = ", ".join((image_search_result.get("vision_tags") or [])[:8])
+            score_pct = int(float(bcm.get("score") or 0) * 100)
+            if it and add(it):
+                blocks.append(
+                    f"ANIME VISION & CHARACTER SCOUTER REPORT ({score_pct}% CONFIDENCE):\n"
+                    f"- Detected Character(s): {chars_str}\n"
+                    f"- Visual Match: {_vegeta_line(it, 240).lstrip('- ')}\n"
+                    + (f"- Detected Visual Cues: {tags_str}\n" if tags_str else "")
+                    + "- Action Directive: Confirm visually and present the character + anime clearly with its `[Watch on KuroAnime](#anime/ID)` link!"
+                )
         else:
             hint = ""
             if image_search_result and image_search_result.get("matched_item"):
                 h_it = image_search_result["matched_item"]
                 h_sim = int(image_search_result.get("similarity", 0) * 100)
                 hint = f" (Weak trace.moe hint {h_sim}%: {h_it.get('title_english') or h_it.get('title')} — DO NOT trust blindly!)"
+            vtags = ", ".join((image_search_result or {}).get("vision_tags") or [])
+            vtag_line = f"- Neural Visual Cues Seen: {vtags}\n" if vtags else ""
             blocks.append(
-                f"GEMINI VISION IMAGE IDENTIFICATION REQUIRED{hint}:\n"
+                f"VISION IMAGE IDENTIFICATION REQUIRED{hint}:\n"
                 f"- The user attached an image (character portrait, fanart, poster, or cropped frame) and trace.moe could not confirm an exact episode frame.\n"
-                f"- Examine the character's hair, eyes, outfit, uniform, weapons, markings, and art style using YOUR Gemini Vision.\n"
+                f"{vtag_line}"
+                f"- Examine the character's hair, eyes, outfit, uniform, weapons, markings, and art style using YOUR Vision.\n"
                 f"- Identify the exact character and anime series, then IMMEDIATELY call `search_anime` to look up that anime in KuroAnime's dual-server catalog (ZokoAnime + Munib Server) and give the `[Watch on KuroAnime](#anime/ID)` link!"
             )
 
@@ -6266,13 +6728,19 @@ async def ai_chat(req: Request):
                 print(f"Gemini API error ({model}): {gemini_err}")
                 continue
 
-    # If image was uploaded and Gemini Vision was unavailable/failed and neither trace.moe nor MAL character matcher locked on
+    # If image was uploaded and neither Gemini Vision nor trace.moe/WD-Tagger/MAL visual matcher locked onto an anime
     if image_data and not (image_result and (image_result.get("matched_item") or image_result.get("best_char_match"))):
+        seen_tags = [t for t in ((image_result or {}).get("vision_tags") or []) if t][:6]
+        cues_note = (
+            f"\n\nMy scouter only picked up generic visual cues (`{', '.join(seen_tags)}`) without a confirmed anime character signature."
+            if seen_tags else ""
+        )
         return {
             "ok": True,
             "reply": (
-                "Tch! My offline scouter only locks onto exact 16:9 anime episode frames or direct MyAnimeList character portraits — it cannot identify heavily cropped scenes, screenshots-with-UI, or fanart without **Gemini Vision**!\n\n"
-                "Configure `GEMINI_API_KEY` on the server (or send a clean full 16:9 episode screenshot / character portrait) and I will identify the character and anime with 100% precision."
+                "Tch! Even after scanning both **trace.moe** and my **Neural Anime Vision** scouter, that image didn't contain a clear, recognizable anime character or episode frame."
+                f"{cues_note}\n\n"
+                "Try uploading a clearer frame, character closeup, or tell me a detail about the character or scene and I'll track down the anime immediately!"
             ),
             "action": None,
             "actions": [],
