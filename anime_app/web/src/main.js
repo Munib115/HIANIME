@@ -101,7 +101,9 @@ import {
   ImagePlus,
   Send,
   MessageSquare,
-  Square
+  Square,
+  Pause,
+  AlertCircle
 } from 'lucide';
 
 // ─── Global State & Storage ─────────────────────────────────────────
@@ -220,18 +222,398 @@ function refreshIcons() {
       Layers, Volume2, VolumeX, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
       ChevronLeft, RotateCcw, Film, Bell, ExternalLink, Download, Plus,
       User, Settings, LogOut, Trash2, Share2, Copy, ChevronDown, Info, Mic,
-      WifiOff, ImagePlus, Send, MessageSquare, Square
+      WifiOff, ImagePlus, Send, MessageSquare, Square, Pause, AlertCircle
     }
   });
 }
 
+// ─── KuroAnime Dynamic Island Controller ────────────────────────────
+const KuroDynamicIsland = (() => {
+  let initialized = false;
+  let expanded = false;
+  let vegetaBusy = false;
+  let alertTimer = null;
+  let toastFallbackTimer = null;
+  let activeAlert = null; // { text, icon, tone }
+  let livePlayback = null; // { animeId, title, episodeNumber, currentTime, duration, paused, poster }
+
+  const els = {};
+
+  function fmtSec(sec) {
+    const s = Math.max(0, Math.floor(Number(sec) || 0));
+    const hrs = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const rem = s % 60;
+    if (hrs > 0) return `${hrs}:${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+    return `${mins}:${String(rem).padStart(2, '0')}`;
+  }
+
+  function inferAlertMeta(msg) {
+    const m = String(msg || '').toLowerCase();
+    if (/error|failed|unable|not found|denied|offline|not supported|blocked/.test(m)) {
+      return { icon: 'alert-circle', tone: 'error' };
+    }
+    if (/added|saved|copied|synced|enabled|generated|set to|switched|removed/.test(m)) {
+      return { icon: 'check', tone: 'success' };
+    }
+    if (/watchlist|bookmark/.test(m)) {
+      return { icon: 'bookmark', tone: 'info' };
+    }
+    if (/audio|voice|boost|sub|dub|sound/.test(m)) {
+      return { icon: 'volume-2', tone: 'info' };
+    }
+    if (/share|link|code/.test(m)) {
+      return { icon: 'share-2', tone: 'info' };
+    }
+    return { icon: 'info', tone: 'info' };
+  }
+
+  function isFullscreen() {
+    return Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function canDisplayIsland() {
+    if (!els.root) return false;
+    if (isFullscreen()) return false;
+    const inWatch = document.getElementById('app')?.classList.contains('in-watch-view');
+    if (inWatch && window.innerWidth < 1024) return false;
+    return true;
+  }
+
+  function syncDesktopHeaderPosition() {
+    if (!els.root) return;
+    els.root.style.left = '';
+    els.root.style.maxWidth = '';
+  }
+
+  function resolveSnapshot() {
+    const viewId = getActiveViewId();
+    const savedCount = (state.watchlist || []).length;
+
+    if (viewId === 'view-watch' && state.activeAnimeData) {
+      const anime = state.activeAnimeData;
+      const ep = state.activeEpisodes?.[state.activeEpisodeIndex];
+      const epNum = livePlayback?.episodeNumber || ep?.episode_number || (state.activeEpisodeIndex + 1);
+      const vid = activePlayerInstance?.video;
+      const cur = vid ? (vid.currentTime || 0) : (livePlayback?.currentTime || 0);
+      const dur = (vid && Number.isFinite(vid.duration) && vid.duration > 0) ? vid.duration : (livePlayback?.duration || 0);
+      const paused = vid ? vid.paused : Boolean(livePlayback?.paused);
+      return {
+        mode: paused ? 'paused' : 'playing',
+        kicker: paused ? `Paused · ${(state.activeAudioType || 'sub').toUpperCase()}` : `Playing · ${(state.activeAudioType || 'sub').toUpperCase()}`,
+        title: anime.title_english || anime.title || 'Now Playing',
+        shortTitle: anime.title_english || anime.title || 'Playing',
+        meta: cur > 0 ? `E${epNum} · ${fmtSec(cur)}` : `Ep ${epNum}`,
+        sub: ep?.title ? `Ep ${epNum} · ${ep.title}` : `Episode ${epNum}`,
+        poster: anime.poster_large || anime.poster || anime.banner_image || '',
+        progress: dur > 0 ? Math.min(100, Math.round((cur / dur) * 100)) : 0,
+        elapsed: cur,
+        duration: dur,
+        animeId: anime.anime_id,
+        episodeIndex: state.activeEpisodeIndex,
+        episodeNumber: epNum,
+        paused,
+        kind: 'watch'
+      };
+    }
+
+    const latest = (state.history || [])[0];
+    if (latest && latest.anime_id) {
+      const cur = Math.max(0, Number(latest.progress_seconds) || 0);
+      const dur = Math.max(0, Number(latest.duration_seconds) || 0);
+      const epNum = Number(latest.episode_number) || 1;
+      const pct = dur > 0 ? Math.min(100, Math.round((cur / dur) * 100)) : 0;
+      const epLabel = cur > 15 ? `E${epNum} · ${fmtSec(cur)}` : `Ep ${epNum}`;
+      return {
+        mode: 'resume',
+        kicker: 'Continue watching',
+        title: latest.title || 'Resume series',
+        shortTitle: latest.title || 'Resume',
+        meta: epLabel,
+        sub: latest.episode_title ? `Ep ${epNum} · ${latest.episode_title}` : `Episode ${epNum}`,
+        poster: latest.poster || '',
+        progress: pct,
+        elapsed: cur,
+        duration: dur,
+        animeId: Number(latest.anime_id),
+        episodeNumber: epNum,
+        seekTime: cur,
+        kind: 'resume'
+      };
+    }
+
+    const viewLabels = {
+      'view-home': ['Home', 'Catalog Ready', 'Featured & Airing'],
+      'view-browse': ['Browse', 'Explore Catalog', state.browseGenre ? formatGenreFromSlug(state.browseGenre) : 'All genres'],
+      'view-search': ['Search', 'Search Catalog', 'Titles & genres'],
+      'view-watchlist': ['My List', 'Collection', `${savedCount} saved`],
+      'view-detail': ['Details', state.activeAnimeData?.title_english || state.activeAnimeData?.title || 'Anime Detail', 'Episodes & trailers'],
+      'view-advisor': ['Advisor', 'Prince Vegeta', 'Scene & plot lookup'],
+    };
+    const [viewTag, nameTxt, subTxt] = viewLabels[viewId] || ['KuroAnime', 'Catalog Ready', 'Sub & Dub streaming'];
+    return {
+      mode: 'idle',
+      kicker: 'Screening room',
+      title: nameTxt,
+      shortTitle: nameTxt,
+      meta: savedCount > 0 ? `${savedCount} saved` : viewTag,
+      sub: subTxt,
+      poster: state.activeAnimeData?.poster_large || state.activeAnimeData?.poster || '',
+      progress: 0,
+      elapsed: 0,
+      duration: 0,
+      animeId: state.activeAnimeData?.anime_id || null,
+      kind: 'idle'
+    };
+  }
+
+  function render() {
+    if (!initialized || !els.root) return;
+
+    const snap = resolveSnapshot();
+    const visible = canDisplayIsland();
+    els.root.classList.toggle('is-hidden', !visible);
+    els.root.classList.toggle('is-expanded', expanded);
+    els.backdrop?.classList.toggle('active', expanded);
+    els.trigger?.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    els.panel?.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+
+    if (els.savedLabel) {
+      els.savedLabel.textContent = `Saved (${(state.watchlist || []).length})`;
+    }
+
+    if (activeAlert) {
+      els.root.classList.add('is-alert');
+      els.root.dataset.mode = 'alert';
+      els.root.dataset.tone = activeAlert.tone;
+      els.leading.innerHTML = `<i data-lucide="${activeAlert.icon}"></i>`;
+      els.title.textContent = activeAlert.text;
+      els.meta.textContent = '';
+    } else if (vegetaBusy) {
+      els.root.classList.remove('is-alert');
+      els.root.dataset.mode = 'vegeta';
+      els.root.dataset.tone = 'info';
+      els.leading.innerHTML = '<span class="kdi-status-dot"></span>';
+      els.title.textContent = 'Vegeta scouting catalog';
+      els.meta.textContent = 'Scout';
+    } else {
+      els.root.classList.remove('is-alert');
+      els.root.dataset.mode = snap.mode;
+      els.root.dataset.tone = 'neutral';
+      if (snap.poster && (snap.kind === 'resume' || snap.kind === 'watch')) {
+        els.leading.innerHTML = `<img class="kdi-mini-thumb" src="${escapeHtmlText(snap.poster)}" alt="" />`;
+      } else {
+        els.leading.innerHTML = '<span class="kdi-status-dot"></span>';
+      }
+      els.title.textContent = snap.shortTitle;
+      els.meta.textContent = snap.meta;
+    }
+
+    if (els.panelThumb) {
+      if (snap.poster) {
+        els.panelThumb.src = snap.poster;
+        els.panelThumb.style.display = 'block';
+      } else {
+        els.panelThumb.style.display = 'none';
+      }
+    }
+    if (els.panelKicker) els.panelKicker.textContent = snap.kicker;
+    if (els.panelName) els.panelName.textContent = snap.title;
+    if (els.panelSub) els.panelSub.textContent = snap.sub;
+
+    if (els.progressWrap) {
+      const showProg = snap.duration > 0 || snap.progress > 0;
+      els.progressWrap.style.display = showProg ? 'flex' : 'none';
+      if (showProg) {
+        els.progressFill.style.width = `${snap.progress}%`;
+        els.timeElapsed.textContent = fmtSec(snap.elapsed);
+        els.timeDuration.textContent = snap.duration > 0 ? fmtSec(snap.duration) : '24:00';
+      }
+    }
+
+    if (els.btnPrimary && els.btnPrimaryLabel) {
+      if (snap.kind === 'watch') {
+        els.btnPrimaryLabel.textContent = snap.paused ? 'Resume' : 'Pause';
+        els.btnPrimary.querySelector('svg, i')?.remove();
+        const iconName = snap.paused ? 'play' : 'pause';
+        els.btnPrimary.insertAdjacentHTML('afterbegin', `<i data-lucide="${iconName}"></i>`);
+      } else if (snap.kind === 'resume') {
+        els.btnPrimaryLabel.textContent = `Resume Ep ${snap.episodeNumber}`;
+        els.btnPrimary.querySelector('svg, i')?.remove();
+        els.btnPrimary.insertAdjacentHTML('afterbegin', '<i data-lucide="play"></i>');
+      } else {
+        els.btnPrimaryLabel.textContent = 'Explore';
+        els.btnPrimary.querySelector('svg, i')?.remove();
+        els.btnPrimary.insertAdjacentHTML('afterbegin', '<i data-lucide="compass"></i>');
+      }
+    }
+
+    if (els.btnSecondary && els.btnSecondaryLabel) {
+      if (snap.kind === 'watch') {
+        const hasNext = state.activeEpisodeIndex < (state.activeEpisodes?.length || 0) - 1;
+        els.btnSecondaryLabel.textContent = hasNext ? 'Next Ep' : 'Details';
+      } else if (snap.kind === 'resume' || snap.animeId) {
+        els.btnSecondaryLabel.textContent = 'Details';
+      } else {
+        els.btnSecondaryLabel.textContent = 'Search';
+      }
+    }
+
+    refreshIcons();
+    syncDesktopHeaderPosition();
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => syncDesktopHeaderPosition()).catch(() => {});
+    }
+  }
+
+  function setExpanded(nextState) {
+    if (!initialized) return;
+    expanded = Boolean(nextState);
+    if (expanded) {
+      activeAlert = null;
+      clearTimeout(alertTimer);
+    }
+    render();
+  }
+
+  function notify(msg) {
+    const clean = String(msg || '').trim();
+    if (!clean) return;
+    if (initialized && canDisplayIsland()) {
+      clearTimeout(alertTimer);
+      const { icon, tone } = inferAlertMeta(clean);
+      activeAlert = { text: clean, icon, tone };
+      render();
+      alertTimer = setTimeout(() => {
+        activeAlert = null;
+        render();
+      }, 2600);
+      return;
+    }
+    const toast = document.getElementById('toast-notification');
+    if (toast) {
+      toast.textContent = clean;
+      toast.classList.add('show');
+      clearTimeout(toastFallbackTimer);
+      toastFallbackTimer = setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+  }
+
+  function setVegetaBusy(busy) {
+    vegetaBusy = Boolean(busy);
+    render();
+  }
+
+  function syncPlayback(info) {
+    livePlayback = info ? { ...info } : null;
+    render();
+  }
+
+  function init() {
+    els.root = document.getElementById('kuro-dynamic-island');
+    els.backdrop = document.getElementById('kuro-island-backdrop');
+    els.trigger = document.getElementById('kdi-pill-trigger');
+    els.leading = document.getElementById('kdi-leading');
+    els.title = document.getElementById('kdi-title');
+    els.meta = document.getElementById('kdi-meta');
+    els.panel = document.getElementById('kdi-panel');
+    els.panelThumb = document.getElementById('kdi-panel-thumb');
+    els.panelKicker = document.getElementById('kdi-panel-kicker');
+    els.panelName = document.getElementById('kdi-panel-name');
+    els.panelSub = document.getElementById('kdi-panel-sub');
+    els.progressWrap = document.getElementById('kdi-progress-wrap');
+    els.progressFill = document.getElementById('kdi-progress-fill');
+    els.timeElapsed = document.getElementById('kdi-time-elapsed');
+    els.timeDuration = document.getElementById('kdi-time-duration');
+    els.btnPrimary = document.getElementById('kdi-btn-primary');
+    els.btnPrimaryLabel = document.getElementById('kdi-btn-primary-label');
+    els.btnSecondary = document.getElementById('kdi-btn-secondary');
+    els.btnSecondaryLabel = document.getElementById('kdi-btn-secondary-label');
+    els.btnVegeta = document.getElementById('kdi-btn-vegeta');
+    els.closeBtn = document.getElementById('kdi-close-btn');
+    els.savedLabel = document.getElementById('kdi-saved-label');
+
+    if (!els.root || initialized) return;
+    initialized = true;
+
+    els.trigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setExpanded(!expanded);
+    });
+
+    els.closeBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setExpanded(false);
+    });
+
+    els.backdrop?.addEventListener('click', () => setExpanded(false));
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && expanded) setExpanded(false);
+    });
+
+    document.addEventListener('fullscreenchange', render);
+    window.addEventListener('resize', render);
+
+    els.btnPrimary?.addEventListener('click', () => {
+      const snap = resolveSnapshot();
+      if (snap.kind === 'watch' && activePlayerInstance?.video) {
+        const v = activePlayerInstance.video;
+        if (v.paused) v.play().catch(() => {});
+        else v.pause();
+        setTimeout(render, 60);
+        return;
+      }
+      setExpanded(false);
+      if (snap.kind === 'resume' && snap.animeId) {
+        const epNum = snap.episodeNumber || 1;
+        state.playerEnteredFrom = 'home';
+        openAnimeDetail(snap.animeId, true, Math.max(0, epNum - 1), epNum, snap.seekTime || 0);
+        return;
+      }
+      switchTab('browse');
+    });
+
+    els.btnSecondary?.addEventListener('click', () => {
+      const snap = resolveSnapshot();
+      setExpanded(false);
+      if (snap.kind === 'watch') {
+        if (state.activeEpisodeIndex < (state.activeEpisodes?.length || 0) - 1) {
+          openWatchPlayer(state.activeEpisodeIndex + 1);
+        } else if (snap.animeId) {
+          openAnimeDetail(snap.animeId, false);
+        }
+        return;
+      }
+      if (snap.animeId) {
+        openAnimeDetail(snap.animeId, false);
+        return;
+      }
+      switchTab('search');
+    });
+
+    els.btnVegeta?.addEventListener('click', () => {
+      setExpanded(false);
+      document.getElementById('btn-vegeta-toggle')?.click();
+    });
+
+    els.panel?.querySelectorAll('[data-kdi-nav]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.kdiNav;
+        setExpanded(false);
+        if (tab) switchTab(tab);
+      });
+    });
+
+    render();
+  }
+
+  return { init, render, notify, setExpanded, setVegetaBusy, syncPlayback };
+})();
+
 // ─── Toast Notifications ────────────────────────────────────────────
 function showToast(msg) {
-  const toast = document.getElementById('toast-notification');
-  if (!toast) return;
-  toast.textContent = msg;
-  toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2500);
+  KuroDynamicIsland.notify(msg);
 }
 
 // ─── Video Playback Controller ──────────────────────────────────────
@@ -336,13 +718,18 @@ function showView(viewId, { pushHistory = true } = {}) {
     }
   }
 
-  // Update tab active state (mobile & desktop)
+  // Update tab & sidebar active state (mobile, tablet & desktop)
   document.querySelectorAll('.tab-item').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === state.currentTab);
   });
   document.querySelectorAll('.desktop-nav-menu .nav-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === state.currentTab);
   });
+  syncSidebarActiveState();
+
+  document.getElementById('app')?.classList.toggle('in-watch-view', viewId === 'view-watch');
+  if (viewId !== 'view-watch') KuroDynamicIsland.syncPlayback(null);
+  KuroDynamicIsland.render();
 
   // Push semantic crawlable URL to browser history state
   if (pushHistory && !isHandlingPopState) {
@@ -635,6 +1022,40 @@ function updateWatchlistBadge() {
   if (badge) {
     badge.style.display = state.watchlist.length > 0 ? 'block' : 'none';
   }
+  const sideCount = document.getElementById('sidebar-watchlist-count');
+  if (sideCount) {
+    sideCount.textContent = String((state.watchlist || []).length);
+  }
+  KuroDynamicIsland.render();
+}
+
+function syncSidebarActiveState() {
+  const viewId = getActiveViewId();
+  document.querySelectorAll('#app-sidebar .sidebar-nav-item').forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.dataset.sidebarTab) {
+      const isBrowseSpecial = state.currentTab === 'browse' && (state.browseStatus === 'airing' || state.browseAudio === 'dub' || state.browseGenre);
+      if (btn.dataset.sidebarTab === 'browse') {
+        btn.classList.toggle('active', state.currentTab === 'browse' && !isBrowseSpecial && viewId === 'view-browse');
+      } else {
+        btn.classList.toggle('active', btn.dataset.sidebarTab === state.currentTab && viewId !== 'view-advisor');
+      }
+    } else if (btn.dataset.sidebarHub) {
+      const hub = btn.dataset.sidebarHub;
+      if (hub === 'advisor') {
+        btn.classList.toggle('active', viewId === 'view-advisor');
+      } else if (hub === 'airing') {
+        btn.classList.toggle('active', viewId === 'view-browse' && state.browseStatus === 'airing' && !state.browseGenre);
+      } else if (hub === 'dubbed') {
+        btn.classList.toggle('active', viewId === 'view-browse' && state.browseAudio === 'dub' && !state.browseGenre);
+      }
+    } else if (btn.dataset.sidebarGenre) {
+      btn.classList.toggle(
+        'active',
+        viewId === 'view-browse' && (state.browseGenre || '').toLowerCase() === btn.dataset.sidebarGenre.toLowerCase()
+      );
+    }
+  });
 }
 
 function renderContinueWatchingRail() {
@@ -739,6 +1160,7 @@ function saveHistory(anime, episode, progressSeconds = 0, durationSeconds = 0, c
   localStorage.setItem('kuro_history', JSON.stringify(state.history));
   renderContinueWatchingRail();
   saveWatchHistoryToCloud(entry);
+  KuroDynamicIsland.render();
 }
 
 async function syncCloudUserData() {
@@ -1979,6 +2401,7 @@ async function fetchBrowseResults() {
       (hub === 'all' && !state.browseGenre && !state.browseStatus && !state.browseAudio);
     a.classList.toggle('active', Boolean(active));
   });
+  syncSidebarActiveState();
 
   if (state.browseAudio === 'dub' && !state.browseGenre && !state.browseStatus && !state.browseType) {
     if (pageTitleEl) pageTitleEl.textContent = 'Watch English Dubbed Anime Online Free';
@@ -3839,6 +4262,14 @@ function loadStreamIntoPlayer(targetTime = 0) {
         title: p.episodeTitle || ep.title || ''
       };
       saveHistory(curAnime, curEp, p.currentTime, p.duration, p.completed);
+      KuroDynamicIsland.syncPlayback({
+        animeId: curAnime.anime_id,
+        title: curAnime.title_english || curAnime.title,
+        episodeNumber: curEp.episode_number,
+        currentTime: p.currentTime,
+        duration: p.duration,
+        paused: Boolean(activePlayerInstance?.video?.paused)
+      });
     },
     onNextEpisode: () => {
       if (state.activeEpisodeIndex < state.activeEpisodes.length - 1) {
@@ -4887,6 +5318,62 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
+  // Desktop Left Sidebar Navigation Listeners
+  document.getElementById('btn-sidebar-home')?.addEventListener('click', () => switchTab('home'));
+  document.querySelectorAll('#app-sidebar [data-sidebar-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.sidebarTab;
+      if (tab === 'browse') {
+        state.browseGenre = '';
+        state.browseAudio = '';
+        state.browseStatus = '';
+        state.browseType = '';
+        state.browseMode = 'browse';
+        state.browsePage = 1;
+      }
+      switchTab(tab);
+    });
+  });
+  document.querySelectorAll('#app-sidebar [data-sidebar-hub]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const hub = btn.dataset.sidebarHub;
+      if (hub === 'advisor') {
+        openAdvisorHub();
+        return;
+      }
+      state.browseGenre = '';
+      state.browseType = '';
+      state.browsePage = 1;
+      if (hub === 'airing') {
+        state.browseStatus = 'airing';
+        state.browseAudio = '';
+        state.browseMode = 'airing';
+      } else if (hub === 'dubbed') {
+        state.browseAudio = 'dub';
+        state.browseStatus = '';
+        state.browseMode = 'dubbed';
+      }
+      switchTab('browse');
+    });
+  });
+  document.querySelectorAll('#app-sidebar [data-sidebar-genre]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.browseGenre = btn.dataset.sidebarGenre || '';
+      state.browseAudio = '';
+      state.browseStatus = '';
+      state.browseType = '';
+      state.browseMode = 'genre';
+      state.browsePage = 1;
+      switchTab('browse');
+    });
+  });
+  document.getElementById('btn-sidebar-sync')?.addEventListener('click', () => {
+    document.getElementById('btn-user-sync-share')?.click();
+  });
+  document.getElementById('btn-sidebar-settings')?.addEventListener('click', () => {
+    document.getElementById('btn-user-settings')?.click();
+  });
+
   document.getElementById('btn-brand-home')?.addEventListener('click', () => switchTab('home'));
   document.getElementById('header-search-btn')?.addEventListener('click', () => switchTab('search'));
   document.getElementById('header-watchlist-btn')?.addEventListener('click', () => switchTab('watchlist'));
@@ -4921,10 +5408,20 @@ document.addEventListener('DOMContentLoaded', () => {
     performSearch('');
   });
 
-  // ─── YouTube-Inspired Voice Search Engine (Web Speech Recognition) ─
+  // ─── Universal Mobile-Resilient Voice Search Engine ─────────────────
   const VoiceSearch = {
     recognition: null,
     isListening: false,
+    _lastTranscript: '',
+    _submitted: false,
+    _preferRecorder: false,
+    _recorder: null,
+    _micStream: null,
+    _recordChunks: [],
+    _silenceTimer: null,
+    _maxRecordTimer: null,
+    _vadRaf: null,
+    _vadCtx: null,
     modal: document.getElementById('kuro-voice-search-modal'),
     statusEl: document.getElementById('voice-search-status'),
     transcriptEl: document.getElementById('voice-transcript-text'),
@@ -4939,25 +5436,25 @@ document.addEventListener('DOMContentLoaded', () => {
     init() {
       if (!this.triggerBtn) return;
 
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SpeechRecognition) {
-        this.triggerBtn.addEventListener('click', () => {
-          showToast('Voice search is not supported in this browser. Try Chrome or Edge.');
-        });
-        return;
-      }
-
-      this.triggerBtn.addEventListener('click', () => this.open());
+      this.triggerBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.open();
+      });
       this.closeBtn?.addEventListener('click', () => this.close());
       this.modal?.addEventListener('click', (e) => {
         if (e.target === this.modal) this.close();
       });
 
       this.micBtn?.addEventListener('click', () => {
+        if (this._recorder && this._recorder.state === 'recording') {
+          this.stopRecorderAndTranscribe();
+          return;
+        }
         if (this.isListening) {
           this.stop(true);
-          if (this.statusEl) this.statusEl.textContent = 'Voice Search Paused';
-          if (this.tipEl) this.tipEl.textContent = 'Tap microphone to resume listening';
+          if (this.statusEl) this.statusEl.textContent = 'Voice search paused';
+          if (this.tipEl) this.tipEl.textContent = 'Tap microphone to speak again';
         } else {
           this.start();
         }
@@ -4972,6 +5469,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     open() {
       if (!this.modal) return;
+      try { this.searchInput?.blur(); } catch (_) {}
       this.modal.classList.add('open');
       this.modal.setAttribute('aria-hidden', 'false');
       refreshIcons();
@@ -4986,101 +5484,282 @@ document.addEventListener('DOMContentLoaded', () => {
       this.modal.setAttribute('aria-hidden', 'true');
     },
 
-    start() {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SpeechRecognition) return;
+    _setListeningUI(listening, statusText = 'Listening...', placeholderText = 'Say an anime title...', tipText = 'Tap microphone to finish') {
+      this.isListening = Boolean(listening);
+      if (this.statusEl) this.statusEl.textContent = statusText;
+      if (this.transcriptEl && placeholderText !== null) {
+        this.transcriptEl.innerHTML = `<span class="voice-transcript-placeholder">${escapeHtmlText(placeholderText)}</span>`;
+      }
+      if (this.micStage) this.micStage.classList.toggle('listening', Boolean(listening));
+      if (this.micBtn) {
+        this.micBtn.classList.toggle('paused', !listening);
+        this.micBtn.title = listening ? 'Listening (tap to stop)' : 'Tap to retry';
+      }
+      if (this.tipEl && tipText) this.tipEl.textContent = tipText;
+    },
 
+    start() {
       this.stop(false);
+      this._lastTranscript = '';
+      this._submitted = false;
+
+      const isLocalOrSecure = Boolean(window.isSecureContext) || ['localhost', '127.0.0.1'].includes(window.location.hostname);
+      if (!isLocalOrSecure) {
+        this._setListeningUI(false, 'HTTPS required for mic', 'Mobile browsers block microphone access on plain HTTP links.', 'Open via HTTPS or localhost');
+        return;
+      }
+
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition || this._preferRecorder) {
+        this.startMediaRecorderFallback();
+        return;
+      }
 
       try {
         const rec = new SpeechRecognition();
         rec.continuous = false;
         rec.interimResults = true;
-        rec.lang = 'en-US';
+        rec.maxAlternatives = 1;
+        rec.lang = navigator.language || 'en-US';
 
         this.recognition = rec;
-        this.isListening = true;
-
-        if (this.statusEl) this.statusEl.textContent = 'Listening...';
-        if (this.transcriptEl) {
-          this.transcriptEl.innerHTML = '<span class="voice-transcript-placeholder">Say an anime title...</span>';
-        }
-        if (this.micStage) this.micStage.classList.add('listening');
-        if (this.micBtn) {
-          this.micBtn.classList.remove('paused');
-          this.micBtn.title = 'Listening (tap to pause)';
-        }
-        if (this.tipEl) this.tipEl.textContent = 'Tap microphone to cancel';
+        this._setListeningUI(true, 'Listening...', 'Say an anime title...', 'Tap microphone to cancel');
 
         rec.onresult = (event) => {
           let interim = '';
           let final = '';
 
           for (let i = event.resultIndex; i < event.results.length; ++i) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-              final += transcript;
-            } else {
-              interim += transcript;
-            }
+            const transcript = event.results[i][0]?.transcript || '';
+            if (event.results[i].isFinal) final += transcript;
+            else interim += transcript;
           }
 
           const currentText = (final || interim).trim();
-          if (currentText && this.transcriptEl) {
-            this.transcriptEl.textContent = currentText;
+          if (currentText) {
+            this._lastTranscript = currentText;
+            if (this.transcriptEl) this.transcriptEl.textContent = currentText;
           }
 
-          if (final.trim()) {
+          if (final.trim() && !this._submitted) {
+            this._submitted = true;
             this.handleFinalResult(final.trim());
           }
         };
 
         rec.onerror = (event) => {
-          console.warn('Voice recognition error:', event.error);
+          const errCode = event?.error || '';
+          console.warn('Voice recognition error:', errCode);
           this.isListening = false;
           if (this.micStage) this.micStage.classList.remove('listening');
           if (this.micBtn) this.micBtn.classList.add('paused');
 
-          if (event.error === 'not-allowed') {
-            if (this.statusEl) this.statusEl.textContent = 'Mic Permission Needed';
-            if (this.transcriptEl) {
-              this.transcriptEl.innerHTML = '<span style="color:#F87171;">Microphone blocked. Please allow access in browser.</span>';
+          // On iOS PWA / Brave / WebViews where native Speech API service is blocked, switch seamlessly to MediaRecorder
+          if (errCode === 'service-not-allowed' || errCode === 'network' || errCode === 'language-not-supported') {
+            this._preferRecorder = true;
+            this.recognition = null;
+            this.startMediaRecorderFallback();
+            return;
+          }
+
+          if (errCode === 'not-allowed' || errCode === 'permission-denied') {
+            this._setListeningUI(false, 'Mic permission needed', 'Allow microphone access in your browser site settings.', 'Tap microphone to retry');
+          } else if (errCode === 'no-speech') {
+            if (this._lastTranscript && !this._submitted) {
+              this._submitted = true;
+              this.handleFinalResult(this._lastTranscript);
+              return;
             }
-            if (this.tipEl) this.tipEl.textContent = 'Tap microphone to retry';
-          } else if (event.error === 'no-speech') {
-            if (this.statusEl) this.statusEl.textContent = "Didn't hear anything";
-            if (this.tipEl) this.tipEl.textContent = 'Tap microphone to try again';
-          } else {
-            if (this.statusEl) this.statusEl.textContent = 'Voice Search Paused';
-            if (this.tipEl) this.tipEl.textContent = 'Tap microphone to try again';
+            this._setListeningUI(false, "Didn't hear anything", 'Speak clearly into your phone microphone.', 'Tap microphone to try again');
+          } else if (errCode !== 'aborted') {
+            this._setListeningUI(false, 'Voice search paused', 'Could not hear clearly. Try tapping the mic again.', 'Tap microphone to try again');
           }
         };
 
         rec.onend = () => {
+          if (this.recognition !== rec) return;
+          // Mobile Chrome / Safari often fires onend right after interim text without marking isFinal=true
+          if (!this._submitted && this._lastTranscript) {
+            this._submitted = true;
+            this.handleFinalResult(this._lastTranscript);
+            return;
+          }
           if (this.isListening) {
-            this.isListening = false;
-            if (this.micStage) this.micStage.classList.remove('listening');
-            if (this.micBtn) this.micBtn.classList.add('paused');
-            if (this.tipEl) this.tipEl.textContent = 'Tap microphone to speak again';
+            this._setListeningUI(false, 'Voice search paused', null, 'Tap microphone to speak again');
           }
         };
 
         rec.start();
       } catch (err) {
-        console.warn('Could not start speech recognition:', err);
-        this.isListening = false;
-        if (this.statusEl) this.statusEl.textContent = 'Voice Search Unavailable';
-        if (this.tipEl) this.tipEl.textContent = 'Tap microphone to retry';
+        console.warn('SpeechRecognition start failed, falling back to mic recorder:', err);
+        this.startMediaRecorderFallback();
       }
+    },
+
+    async startMediaRecorderFallback() {
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+        this._setListeningUI(false, 'Voice search unavailable', 'This browser does not allow microphone capture.', 'Type your search above');
+        return;
+      }
+
+      try {
+        this._setListeningUI(true, 'Listening...', 'Speak an anime title, then tap mic to search', 'Recording · Tap mic when done');
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        this._micStream = stream;
+        this._recordChunks = [];
+
+        const mimeCandidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg'];
+        const chosenMime = mimeCandidates.find(m => MediaRecorder.isTypeSupported?.(m)) || '';
+        const rec = chosenMime ? new MediaRecorder(stream, { mimeType: chosenMime }) : new MediaRecorder(stream);
+        this._recorder = rec;
+
+        rec.ondataavailable = (ev) => {
+          if (ev.data && ev.data.size > 0) this._recordChunks.push(ev.data);
+        };
+
+        rec.onstop = async () => {
+          this._cleanupMicResources();
+          if (this._submitted) return;
+          const chunks = this._recordChunks;
+          this._recordChunks = [];
+          if (!chunks.length) {
+            this._setListeningUI(false, "Didn't hear anything", 'No audio captured from microphone.', 'Tap microphone to retry');
+            return;
+          }
+          const mime = rec.mimeType || chosenMime || 'audio/webm';
+          const blob = new Blob(chunks, { type: mime });
+          if (blob.size < 800) {
+            this._setListeningUI(false, "Didn't hear anything", 'Clip was too short.', 'Tap microphone to try again');
+            return;
+          }
+          await this._transcribeBlob(blob, mime);
+        };
+
+        rec.start(250);
+
+        // Simple silence detector so users do not even have to tap Stop on mobile
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) {
+            const ctx = new AC();
+            this._vadCtx = ctx;
+            const src = ctx.createMediaStreamSource(stream);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 512;
+            src.connect(analyser);
+            const buf = new Uint8Array(analyser.fftSize);
+            let heardSpeech = false;
+            let lastLoud = performance.now();
+            const tick = () => {
+              if (!this._recorder || this._recorder.state !== 'recording') return;
+              analyser.getByteTimeDomainData(buf);
+              let sum = 0;
+              for (let i = 0; i < buf.length; i++) {
+                const v = (buf[i] - 128) / 128;
+                sum += v * v;
+              }
+              const rms = Math.sqrt(sum / buf.length);
+              const now = performance.now();
+              if (rms > 0.032) {
+                heardSpeech = true;
+                lastLoud = now;
+              } else if (heardSpeech && (now - lastLoud) > 1050) {
+                this.stopRecorderAndTranscribe();
+                return;
+              }
+              this._vadRaf = requestAnimationFrame(tick);
+            };
+            this._vadRaf = requestAnimationFrame(tick);
+          }
+        } catch (_) {}
+
+        this._maxRecordTimer = setTimeout(() => {
+          if (this._recorder && this._recorder.state === 'recording') {
+            this.stopRecorderAndTranscribe();
+          }
+        }, 4800);
+      } catch (err) {
+        this._cleanupMicResources();
+        const isDenied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
+        this._setListeningUI(
+          false,
+          isDenied ? 'Mic permission needed' : 'Mic unavailable',
+          isDenied ? 'Allow microphone permission in mobile browser settings.' : 'Could not open device microphone.',
+          'Tap microphone to retry'
+        );
+      }
+    },
+
+    stopRecorderAndTranscribe() {
+      clearTimeout(this._maxRecordTimer);
+      if (this._vadRaf) cancelAnimationFrame(this._vadRaf);
+      if (this._recorder && this._recorder.state === 'recording') {
+        this._setListeningUI(false, 'Transcribing...', 'Recognizing your voice...', 'Please wait');
+        try { this._recorder.stop(); } catch (_) { this._cleanupMicResources(); }
+      }
+    },
+
+    async _transcribeBlob(blob, mime) {
+      try {
+        this._setListeningUI(false, 'Transcribing...', 'Identifying anime title...', 'Almost ready');
+        const b64 = await new Promise((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(fr.result);
+          fr.onerror = reject;
+          fr.readAsDataURL(blob);
+        });
+        const sendReq = (url) => fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audio: b64, mimeType: mime })
+        });
+        let res;
+        try {
+          res = await sendReq('/api/ai/voice-transcribe');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch (_) {
+          res = await sendReq('http://127.0.0.1:8000/api/ai/voice-transcribe');
+        }
+        const data = await res.json();
+        const txt = String(data?.text || '').trim();
+        if (txt) {
+          this._submitted = true;
+          if (this.transcriptEl) this.transcriptEl.textContent = txt;
+          this.handleFinalResult(txt);
+        } else {
+          this._setListeningUI(false, "Didn't catch that", 'Try speaking closer to your mic.', 'Tap microphone to retry');
+        }
+      } catch (_) {
+        this._setListeningUI(false, 'Voice recognition unavailable', 'Browser speech engine unavailable.', 'Tap microphone to retry');
+      }
+    },
+
+    _cleanupMicResources() {
+      clearTimeout(this._maxRecordTimer);
+      if (this._vadRaf) cancelAnimationFrame(this._vadRaf);
+      this._vadRaf = null;
+      if (this._vadCtx) {
+        try { this._vadCtx.close(); } catch (_) {}
+        this._vadCtx = null;
+      }
+      if (this._micStream) {
+        try { this._micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+        this._micStream = null;
+      }
+      this._recorder = null;
     },
 
     stop(markPaused = true) {
       if (this.recognition) {
-        try {
-          this.recognition.abort();
-        } catch (_) {}
+        const ref = this.recognition;
         this.recognition = null;
+        try { ref.abort(); } catch (_) {}
       }
+      if (this._recorder && this._recorder.state === 'recording') {
+        this._submitted = true;
+        try { this._recorder.stop(); } catch (_) {}
+      }
+      this._cleanupMicResources();
       this.isListening = false;
       if (this.micStage) this.micStage.classList.remove('listening');
       if (this.micBtn && markPaused) this.micBtn.classList.add('paused');
@@ -5089,17 +5768,17 @@ document.addEventListener('DOMContentLoaded', () => {
     handleFinalResult(query) {
       if (!query) return;
       this.stop(false);
-      if (this.statusEl) this.statusEl.textContent = `Searching...`;
+      if (this.statusEl) this.statusEl.textContent = 'Searching...';
+      if (this.transcriptEl) this.transcriptEl.textContent = query;
       if (this.tipEl) this.tipEl.textContent = `Searching for "${query}"`;
 
       this.finishTimeout = setTimeout(() => {
         this.close();
         if (this.searchInput) {
           this.searchInput.value = query;
-          this.searchInput.focus();
         }
         performSearch(query);
-      }, 420);
+      }, 360);
     }
   };
 
@@ -5326,40 +6005,135 @@ document.addEventListener('DOMContentLoaded', () => {
   const vegetaChatForm = document.getElementById('vegeta-chat-form');
   const vegetaChatInput = document.getElementById('vegeta-chat-input');
 
-  // ─── Prince Vegeta Voice Engine (Web Speech Synthesis) ─────────────
+  // ─── Prince Vegeta Voice Engine (Clone + Deep Neural Baritone + Male Fallback) ─
   const VegetaVoice = {
     synth: typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null,
     currentUtterance: null,
+    audioEl: typeof Audio !== 'undefined' ? new Audio() : null,
+    audioCtx: null,
+    gritDryGain: null,
+    gritWetGain: null,
+    _graphReady: false,
+    _blobCache: new Map(),
+    _abortCtrl: null,
+    _playGen: 0,
     isSpeaking: false,
     enabled: localStorage.getItem('kuro_vegeta_voice_enabled') !== 'false',
 
     init() {
-      if (!this.synth) return;
-      if (this.synth.onvoiceschanged !== undefined) {
-        this.synth.onvoiceschanged = () => this.getVoice();
+      if (this.audioEl) {
+        this.audioEl.crossOrigin = 'anonymous';
+        this.audioEl.preload = 'auto';
+      }
+      if (this.synth && this.synth.onvoiceschanged !== undefined) {
+        this.synth.onvoiceschanged = () => this.getMaleBrowserVoice();
       }
       this.updateVoiceToggleUI();
     },
 
-    getVoice() {
+    getMaleBrowserVoice() {
       if (!this.synth) return null;
-      const voices = this.synth.getVoices();
-      if (!voices || !voices.length) return null;
+      const voices = this.synth.getVoices() || [];
+      if (!voices.length) return null;
 
-      // Prefer authoritative, deep male English voices
-      const preferredKeywords = [
-        'guy', 'christopher', 'david', 'ryan', 'mark', 'daniel', 'george', 'uk english male', 'us english male'
+      // Never pick female OS/browser voices (e.g. "Google US English" on Chrome is female)
+      const femaleBlocklist = [
+        'female', 'zira', 'samantha', 'victoria', 'karen', 'hazel', 'susan', 'libby', 'sonia',
+        'aria', 'jenny', 'michelle', 'monica', 'ana', 'emma', 'ava', 'sara', 'natasha', 'clara',
+        'serena', 'tessa', 'fiona', 'moira', 'veena', 'paulina', 'amelie', 'anna', 'ellen',
+        'ioana', 'laura', 'melina', 'nora', 'yelda', 'zosia', 'google us english',
+        'google uk english female', 'kate', 'allison', 'siri'
       ];
-      for (const kw of preferredKeywords) {
-        const match = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(kw));
-        if (match) return match;
+      const maleAllowlist = [
+        'google uk english male', 'christopher', 'eric', 'guy', 'andrew', 'brian', 'steffan',
+        'david', 'mark', 'daniel', 'george', 'ryan', 'alex', 'fred', 'roger', 'james',
+        'thomas', 'liam', 'mitchell', 'connor', 'william', 'male'
+      ];
+
+      const isBlocked = (v) => {
+        const n = String(v?.name || '').toLowerCase();
+        return femaleBlocklist.some(f => n.includes(f));
+      };
+
+      const enVoices = voices.filter(v => String(v?.lang || '').toLowerCase().startsWith('en'));
+      for (const kw of maleAllowlist) {
+        const hit = enVoices.find(v => !isBlocked(v) && String(v.name || '').toLowerCase().includes(kw));
+        if (hit) return hit;
       }
-      return voices.find(v => v.lang === 'en-US') || voices.find(v => v.lang.startsWith('en')) || voices[0];
+      return null;
+    },
+
+    _makeGritCurve(amount = 6) {
+      const n = 1024;
+      const curve = new Float32Array(n);
+      const k = amount;
+      for (let i = 0; i < n; i++) {
+        const x = (i * 2) / n - 1;
+        curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
+      }
+      return curve;
+    },
+
+    ensureAudioGraph(applyGrit = false) {
+      if (!this.audioEl) return;
+      try {
+        if (!this._graphReady) {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC) return;
+          this.audioCtx = new AC();
+          const src = this.audioCtx.createMediaElementSource(this.audioEl);
+
+          const dry = this.audioCtx.createGain();
+          const wet = this.audioCtx.createGain();
+          dry.gain.value = applyGrit ? 0 : 1;
+          wet.gain.value = applyGrit ? 1 : 0;
+
+          const lowChest = this.audioCtx.createBiquadFilter();
+          lowChest.type = 'lowshelf';
+          lowChest.frequency.value = 140;
+          lowChest.gain.value = 3.5;
+
+          const raspPresence = this.audioCtx.createBiquadFilter();
+          raspPresence.type = 'peaking';
+          raspPresence.frequency.value = 2350;
+          raspPresence.Q.value = 1.2;
+          raspPresence.gain.value = 2.8;
+
+          const shaper = this.audioCtx.createWaveShaper();
+          shaper.curve = this._makeGritCurve(3.2);
+          shaper.oversample = '2x';
+
+          const comp = this.audioCtx.createDynamicsCompressor();
+          comp.threshold.value = -16;
+          comp.ratio.value = 3.2;
+
+          src.connect(dry);
+          dry.connect(this.audioCtx.destination);
+
+          src.connect(lowChest);
+          lowChest.connect(raspPresence);
+          raspPresence.connect(shaper);
+          shaper.connect(comp);
+          comp.connect(wet);
+          wet.connect(this.audioCtx.destination);
+
+          this.gritDryGain = dry;
+          this.gritWetGain = wet;
+          this._graphReady = true;
+        }
+        if (this.audioCtx && this.audioCtx.state === 'suspended') {
+          this.audioCtx.resume().catch(() => {});
+        }
+        if (this.gritDryGain && this.gritWetGain) {
+          this.gritDryGain.gain.value = applyGrit ? 0 : 1;
+          this.gritWetGain.gain.value = applyGrit ? 1 : 0;
+        }
+      } catch (_) {}
     },
 
     cleanForSpeech(rawText) {
       if (!rawText) return '';
-      let text = rawText;
+      let text = String(rawText);
       text = text.replace(/^#{1,6}\s+/gm, '');
       text = text.replace(/\*\*(.*?)\*\*/g, '$1');
       text = text.replace(/\*(.*?)\*/g, '$1');
@@ -5367,38 +6141,32 @@ document.addEventListener('DOMContentLoaded', () => {
       text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, '');
       text = text.replace(/^\s*[-*•>]\s+/gm, '');
       text = text.replace(/★\s*([\d\.]+)(?:\/10)?/g, 'rated $1 out of 10');
+      text = text.replace(/⭐\s*`?([\d\.]+)`?/g, 'rated $1');
+      text = text.replace(/[\u{1F300}-\u{1FAFF}]/gu, '');
       text = text.replace(/[-─=_]{2,}/g, '');
       text = text.replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim();
 
-      // If text is a long multi-anime catalog list, keep dialogue punchy and memorable
-      if (text.length > 340) {
+      if (text.length > 320) {
         const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
         text = sentences.slice(0, 3).join(' ');
       }
       return text;
     },
 
-    speak(rawText, onDone) {
-      if (!this.synth || !this.enabled) {
+    speakBrowserFallback(spoken, gen, onDone) {
+      if (gen !== this._playGen) return;
+      const maleVoice = this.getMaleBrowserVoice();
+      if (!this.synth || !maleVoice) {
+        this.isSpeaking = false;
+        this.setWaveActive(false);
         if (onDone) onDone();
         return;
       }
-
-      this.stop();
-      const spoken = this.cleanForSpeech(rawText);
-      if (!spoken) {
-        if (onDone) onDone();
-        return;
-      }
-
       try {
         const utter = new SpeechSynthesisUtterance(spoken);
-        const voice = this.getVoice();
-        if (voice) utter.voice = voice;
-
-        // Prince Vegeta Saiyan audio profile
-        utter.pitch = 0.82;
-        utter.rate = 1.05;
+        utter.voice = maleVoice;
+        utter.pitch = 0.72;
+        utter.rate = 1.04;
         utter.volume = 1.0;
 
         this.currentUtterance = utter;
@@ -5411,27 +6179,110 @@ document.addEventListener('DOMContentLoaded', () => {
           this.setWaveActive(false);
           if (onDone) onDone();
         };
-
-        utter.onerror = (e) => {
+        utter.onerror = () => {
           this.isSpeaking = false;
           this.currentUtterance = null;
           this.setWaveActive(false);
           if (onDone) onDone();
         };
-
         this.synth.speak(utter);
-      } catch (err) {
-        this.setWaveActive(false);
+      } catch (_) {
         this.isSpeaking = false;
+        this.setWaveActive(false);
         if (onDone) onDone();
       }
     },
 
-    stop() {
-      if (!this.synth) return;
+    async speak(rawText, onDone) {
+      if (!this.enabled) {
+        if (onDone) onDone();
+        return;
+      }
+
+      this.stop();
+      const myGen = ++this._playGen;
+      const spoken = this.cleanForSpeech(rawText);
+      if (!spoken) {
+        if (onDone) onDone();
+        return;
+      }
+
+      this.isSpeaking = true;
+      this.setWaveActive(true);
+
+      const finish = () => {
+        if (myGen !== this._playGen) return;
+        this.isSpeaking = false;
+        this.currentUtterance = null;
+        this.setWaveActive(false);
+        if (onDone) onDone();
+      };
+
       try {
-        this.synth.cancel();
-      } catch (_) {}
+        const cacheKey = spoken.toLowerCase();
+        let entry = this._blobCache.get(cacheKey);
+        if (!entry) {
+          this._abortCtrl = new AbortController();
+          const fetchTts = (url) => fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: spoken }),
+            signal: this._abortCtrl.signal
+          });
+          let res;
+          try {
+            res = await fetchTts('/api/ai/vegeta-tts');
+            if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+          } catch (netErr) {
+            if (netErr?.name === 'AbortError') return;
+            res = await fetchTts('http://127.0.0.1:8000/api/ai/vegeta-tts');
+          }
+          if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+          const engine = (res.headers.get('X-Vegeta-Engine') || 'edge-male').toLowerCase();
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          if (this._blobCache.size >= 24) {
+            const oldestKey = this._blobCache.keys().next().value;
+            const oldestVal = this._blobCache.get(oldestKey);
+            if (oldestVal?.url) URL.revokeObjectURL(oldestVal.url);
+            this._blobCache.delete(oldestKey);
+          }
+          entry = { url, engine };
+          this._blobCache.set(cacheKey, entry);
+        }
+
+        if (myGen !== this._playGen || !this.audioEl) return;
+
+        const useGrit = entry.engine.startsWith('edge');
+        this.ensureAudioGraph(useGrit);
+        this.audioEl.src = entry.url;
+        this.audioEl.onended = finish;
+        this.audioEl.onerror = () => {
+          if (myGen !== this._playGen) return;
+          this.speakBrowserFallback(spoken, myGen, onDone);
+        };
+        await this.audioEl.play();
+      } catch (err) {
+        if (err?.name === 'AbortError' || myGen !== this._playGen) return;
+        this.speakBrowserFallback(spoken, myGen, onDone);
+      }
+    },
+
+    stop() {
+      this._playGen++;
+      try { this._abortCtrl?.abort(); } catch (_) {}
+      this._abortCtrl = null;
+      if (this.audioEl) {
+        try {
+          this.audioEl.onended = null;
+          this.audioEl.onerror = null;
+          this.audioEl.pause();
+          this.audioEl.currentTime = 0;
+        } catch (_) {}
+      }
+      if (this.synth) {
+        try { this.synth.cancel(); } catch (_) {}
+      }
       this.isSpeaking = false;
       this.currentUtterance = null;
       this.setWaveActive(false);
@@ -5937,6 +6788,26 @@ document.addEventListener('DOMContentLoaded', () => {
           const subBtn = document.getElementById('btn-audio-sub');
           if (subBtn) subBtn.click();
           else state.activeAudioType = 'sub';
+        } else if (a.command === 'boost_200' || a.command === 'boost_150' || a.command === 'boost_100') {
+          const targetGain = a.command === 'boost_200' ? 2.0 : (a.command === 'boost_150' ? 1.5 : 1.0);
+          const boostBtn = document.getElementById('v-boost-btn');
+          if (boostBtn) {
+            for (let tries = 0; tries < 4; tries++) {
+              const curTxt = (boostBtn.textContent || '').trim();
+              const wantTxt = targetGain === 2.0 ? '200%' : (targetGain === 1.5 ? '150%' : '100%');
+              if (curTxt.includes(wantTxt)) break;
+              boostBtn.click();
+            }
+          }
+        } else if (a.command === 'pause') {
+          const v = document.getElementById('main-video');
+          if (v) {
+            if (v.paused) v.play().catch(() => {});
+            else v.pause();
+          }
+        } else if (a.command === 'fullscreen') {
+          const fsBtn = document.getElementById('v-fs-btn');
+          if (fsBtn) fsBtn.click();
         }
       } else if (a.type === 'navigate') {
         if (a.view === 'home') switchTab('home');
@@ -5963,6 +6834,17 @@ document.addEventListener('DOMContentLoaded', () => {
           VegetaVoice.stop();
           toggleVegetaChat(false);
           openAnimeDetail(aid, false);
+        }
+      } else if (a.type === 'trailer') {
+        const aid = Number(a.anime_id);
+        if (aid) {
+          VegetaVoice.stop();
+          toggleVegetaChat(false);
+          openAnimeDetail(aid, false);
+          setTimeout(() => {
+            const trBtn = document.getElementById('detail-trailer-btn');
+            if (trBtn) trBtn.click();
+          }, 900);
         }
       }
     }
@@ -6036,6 +6918,7 @@ document.addEventListener('DOMContentLoaded', () => {
       vegetaTypingIndicator.style.display = 'flex';
       vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
     }
+    KuroDynamicIsland.setVegetaBusy(true);
 
     localStorage.removeItem('kuro_gemini_api_key');
 
@@ -6099,6 +6982,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const data = await res.json();
       if (vegetaTypingIndicator) vegetaTypingIndicator.style.display = 'none';
+      KuroDynamicIsland.setVegetaBusy(false);
 
       if (data && data.reply) {
         vegetaConversation.push({ role: 'model', text: data.reply });
@@ -6128,6 +7012,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Vegeta Advisor error:', err);
       if (vegetaTypingIndicator) vegetaTypingIndicator.style.display = 'none';
+      KuroDynamicIsland.setVegetaBusy(false);
       appendVegetaMessage('bot', 'A temporary connection error interrupted the lookup. Ask again in a moment.');
     }
   }
@@ -6973,6 +7858,7 @@ function handleInitialRoute() {
   initCustomSelects();
   applyVisualSettings();
   initUserMenuAndSettings();
+  KuroDynamicIsland.init();
   updateWatchlistBadge();
   syncModalInstance = initSyncModal();
   initShareModalListeners();

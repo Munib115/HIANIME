@@ -8,7 +8,7 @@
   },
   "functions": {
     "api/index.py": {
-      "includeFiles": "api/*.{db*,json.gz,npz,html}",
+      "includeFiles": "api/*.{db*,json.gz,npz,html,mp3}",
       "maxDuration": 60
     }
   },

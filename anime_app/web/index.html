@@ -62,6 +62,94 @@
 
 <body>
   <div id="app" class="app-root">
+    <!-- Desktop Left Navigation Sidebar (>= 1024px, Unslop Warm Carbon Rail) -->
+    <aside class="app-sidebar" id="app-sidebar" aria-label="Primary navigation">
+      <div class="sidebar-top">
+        <div class="brand-logo" id="btn-sidebar-home" title="KuroAnime Home">
+          <svg class="brand-mark" viewBox="0 0 36 36" width="28" height="28" aria-hidden="true">
+            <rect x="1" y="1" width="34" height="34" rx="9" fill="#171512" stroke="#302B24" stroke-width="1.25" />
+            <rect x="8.5" y="8.5" width="4" height="19" rx="1.4" fill="#F4EFE6" />
+            <path d="M14.2 17.2L22.4 8.5H26.8L18 17.6L14.2 17.2Z" fill="#F4EFE6" />
+            <path d="M14.2 18.8L18 18.4L26.8 27.5H22.4L14.2 18.8Z" fill="#F4EFE6" />
+            <polygon points="20.6,14.2 27.6,18 20.6,21.8" fill="#E05638" />
+          </svg>
+          <div class="brand-text">
+            <span class="brand-title">Kuro<span class="brand-dot" aria-hidden="true"></span><span class="brand-accent">Anime</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-nav-scroll">
+        <div class="sidebar-section">
+          <div class="sidebar-section-label">Menu</div>
+          <button type="button" class="sidebar-nav-item active" data-sidebar-tab="home">
+            <span class="sidebar-icon-box"><i data-lucide="home"></i></span>
+            <span class="sidebar-item-label">Home</span>
+          </button>
+          <button type="button" class="sidebar-nav-item" data-sidebar-tab="browse">
+            <span class="sidebar-icon-box"><i data-lucide="compass"></i></span>
+            <span class="sidebar-item-label">Browse</span>
+          </button>
+          <button type="button" class="sidebar-nav-item" data-sidebar-tab="search">
+            <span class="sidebar-icon-box"><i data-lucide="search"></i></span>
+            <span class="sidebar-item-label">Search</span>
+          </button>
+          <button type="button" class="sidebar-nav-item" data-sidebar-tab="watchlist">
+            <span class="sidebar-icon-box"><i data-lucide="bookmark"></i></span>
+            <span class="sidebar-item-label">My List</span>
+            <span class="sidebar-item-count" id="sidebar-watchlist-count">0</span>
+          </button>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-section-label">Discover</div>
+          <button type="button" class="sidebar-nav-item" data-sidebar-hub="airing">
+            <span class="sidebar-icon-box"><i data-lucide="clock"></i></span>
+            <span class="sidebar-item-label">Currently airing</span>
+          </button>
+          <button type="button" class="sidebar-nav-item" data-sidebar-hub="dubbed">
+            <span class="sidebar-icon-box"><i data-lucide="layers"></i></span>
+            <span class="sidebar-item-label">English dubbed</span>
+          </button>
+          <button type="button" class="sidebar-nav-item" data-sidebar-hub="advisor">
+            <span class="sidebar-icon-box"><i data-lucide="message-square"></i></span>
+            <span class="sidebar-item-label">Vegeta advisor</span>
+          </button>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-section-label">Genres</div>
+          <button type="button" class="sidebar-nav-item" data-sidebar-genre="Action">
+            <span class="sidebar-icon-box"><span class="sidebar-dot is-accent"></span></span>
+            <span class="sidebar-item-label">Action</span>
+          </button>
+          <button type="button" class="sidebar-nav-item" data-sidebar-genre="Isekai">
+            <span class="sidebar-icon-box"><span class="sidebar-dot"></span></span>
+            <span class="sidebar-item-label">Isekai</span>
+          </button>
+          <button type="button" class="sidebar-nav-item" data-sidebar-genre="Fantasy">
+            <span class="sidebar-icon-box"><span class="sidebar-dot"></span></span>
+            <span class="sidebar-item-label">Fantasy</span>
+          </button>
+          <button type="button" class="sidebar-nav-item" data-sidebar-genre="Romance">
+            <span class="sidebar-icon-box"><span class="sidebar-dot"></span></span>
+            <span class="sidebar-item-label">Romance</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button type="button" class="sidebar-nav-item" id="btn-sidebar-sync">
+          <span class="sidebar-icon-box"><i data-lucide="share-2"></i></span>
+          <span class="sidebar-item-label">Share &amp; Sync</span>
+        </button>
+        <button type="button" class="sidebar-nav-item" id="btn-sidebar-settings">
+          <span class="sidebar-icon-box"><i data-lucide="settings"></i></span>
+          <span class="sidebar-item-label">Settings</span>
+        </button>
+      </div>
+    </aside>
+
     <!-- Universal Header Bar -->
     <header class="app-header" id="app-header">
       <div class="header-container">
@@ -1398,6 +1486,75 @@
             <i data-lucide="send"></i>
           </button>
         </form>
+      </div>
+    </aside>
+
+    <!-- KuroAnime Dynamic Island (Tokyo Screening Room Hardware Capsule) -->
+    <div class="kuro-island-backdrop" id="kuro-island-backdrop" aria-hidden="true"></div>
+    <aside class="kuro-dynamic-island is-collapsed" id="kuro-dynamic-island" data-mode="idle" aria-label="Activity and playback capsule">
+      <div class="kdi-shell" id="kdi-shell">
+        <button type="button" class="kdi-pill" id="kdi-pill-trigger" aria-expanded="false" aria-controls="kdi-panel">
+          <span class="kdi-leading" id="kdi-leading">
+            <span class="kdi-status-dot" id="kdi-status-dot"></span>
+          </span>
+          <span class="kdi-label-wrap">
+            <span class="kdi-title" id="kdi-title">Catalog Ready</span>
+          </span>
+          <span class="kdi-trailing" id="kdi-trailing">
+            <span class="kdi-meta" id="kdi-meta">Browse</span>
+            <i data-lucide="chevron-down" class="kdi-chevron"></i>
+          </span>
+        </button>
+
+        <div class="kdi-panel" id="kdi-panel" aria-hidden="true">
+          <div class="kdi-panel-head">
+            <img class="kdi-thumb" id="kdi-panel-thumb" src="" alt="" style="display:none" />
+            <div class="kdi-panel-info">
+              <div class="kdi-panel-kicker" id="kdi-panel-kicker">Continue watching</div>
+              <div class="kdi-panel-name" id="kdi-panel-name">KuroAnime</div>
+              <div class="kdi-panel-sub" id="kdi-panel-sub">Select a series to start streaming</div>
+            </div>
+            <button type="button" class="kdi-close-btn" id="kdi-close-btn" aria-label="Collapse capsule">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+
+          <div class="kdi-progress-wrap" id="kdi-progress-wrap" style="display:none">
+            <div class="kdi-progress-track">
+              <div class="kdi-progress-fill" id="kdi-progress-fill" style="width:0%"></div>
+            </div>
+            <div class="kdi-progress-times">
+              <span id="kdi-time-elapsed">0:00</span>
+              <span id="kdi-time-duration">24:00</span>
+            </div>
+          </div>
+
+          <div class="kdi-actions" id="kdi-actions">
+            <button type="button" class="kdi-btn kdi-btn-primary" id="kdi-btn-primary">
+              <i data-lucide="play"></i>
+              <span id="kdi-btn-primary-label">Explore</span>
+            </button>
+            <button type="button" class="kdi-btn kdi-btn-secondary" id="kdi-btn-secondary">
+              <i data-lucide="info"></i>
+              <span id="kdi-btn-secondary-label">Details</span>
+            </button>
+            <button type="button" class="kdi-btn kdi-btn-icon" id="kdi-btn-vegeta" title="Ask Prince Vegeta" aria-label="Ask Prince Vegeta">
+              <i data-lucide="message-square"></i>
+            </button>
+          </div>
+
+          <div class="kdi-quick-row" id="kdi-quick-row">
+            <button type="button" class="kdi-quick-link" data-kdi-nav="search">
+              <i data-lucide="search"></i><span>Search</span>
+            </button>
+            <button type="button" class="kdi-quick-link" data-kdi-nav="browse">
+              <i data-lucide="compass"></i><span>Catalog</span>
+            </button>
+            <button type="button" class="kdi-quick-link" data-kdi-nav="watchlist">
+              <i data-lucide="bookmark"></i><span id="kdi-saved-label">Saved (0)</span>
+            </button>
+          </div>
+        </div>
       </div>
     </aside>
 

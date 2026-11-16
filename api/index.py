@@ -204,6 +204,46 @@ def find_munib_db():
 
 
 _INITIALIZED_MUNIB_DB = None
+_DB_STAGE_LOCK = _threading.Lock()
+
+
+def _stage_sqlite_file(source: str, filename: str) -> str:
+    """Return local writable .db directly, or atomically stage .gz/.db into serverless /tmp."""
+    is_gz = source.endswith(".gz")
+    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+    if not is_gz and not is_vercel:
+        return source
+
+    import gzip
+    import shutil
+    import tempfile
+
+    tmp_dir = "/tmp" if is_vercel else tempfile.gettempdir()
+    os.makedirs(tmp_dir, exist_ok=True)
+    tmp_db = os.path.join(tmp_dir, filename)
+
+    with _DB_STAGE_LOCK:
+        need_stage = not os.path.exists(tmp_db) or os.path.getsize(tmp_db) == 0
+        if not need_stage and not is_gz and os.path.getsize(tmp_db) != os.path.getsize(source):
+            need_stage = True
+        if need_stage:
+            part_path = f"{tmp_db}.{os.getpid()}.part"
+            try:
+                if is_gz:
+                    with gzip.open(source, "rb") as f_in, open(part_path, "wb") as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                else:
+                    shutil.copyfile(source, part_path)
+                os.replace(part_path, tmp_db)
+            except Exception:
+                if os.path.exists(part_path):
+                    try:
+                        os.unlink(part_path)
+                    except Exception:
+                        pass
+                raise
+    return tmp_db
+
 
 def get_munib_db_path():
     global _INITIALIZED_MUNIB_DB
@@ -214,46 +254,24 @@ def get_munib_db_path():
     if not source or not os.path.exists(source):
         return None
 
-    if source.endswith(".gz"):
-        import gzip
-        import shutil
-        import tempfile
-        tmp_dir = "/tmp" if (os.environ.get("VERCEL") or os.path.exists("/tmp")) else tempfile.gettempdir()
-        tmp_db = os.path.join(tmp_dir, "munib_server.db")
-        try:
-            if not os.path.exists(tmp_db) or os.path.getsize(tmp_db) == 0:
-                with gzip.open(source, "rb") as f_in, open(tmp_db, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            if os.path.exists(tmp_db) and os.path.getsize(tmp_db) > 0:
-                _INITIALIZED_MUNIB_DB = tmp_db
-                return _INITIALIZED_MUNIB_DB
-        except Exception:
-            return None
-
-    if os.environ.get("VERCEL") or os.path.exists("/tmp"):
-        tmp_db = "/tmp/munib_server.db"
-        try:
-            if not os.path.exists(tmp_db) or os.path.getsize(tmp_db) != os.path.getsize(source):
-                import shutil
-                shutil.copyfile(source, tmp_db)
-            if os.path.exists(tmp_db) and os.path.getsize(tmp_db) > 0:
-                _INITIALIZED_MUNIB_DB = tmp_db
-                return _INITIALIZED_MUNIB_DB
-        except Exception:
-            pass
-
-    _INITIALIZED_MUNIB_DB = source
-    return source
-
-
-def munib_db():
-    path = get_munib_db_path()
-    if not path or not os.path.exists(path):
+    try:
+        staged = _stage_sqlite_file(source, "munib_server.db")
+        if staged and os.path.exists(staged) and os.path.getsize(staged) > 0:
+            _INITIALIZED_MUNIB_DB = staged
+            return _INITIALIZED_MUNIB_DB
+    except Exception:
+        if not source.endswith(".gz"):
+            _INITIALIZED_MUNIB_DB = source
+            return source
         return None
+    return None
 
+
+def _open_sqlite_ro(path: str, timeout: int = 15):
+    """Open SQLite safely on local disk or serverless /var/task (/tmp)."""
     if path.startswith("/tmp"):
         try:
-            conn = sqlite3.connect(path, timeout=10, check_same_thread=False)
+            conn = sqlite3.connect(path, timeout=timeout, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             return conn
         except Exception:
@@ -263,23 +281,31 @@ def munib_db():
     if not norm_path.startswith("/"):
         norm_path = "/" + norm_path
 
+    if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        try:
+            conn = sqlite3.connect(f"file://{norm_path}?mode=ro&immutable=1", uri=True, timeout=timeout, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except Exception:
+            pass
+
     try:
-        conn = sqlite3.connect(f"file://{norm_path}?mode=ro&immutable=1", uri=True, timeout=10, check_same_thread=False)
+        conn = sqlite3.connect(f"file://{norm_path}?mode=ro", uri=True, timeout=timeout, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
     except Exception:
         pass
 
-    try:
-        conn = sqlite3.connect(f"file://{norm_path}?mode=ro", uri=True, timeout=10, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except Exception:
-        pass
-
-    conn = sqlite3.connect(path, timeout=10, check_same_thread=False)
+    conn = sqlite3.connect(path, timeout=timeout, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def munib_db():
+    path = get_munib_db_path()
+    if not path or not os.path.exists(path):
+        return None
+    return _open_sqlite_ro(path, timeout=10)
 
 
 def munib_rows(sql, params=()):
@@ -444,74 +470,21 @@ def get_db_path():
     if not source or not os.path.exists(source):
         raise HTTPException(status_code=500, detail="Database file not found on server")
 
-    if source.endswith(".gz"):
-        import gzip
-        import shutil
-        import tempfile
-        tmp_dir = "/tmp" if (os.environ.get("VERCEL") or os.path.exists("/tmp")) else tempfile.gettempdir()
-        tmp_db = os.path.join(tmp_dir, "hianime.db")
-        try:
-            if not os.path.exists(tmp_db) or os.path.getsize(tmp_db) == 0:
-                with gzip.open(source, "rb") as f_in, open(tmp_db, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            if os.path.exists(tmp_db) and os.path.getsize(tmp_db) > 0:
-                _INITIALIZED_DB = tmp_db
-                return _INITIALIZED_DB
-        except Exception as e:
+    try:
+        staged = _stage_sqlite_file(source, "hianime.db")
+        if staged and os.path.exists(staged) and os.path.getsize(staged) > 0:
+            _INITIALIZED_DB = staged
+            return _INITIALIZED_DB
+    except Exception as e:
+        if source.endswith(".gz"):
             raise HTTPException(status_code=500, detail=f"Failed to decompress DB: {e}")
-
-    # In serverless read-only environments (e.g. Vercel / AWS Lambda), copy DB to /tmp
-    # to guarantee fully concurrent read/write locks, -shm/-wal handling, and zero disk errors
-    if os.environ.get("VERCEL") or os.path.exists("/tmp"):
-        tmp_db = "/tmp/hianime.db"
-        try:
-            if not os.path.exists(tmp_db) or os.path.getsize(tmp_db) != os.path.getsize(source):
-                import shutil
-                shutil.copyfile(source, tmp_db)
-            if os.path.exists(tmp_db) and os.path.getsize(tmp_db) > 0:
-                _INITIALIZED_DB = tmp_db
-                return _INITIALIZED_DB
-        except Exception:
-            pass
 
     _INITIALIZED_DB = source
     return source
 
 
 def db():
-    path = get_db_path()
-
-    # If DB is in /tmp, direct connection has full local filesystem support
-    if path.startswith("/tmp"):
-        try:
-            conn = sqlite3.connect(path, timeout=15, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            return conn
-        except Exception:
-            pass
-
-    norm_path = os.path.abspath(path).replace("\\", "/")
-    if not norm_path.startswith("/"):
-        norm_path = "/" + norm_path
-
-    # On read-only media like /var/task, immutable=1 completely disables WAL/SHM file locking
-    try:
-        conn = sqlite3.connect(f"file://{norm_path}?mode=ro&immutable=1", uri=True, timeout=15, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except Exception:
-        pass
-
-    try:
-        conn = sqlite3.connect(f"file://{norm_path}?mode=ro", uri=True, timeout=15, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except Exception:
-        pass
-
-    conn = sqlite3.connect(path, timeout=15, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return _open_sqlite_ro(get_db_path(), timeout=15)
 
 
 def rows(sql, params=()):
@@ -2264,7 +2237,10 @@ def get_vegeta_knowledge_base(conn_or_fn=None):
         genres_display = ", ".join(g_tokens[:5]) if g_tokens else "Action, Adventure"
         genres_lower = (" ".join(g_tokens) + " " + raw_genres).lower()
 
-        syn_clean = _clean_html(r[18] or r[19] or "")
+        syn_s1 = _clean_html(r[18] or "")
+        syn_al = _clean_html(r[19] or "")
+        syn_clean = syn_al if len(syn_al) > len(syn_s1) else (syn_s1 or syn_al)
+        syn_combined_lower = f"{syn_s1} {syn_al}".strip().lower()
         year_str = str(season_year) if season_year else ""
         if not year_str and premiered:
             m = re.findall(r"\d{4}", premiered)
@@ -2323,7 +2299,7 @@ def get_vegeta_knowledge_base(conn_or_fn=None):
             "genres": genres_display,
             "genres_lower": genres_lower,
             "synopsis": syn_clean,
-            "synopsis_lower": syn_clean.lower(),
+            "synopsis_lower": syn_combined_lower,
             "seasons_json": r[20],
         }
         al_id = r[22] if len(r) > 22 else None
@@ -2527,12 +2503,17 @@ def _find_exact_or_fuzzy_title(user_msg: str, kb_items: list):
         if best_title_score >= 60.0:
             primary_boost = 30.0 if is_primary_exact else 0.0
             eng_boost = 15.0 if is_eng_exact else 0.0
+            t_low_cmp = (it.get("title_english") or it.get("title") or "").lower()
             movie_penalty = -35.0 if ("movie" in it["title"].lower() and "movie" not in check_phrase) else 0.0
+            q_wants_sequel = bool(re.search(r"\b(season\s*[2-9]|part\s*[2-9]|2nd|3rd|4th|arc|shippuden|brotherhood|hashira|entertainment|swordsmith|arise from|shibuya|culling|final|cour)\b", check_phrase))
+            sequel_penalty = 0.0
+            if not q_wants_sequel and re.search(r"\b(season\s*[2-9]|part\s*[2-9]|cour\s*[2-9]|2nd season|3rd season|4th season|hashira training|entertainment district|swordsmith village|arise from the shadow|chronicle|recap|ova)\b", t_low_cmp):
+                sequel_penalty = -18.0
             tv_boost = 10.0 if it["type"] == "TV" else 0.0
-            pop_boost = min((it["popularity"] or 0) / 10000.0, 20.0)
-            ep_boost = min((it["episode_count"] or 1) / 10.0, 15.0)
+            pop_boost = min((it["popularity"] or 0) / 25000.0, 45.0)
+            ep_boost = min((it["episode_count"] or 1) / 10.0, 12.0)
             score_boost = (it["score"] / 10.0) * 5.0
-            total = best_title_score + primary_boost + eng_boost + movie_penalty + tv_boost + pop_boost + ep_boost + score_boost
+            total = best_title_score + primary_boost + eng_boost + movie_penalty + sequel_penalty + tv_boost + pop_boost + ep_boost + score_boost
             scored.append((total, it))
 
     if not scored:
@@ -2948,44 +2929,206 @@ def _detect_play_intent(user_msg: str, items: list, user_context: dict = None) -
     return None
 
 
-def _find_by_plot_description(msg_low: str, items: list) -> tuple:
-    """Identify an anime from a story background / plot description across both servers."""
+_VG_SHORT_SCENE_WORDS = {
+    "box", "dog", "cat", "arm", "leg", "eye", "fox", "god", "war", "lab", "gun",
+    "ice", "ant", "orb", "elf", "orc", "pig", "sao", "odm", "nen", "eva", "red",
+    "son", "mom", "dad", "boy", "man", "nun", "spy", "ink", "key", "fog", "bow",
+    "axe", "bat", "rat", "owl", "ape", "bug", "bee", "mud", "ash", "sao", "jjk",
+    "aot", "fma", "hxh", "opm", "mha", "dbz", "dbs",
+}
+
+_VG_PLOT_STOPWORDS = {
+    "anime", "show", "series", "story", "background", "character", "characters",
+    "main", "protagonist", "hero", "guy", "boy", "girl", "man", "woman", "person",
+    "people", "world", "power", "powers", "gets", "become", "becomes", "became",
+    "wants", "finds", "found", "lives", "live", "where", "about", "forgot", "name",
+    "remember", "called", "which", "there", "scene", "episode", "season", "part",
+    "movie", "film", "watch", "watched", "seen", "looking", "search", "find",
+    "tell", "know", "explain", "explained", "happens", "happened", "starts",
+    "begins", "start", "begin", "someone", "somebody", "everyone", "everybody",
+    "thing", "things", "into", "from", "with", "without", "after", "before",
+    "while", "when", "that", "this", "what", "whats", "who", "whom", "whose",
+    "have", "has", "had", "does", "did", "done", "make", "makes", "made", "take",
+    "takes", "took", "give", "gives", "gave", "goes", "went", "gone", "come",
+    "comes", "came", "like", "just", "very", "really", "only", "also", "even",
+    "back", "down", "over", "under", "again", "then", "than", "other", "another",
+    "first", "second", "third", "last", "next", "some", "many", "much", "more",
+    "most", "good", "best", "great", "little", "young", "high", "year", "years",
+    "time", "days", "life", "friend", "friends", "fight", "fights", "fighting",
+}
+
+
+def _vg_stem_word(w: str) -> str:
+    w = w.strip("'")
+    if len(w) <= 3:
+        return w
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith("ves") and len(w) > 4:
+        return w[:-3] + "f"
+    for suf in ("ation", "ition", "ment", "ness", "ingly", "edly", "ting", "ning", "ring", "ling", "ing", "ed", "es", "s"):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            stem = w[:-len(suf)]
+            if len(stem) >= 3 and stem[-1] == stem[-2] and stem[-1] not in ("s", "l", "z"):
+                stem = stem[:-1]
+            return stem
+    return w
+
+
+def _vg_stem_tokens(text: str, keep_stopwords: bool = False) -> list:
+    if not text:
+        return []
+    raw = re.findall(r"[a-z0-9']{3,}", text.lower())
+    out = []
+    for w in raw:
+        w_clean = w.strip("'")
+        if len(w_clean) < 3:
+            continue
+        if len(w_clean) == 3 and w_clean not in _VG_SHORT_SCENE_WORDS and not w_clean.isdigit():
+            continue
+        if not keep_stopwords and w_clean in _VG_PLOT_STOPWORDS:
+            continue
+        st = _vg_stem_word(w_clean)
+        if not keep_stopwords and st in _VG_PLOT_STOPWORDS:
+            continue
+        out.append(st)
+    return out
+
+
+_VG_SCENE_CONCEPT_EXPANSIONS = [
+    (r"\b(wooden box|carries? (?:his )?(?:demon )?sister|sister in a box|bamboo muzzle|sun breathing|water breathing|hinokami)\b", "nezuko tanjiro kamado kimetsu demon slayer"),
+    (r"\b(writes? (?:their )?names?|book that kills|death book|kills? criminals|apple shinigami|god of death notebook)\b", "notebook shinigami ryuk kira light yagami lawliet death note"),
+    (r"\b(eats? (?:a )?(?:cursed|rotted)?\s*finger|twenty fingers|white hair blindfold|hollow purple|infinite void|malevolent shrine)\b", "sukuna yuji itadori gojo satoru megumi jujutsu kaisen cursed"),
+    (r"\b(loses? (?:his )?arm and leg|brother(?:'s)? soul in armor|suit of armor brother|bring (?:their )?(?:dead )?(?:mom|mother) back|human transmutation)\b", "edward alphonse elric automail philosopher stone fullmetal alchemist"),
+    (r"\b(three (?:giant )?walls|giant naked|eats? his (?:mom|mother)|bites? (?:his )?hand to transform|omni[- ]?directional|3d maneuver|rumbling)\b", "eren yeager mikasa levi titan wall maria scout regiment shingeki"),
+    (r"\b(weakest (?:e[- ]?rank )?hunter|double dungeon|statue smiles?|shadow army|says? arise|system player level up)\b", "sung jinwoo shadow monarch igris arise solo leveling"),
+    (r"\b(chainsaw dog|pulls? (?:a )?cord on (?:his )?chest|heart replaced by (?:his )?dog|gun devil|control devil)\b", "denji pochita makima power aki chainsaw man"),
+    (r"\b(bald (?:hero|guy)|defeats? (?:everyone|enemies|monsters) in one punch|100 push[- ]?ups|cyborg disciple)\b", "saitama genos hero association one punch man"),
+    (r"\b(dies? and (?:resets?|loops?|comes? back|restarts?)|time loop when he dies|return by death|blue haired maid)\b", "subaru natsuki emilia rem return by death re zero"),
+    (r"\b(microwave time|texts? to the past|gel banana|mad scientist lab coat|worldline divergence)\b", "okabe rintaro kurisu makise mayuri steins gate"),
+    (r"\b(trapped in (?:a )?(?:vr|virtual reality|mmorpg|video)[\w\s]*|die in (?:the )?game|dying in (?:the )?game|100 floors|dual blades|nervegear)\b", "kirito asuna aincrad nervegear sword art online"),
+    (r"\b(brain surgeon|saves? a (?:young )?boy instead of (?:the )?mayor|boy grows up to be a (?:serial killer|monster|psychopath))\b", "tenma johan liebert anna monster surgeon"),
+    (r"\b(alien (?:worm|parasite) in (?:his )?(?:right )?hand|hand talks|hand turns into blades)\b", "shinichi izumi migi parasyte kiseijuu"),
+    (r"\b(everyone turned to stone|petrified for 3700 years|nitric acid|revival fluid|count seconds)\b", "senku ishigami taiju stone world dr stone"),
+    (r"\b(pink hair.*horns|two small horns|invisible.*(?:hands|arms|vectors)|escapes? (?:a )?(?:research )?lab|diclonius)\b", "lucy nyu kouta diclonius vectors elfen lied"),
+    (r"\b(piano prodigy|can'?t hear (?:his )?piano|blonde violinist|dies in spring|surgery letter)\b", "kousei arima kaori miyazono piano violin your lie in april"),
+    (r"\b(deaf girl|bullied in elementary|hearing aids?|learns? sign language|redeem himself)\b", "shoya ishida shouko nishimiya deaf silent voice koe no katachi"),
+    (r"\b(swap(?:ping)? bodies|boy in tokyo girl in countryside|comet hits town|red braided cord)\b", "taki tachibana mitsuha miyamizu comet body swap your name kimi no na wa"),
+    (r"\b(orphanage.*(?:demons|livestock|farm|food|neck|tattoo)|numbers? tattooed on.*neck|grace field|mama isabella)\b", "emma norman ray isabella grace field promised neverland"),
+    (r"\b(yellow octopus teacher|blow up the moon|mach 20|class 3[- ]e|assassinate their teacher)\b", "korosensei nagisa karma assassination classroom ansatsu"),
+    (r"\b(cooking battles|clothes explode when eating|culinary academy|elite ten)\b", "soma yukihira erina totsuki shokugeki food wars"),
+    (r"\b(gambling school|housepet system|compulsive gambler girl|student council president)\b", "yumeko jabami mary kirari kakegurui"),
+    (r"\b(bar after death|play bar games to judge souls|mannequin bodies|arbiter bartender)\b", "decim chiyuki quindecim death parade"),
+    (r"\b(giant hole|curse of the abyss|ascending causes bleeding|robot boy|white whistle)\b", "riko reg nanachi ozen made in abyss"),
+    (r"\b(immortal orb|becomes a rock then a wolf then a boy|nameless boy in snow)\b", "fushi march gugu parona to your eternity fumetsu"),
+    (r"\b(fake family|spy father|assassin mother|telepath daughter|mind reader girl|forger)\b", "loid yor anya bond forger spy x family"),
+    (r"\b(no magic|muscles instead of magic|creampuffs|hogwarts parody|punches spells)\b", "mash burnedead finn lance easton mashle"),
+    (r"\b(aliens and ghosts|lose his balls|golden ball|turbo granny|occult boy gyaru girl)\b", "momo ayase okarun ken takakura turbo granny dan da dan"),
+    (r"\b(cleanup crew|eats a small kaiju|32 year old|transforms into a kaiju|defense force)\b", "kafka hibino mina ashiro reno kaiju no 8"),
+    (r"\b(viking boy|father killed by mercenaries|travels with his father's killer|i have no enemies)\b", "thorfinn askeladd thors canute vinland saga"),
+    (r"\b(giant slabs? of iron|black swordsman|band of the hawk|brand of sacrifice|eclipse betrayal)\b", "guts griffith casca puck berserk"),
+    (r"\b(blind swordsman|prosthetic limbs|demons stole his body parts|gets his body back when killing demons)\b", "hyakkimaru dororo tahomaru daigo"),
+    (r"\b(prosthetic metal arms|writes? letters for people|what does i love you mean|major gilbert)\b", "violet evergarden gilbert hodgins auto memory doll"),
+    (r"\b(apothecary girl|kidnapped into imperial palace|tastes? poison|freckles|eunuch jinshi)\b", "maomao jinshi apothecary diaries kusuriya"),
+    (r"\b(sister eaten by a red dragon|cook and eat dungeon monsters|dwarf chef|elf magemarcille)\b", "laios marcille chilchuk senshi falin delicious in dungeon"),
+    (r"\b(soccer prison|300 strikers|egoist striker|eliminated from national team)\b", "yoichi isagi bachira nagi rin ego blue lock"),
+    (r"\b(goes back to elementary school|1988|save classmate from kidnapper|revival butterfly)\b", "satoru fujinuma kayo hinazuki airi erased boku dake"),
+    (r"\b(trapped in skeleton body|guild base nazarick|undead overlord|npc guardians)\b", "ainz ooal gown momonga albedo shalltear overlord"),
+    (r"\b(elf mage lives for thousands of years|after defeating the demon king|hero himmel dies of old age)\b", "frieren fern stark himmel heiter beyond journey"),
+    (r"\b(eye power to command anyone|britannia empire|masked rebel zero|mecha knightmare)\b", "lelouch vi britannia suzaku ccallen code geass"),
+    (r"\b(false accusation|shield hero|cannot use weapons|raccoon girl slave|four cardinal heroes)\b", "naofumi iwatani raphtalia filo shield hero"),
+    (r"\b(pretends to be a background mob|secret cult turns out to be real|i am atomic)\b", "cid kagenou shadow alpha delta eminence in shadow"),
+    (r"\b(boy sold to a demon by his parents|becomes demon grandson|demon school babyls)\b", "iruma suzuki sullivan opera clara welcome to demon school"),
+    (r"\b(white room genius|manipulates from the shadows|class d|island exam points)\b", "kiyotaka ayanokoji suzune horikita kei classroom of the elite"),
+    (r"\b(boy born without magic|five leaf grimoire|anti magic sword|rival yuno|wizard king)\b", "asta yuno noelle yami black clover"),
+    (r"\b(coffee shop ghouls|date tries to eat him|steel beams organ transplant|one eyed ghoul)\b", "ken kaneki touka rize anteiku kagune tokyo ghoul"),
+    (r"\b(military spine implant|sandevistan|moon promise|arasaka night city)\b", "david martinez lucy rebecca maine cyberpunk edgerunners"),
+    (r"\b(doctor reincarnated as his favorite idol's twin baby|idol murdered at door|star eyes revenge)\b", "aqua ruby ai hoshino kana akane oshi no ko"),
+    (r"\b(stabbed on the street|reincarnated as a blind slime|predator skill|goblin village|veldora)\b", "rimuru tempest veldora shion benimaru slime datta ken"),
+    (r"\b(shut[- ]?in dies saving teenagers|reincarnated as a baby|roxy water magic tutor|greyrat)\b", "rudeus greyrat roxy sylphiette eris mushoku tensei"),
+    (r"\b(rubber pirate|straw hat|eats gum gum fruit|devil fruit|pirate king)\b", "luffy zoro nami sanji straw hat one piece"),
+    (r"\b(fox demon sealed inside|outcast ninja boy|hokage|sharingan clan massacre)\b", "naruto uzumaki sasuke uchiha kakashi itachi"),
+    (r"\b(sees ghosts|shinigami gives him her powers|hollow mask|soul society rescue|zanpakuto)\b", "ichigo kurosaki rukia aizen byakuya bleach"),
+]
+
+
+def _vg_is_scene_or_plot_query(msg_low: str) -> bool:
+    if not msg_low:
+        return False
+    # Explicit identification triggers
+    if any(k in msg_low for k in [
+        "what is that anime", "what's that anime", "whats that anime", "which anime", "forgot the name",
+        "anime where", "show where", "the one where", "name of the anime", "what anime", "anime about",
+        "what is the anime", "what's the anime", "cant remember", "can't remember", "story where",
+        "background story", "plot is", "about a guy", "about a boy", "about a girl", "about a man",
+        "about a woman", "there is a scene", "there's a scene", "theres a scene", "scene where",
+        "i remember a scene", "i saw a clip", "saw a reel", "saw a tiktok", "saw a short",
+        "help me find", "find this anime", "identify this anime", "what show is", "which show is",
+        "in this anime", "the main character is", "mc is a", "mc gets", "mc has", "boy who", "girl who",
+        "guy who", "man who", "woman who", "starts with a", "episode where", "scene in which",
+    ]):
+        return True
+    # Also detect natural narrative descriptions (e.g. "a boy carries his demon sister in a box")
+    if re.search(r"\b(?:(?:a|the|an|two|three|ten thousand)\s+)?(boy|girl|guy|man|woman|kid|kids|children|players|brothers|siblings|orphans|hunters|student|high schooler|doctor|surgeon|prince|princess|knight|mage|hunter|assassin|spy|pirate|ninja|swordsman|orphan|detective|scientist)\b", msg_low):
+        if len(re.findall(r"[a-z0-9']{3,}", msg_low)) >= 5:
+            return True
+    # Or if any concept expansion matches
+    for pat, _ in _VG_SCENE_CONCEPT_EXPANSIONS:
+        if re.search(pat, msg_low):
+            return True
+    return False
+
+
+def _vg_identify_scene_candidates(msg_low: str, items: list, kb: dict = None, limit: int = 4) -> list:
+    """Rank anime across both servers by scene/plot/character/tag/episode description using concept expansion + IDF-weighted stemmed BM25."""
+    if not msg_low or not items:
+        return []
+
+    expanded_parts = [msg_low]
+    concept_boost_terms = set()
+    for pat, exp_str in _VG_SCENE_CONCEPT_EXPANSIONS:
+        if re.search(pat, msg_low):
+            expanded_parts.append(exp_str)
+            for t in _vg_stem_tokens(exp_str):
+                concept_boost_terms.add(t)
+
+    # Check explicit plot signatures first
     plot_signatures = [
-        ("slime", ["slime", "reincarnated as a slime", "rimuru", "tempest"], "That Time I Got Reincarnated as a Slime"),
-        ("death note", ["notebook", "write names", "shinigami", "ryuk", "kira", "l lawliet"], "Death Note"),
-        ("attack on titan", ["titans", "giant humanoid", "walls", "scout regiment", "eren", "wall maria", "odm gear"], "Attack on Titan"),
-        ("demon slayer", ["bamboo muzzle", "nezuko", "tanjiro", "breathing technique", "demon slayer corps", "hashira"], "Demon Slayer"),
-        ("jujutsu kaisen", ["eats a finger", "cursed spirit", "sukuna", "gojo", "domain expansion", "yuji itadori"], "Jujutsu Kaisen"),
-        ("one punch man", ["one punch", "bald hero", "defeats everyone easily", "saitama", "genos", "hero association"], "One Punch Man"),
-        ("sword art online", ["virtual reality", "trapped in a game", "die in game", "die in real life", "kirito", "nervegear", "aincrad"], "Sword Art Online"),
-        ("fullmetal alchemist", ["human transmutation", "two brothers", "arm and leg", "alchemist", "philosopher stone", "elric", "state alchemist"], "Fullmetal Alchemist: Brotherhood"),
+        ("slime", ["slime", "reincarnated as a slime", "rimuru", "tempest", "veldora"], "That Time I Got Reincarnated as a Slime"),
+        ("death note", ["notebook", "write names", "writes names", "shinigami", "ryuk", "kira", "lawliet", "light yagami"], "Death Note"),
+        ("attack on titan", ["titans", "giant humanoid", "walls", "scout regiment", "eren", "wall maria", "odm gear", "rumbling"], "Attack on Titan"),
+        ("demon slayer", ["bamboo muzzle", "wooden box", "demon sister", "nezuko", "tanjiro", "breathing technique", "demon slayer corps", "hashira", "hinokami"], "Demon Slayer: Kimetsu no Yaiba"),
+        ("jujutsu kaisen", ["eats a finger", "cursed finger", "cursed spirit", "sukuna", "gojo", "domain expansion", "yuji itadori", "hollow purple"], "Jujutsu Kaisen"),
+        ("one punch man", ["one punch", "bald hero", "defeats everyone", "saitama", "genos", "hero association"], "One Punch Man"),
+        ("sword art online", ["virtual reality", "trapped in a game", "trapped in a virtual", "mmorpg", "die in game", "dying in the game", "real life", "kirito", "nervegear", "aincrad"], "Sword Art Online"),
+        ("fullmetal alchemist", ["human transmutation", "two brothers", "arm and leg", "suit of armor", "alchemist", "philosopher stone", "elric", "automail"], "Fullmetal Alchemist: Brotherhood"),
         ("steins gate", ["microwave", "time travel", "banana", "divergence meter", "okabe", "kurisu", "mad scientist", "el psy kongroo"], "Steins;Gate"),
-        ("monster", ["doctor", "surgeon", "saves a young boy", "johan liebert", "charismatic psychopath", "tenma"], "Monster"),
+        ("monster", ["brain surgeon", "saves a young boy", "johan liebert", "charismatic psychopath", "tenma"], "Monster"),
         ("tokyo ghoul", ["half ghoul", "coffee", "eats humans", "kaneki", "organ transplant", "kagune", "anteiku"], "Tokyo Ghoul"),
         ("parasyte", ["alien parasite", "right hand", "migi", "shinichi"], "Parasyte -the maxim-"),
-        ("dr stone", ["turned to stone", "petrified", "science", "senku", "rebuild civilization", "stone world"], "Dr. STONE"),
-        ("vinland saga", ["vikings", "thorfinn", "revenge", "askeladd", "duels", "vinland"], "Vinland Saga"),
+        ("dr stone", ["turned to stone", "petrified", "senku", "rebuild civilization", "stone world", "revival fluid"], "Dr. STONE"),
+        ("vinland saga", ["vikings", "thorfinn", "askeladd", "no enemies", "vinland"], "Vinland Saga"),
         ("hunter x hunter", ["hunter exam", "killua", "gon", "nen", "kurapika", "phantom troupe", "chimera ant"], "Hunter x Hunter"),
-        ("code geass", ["geass", "absolute obedience", "lelouch", "zero", "britannia", "knightmare"], "Code Geass"),
-        ("chainsaw man", ["chainsaw", "devil", "denji", "pochita", "makima", "public safety"], "Chainsaw Man"),
-        ("solo leveling", ["shadow monarch", "weakest hunter", "system", "sung jinwoo", "double dungeon", "arise"], "Solo Leveling"),
-        ("re zero", ["return by death", "subaru", "emilia", "rem", "time loop", "dies and resets"], "Re:ZERO -Starting Life in Another World-"),
-        ("frieren", ["elf mage", "defeated the demon king", "defeating the demon king", "demon king", "after the hero dies", "frieren", "fern", "himmel"], "Frieren: Beyond Journey's End"),
-        ("mushoku tensei", ["jobless", "rudeus", "reincarnated as a baby", "magic prodigy", "eris", "roxy"], "Mushoku Tensei: Jobless Reincarnation"),
-        ("spy x family", ["fake family", "telepath", "anya", "assassin mother", "spy father", "loid", "yor"], "SPY x FAMILY"),
+        ("code geass", ["geass", "absolute obedience", "lelouch", "britannia", "knightmare"], "Code Geass"),
+        ("chainsaw man", ["chainsaw", "chainsaw dog", "denji", "pochita", "makima", "public safety"], "Chainsaw Man"),
+        ("solo leveling", ["shadow monarch", "weakest hunter", "sung jinwoo", "double dungeon", "arise", "shadow army"], "Solo Leveling"),
+        ("re zero", ["return by death", "subaru", "emilia", "rem", "dies and resets", "time loop"], "Re:ZERO -Starting Life in Another World-"),
+        ("frieren", ["elf mage", "defeated the demon king", "defeating the demon king", "after the hero dies", "frieren", "fern", "himmel"], "Frieren: Beyond Journey's End"),
+        ("mushoku tensei", ["jobless", "rudeus", "reincarnated as a baby", "magic prodigy", "greyrat", "roxy"], "Mushoku Tensei: Jobless Reincarnation"),
+        ("spy x family", ["fake family", "telepath", "anya", "assassin mother", "spy father", "loid", "yor", "forger"], "SPY x FAMILY"),
         ("my hero academia", ["quirkless", "all might", "deku", "midoriya", "ua high", "one for all"], "My Hero Academia"),
-        ("bleach", ["soul reaper", "shinigami", "ichigo", "hollow", "zanpakuto", "soul society", "bankai"], "Bleach"),
-        ("naruto", ["nine tailed fox", "hokage", "ninja", "naruto", "sasuke", "hidden leaf", "rasengan"], "Naruto"),
+        ("bleach", ["soul reaper", "ichigo", "hollow", "zanpakuto", "soul society", "bankai"], "Bleach"),
+        ("naruto", ["nine tailed fox", "hokage", "naruto", "sasuke", "hidden leaf", "rasengan", "sharingan"], "Naruto"),
         ("one piece", ["rubber body", "devil fruit", "pirate king", "luffy", "straw hat", "grand line", "zoro"], "One Piece"),
         ("dragon ball", ["saiyan", "seven dragon balls", "goku", "vegeta", "kamehameha", "super saiyan"], "Dragon Ball Z"),
-        ("blue lock", ["egoist", "soccer prison", "striker", "isagi", "blue lock"], "BLUE LOCK"),
+        ("blue lock", ["egoist", "soccer prison", "300 strikers", "isagi", "blue lock"], "BLUE LOCK"),
         ("haikyuu", ["short volleyball", "hinata", "karasuno", "kageyama", "volleyball"], "Haikyu!!"),
         ("dandadan", ["ghosts and aliens", "turbo granny", "okarun", "momo ayase", "golden ball"], "DAN DA DAN"),
         ("kaiju no 8", ["cleanup crew", "kafka hibino", "turns into a kaiju", "defense force"], "Kaiju No. 8"),
-        ("overlord", ["skeleton", "ainz ooal gown", "nazarick", "trapped in game", "undead overlord"], "Overlord"),
-        ("mob psycho", ["esper", "psychic", "reigen", "100 percent", "shigeo", "mob"], "Mob Psycho 100"),
+        ("overlord", ["skeleton", "ainz ooal gown", "nazarick", "undead overlord"], "Overlord"),
+        ("mob psycho", ["esper", "psychic", "reigen", "100 percent", "shigeo", "mob", "bowl cut", "con artist"], "Mob Psycho 100"),
         ("cyberpunk edgerunners", ["night city", "sandevistan", "david martinez", "lucy", "cyberpsychosis"], "Cyberpunk: Edgerunners"),
-        ("your name", ["body swap", "comet", "mitsuha", "taki", "red string"], "Your Name."),
+        ("your name", ["body swap", "swap bodies", "comet", "mitsuha", "taki", "red braided"], "Your Name."),
         ("oshi no ko", ["reincarnated as idol", "ai hoshino", "ruby", "aqua", "star eyes"], "Oshi No Ko"),
         ("classroom of the elite", ["ayanokoji", "white room", "class d", "meritocracy", "points system"], "Classroom of the Elite"),
         ("black clover", ["no magic", "anti magic", "asta", "yuno", "wizard king", "five leaf grimoire"], "Black Clover"),
@@ -2994,64 +3137,117 @@ def _find_by_plot_description(msg_low: str, items: list) -> tuple:
         ("erased", ["revival", "goes back in time", "elementary school", "kayo", "satoru"], "ERASED"),
         ("shield hero", ["rising of the shield", "naofumi", "falsely accused", "raphtalia", "four cardinal heroes"], "The Rising of the Shield Hero"),
         ("eminence in shadow", ["atomic", "shadow garden", "cid kagenou", "chunnibyou", "i am atomic"], "The Eminence in Shadow"),
+        ("elfen lied", ["diclonius", "vectors", "pink hair", "small horns", "research lab", "invisible", "lucy", "kouta"], "Elfen Lied"),
+        ("your lie in april", ["piano prodigy", "blonde violinist", "kousei", "kaori"], "Your Lie in April"),
+        ("silent voice", ["deaf girl", "sign language", "shouko", "shoya", "hearing aid"], "A Silent Voice"),
+        ("promised neverland", ["orphanage", "grace field", "emma", "norman", "numbers", "tattooed", "livestock"], "The Promised Neverland"),
+        ("assassination classroom", ["yellow octopus", "korosensei", "class 3-e", "mach 20"], "Assassination Classroom"),
+        ("made in abyss", ["curse of the abyss", "white whistle", "riko", "reg", "nanachi"], "Made in Abyss"),
+        ("to your eternity", ["immortal orb", "fushi", "nameless boy", "turns into a wolf"], "To Your Eternity"),
+        ("mashle", ["muscles instead of magic", "creampuffs", "mash burnedead", "easton"], "MASHLE: MAGIC AND MUSCLES"),
+        ("dororo", ["prosthetic limbs", "hyakkimaru", "dororo", "demons stole his body"], "Dororo"),
+        ("violet evergarden", ["auto memory doll", "violet evergarden", "major gilbert", "metal arms"], "Violet Evergarden"),
+        ("apothecary diaries", ["poison taster", "maomao", "jinshi", "imperial palace"], "The Apothecary Diaries"),
+        ("delicious in dungeon", ["eat dungeon monsters", "laios", "marcille", "senshi", "red dragon ate"], "Delicious in Dungeon"),
     ]
 
-    identify_phrase = any(k in msg_low for k in [
-        "what is that anime", "what's that anime", "whats that anime", "which anime", "forgot the name",
-        "anime where", "show where", "the one where", "name of the anime", "what anime", "anime about a",
-        "what is the anime", "what's the anime", "cant remember", "can't remember", "story where",
-        "background story", "plot is", "about a guy who", "about a boy who", "about a girl who",
-    ])
-    need = 1 if identify_phrase else 2
-    for key_tag, triggers, target_title in plot_signatures:
-        matches = sum(1 for t in triggers if re.search(rf"\b{re.escape(t)}\b", msg_low))
-        if matches >= need:
+    sig_matched_item = None
+    best_sig_hits = 0
+    is_scene_q = _vg_is_scene_or_plot_query(msg_low)
+    for _, triggers, target_title in plot_signatures:
+        matches = sum(1 for t in triggers if t in msg_low)
+        if matches >= (1 if is_scene_q else 2) and matches > best_sig_hits:
             specific, _ = _find_exact_or_fuzzy_title(target_title, items)
             if specific:
-                return specific, target_title
+                sig_matched_item = specific
+                best_sig_hits = matches
 
-    plot_stopwords = _VEGETA_STOPWORDS | {
-        "anime", "show", "series", "story", "background", "character", "main", "guy", "boy", "girl",
-        "man", "woman", "world", "power", "powers", "people", "gets", "become", "becomes", "wants",
-        "finds", "lives", "where", "about", "forgot", "name", "remember", "called", "which", "there",
-    }
-    words = [w for w in re.findall(r"[a-z0-9']{4,}", msg_low) if w not in plot_stopwords]
-    if len(words) >= 3 and (identify_phrase or len(words) >= 5):
-        best_item = None
-        best_score = 0.0
-        for it in items:
-            syn_h = it.get("synopsis_lower") or ""
-            tag_h = it.get("tags_lower") or ""
-            chr_h = it.get("characters_lower") or ""
-            gen_h = it.get("genres_lower") or ""
-            score = 0.0
-            hits = 0
-            for w in words:
-                w_hit = False
-                if w in chr_h:
-                    score += 3.5
-                    w_hit = True
-                if w in tag_h:
-                    score += 2.5
-                    w_hit = True
-                if w in syn_h:
-                    score += 2.0
-                    w_hit = True
-                if w in gen_h:
-                    score += 1.0
-                    w_hit = True
-                if w_hit:
-                    hits += 1
-            if hits >= (2 if len(words) <= 4 else 3):
-                # Tie-break gently with popularity so main series beats obscure OVAs
-                pop_bonus = min(1.5, ((it.get("popularity") or 0) / 500000.0))
-                total_score = score + pop_bonus
-                if total_score > best_score:
-                    best_score = total_score
-                    best_item = it
-        if best_item and best_score >= 4.5:
-            return best_item, best_item["title_english"] or best_item["title"]
+    q_stems = list(dict.fromkeys(_vg_stem_tokens(" ".join(expanded_parts))))
+    raw_words = [w for w in re.findall(r"[a-z0-9']{3,}", msg_low) if w not in _VG_PLOT_STOPWORDS]
+    bigrams = [f"{raw_words[i]} {raw_words[i+1]}" for i in range(len(raw_words) - 1)]
 
+    idf_map = (kb or {}).get("idf") or {}
+    default_idf = 3.2
+
+    scored_by_franchise = {}
+    for it in items:
+        if _vg_is_adult(it) and "hentai" not in msg_low:
+            continue
+        syn_h = it.get("synopsis_lower") or ""
+        tag_h = it.get("tags_lower") or ""
+        chr_h = it.get("characters_lower") or ""
+        ep_h = it.get("ep_titles_lower") or ""
+        tit_h = f"{(it.get('title_english') or '').lower()} {(it.get('title') or '').lower()} {(it.get('synonyms') or '').lower()}"
+        stems_set = it.get("stemmed_plot_tokens")
+
+        score = 0.0
+        matched_clues = []
+
+        if sig_matched_item and it["anime_id"] == sig_matched_item["anime_id"]:
+            score += 90.0
+            matched_clues.append("plot signature")
+
+        for st in q_stems:
+            if stems_set is not None and st not in stems_set:
+                continue
+            w_idf = idf_map.get(st, default_idf)
+            boost = 1.6 if st in concept_boost_terms else 1.0
+            hit_any = False
+            if st in chr_h:
+                score += w_idf * 2.8 * boost
+                hit_any = True
+            if st in tag_h:
+                score += w_idf * 2.2 * boost
+                hit_any = True
+            if st in ep_h:
+                score += w_idf * 2.4 * boost
+                hit_any = True
+            if st in syn_h:
+                score += w_idf * 1.8 * boost
+                hit_any = True
+            if st in tit_h:
+                score += w_idf * 2.0 * boost
+                hit_any = True
+            if hit_any and len(matched_clues) < 6 and st not in matched_clues:
+                matched_clues.append(st)
+
+        for bg in bigrams:
+            if bg in syn_h or bg in ep_h or bg in tag_h:
+                score += 6.5
+
+        if len(matched_clues) >= (1 if sig_matched_item and it["anime_id"] == sig_matched_item["anime_id"] else 2):
+            pop_bonus = min(4.5, ((it.get("popularity") or 0) / 220000.0))
+            tv_bonus = 1.2 if (it.get("type") or "").upper() == "TV" else 0.0
+            t_low_cmp = (it.get("title_english") or it.get("title") or "").lower()
+            seq_pen = -35.0 if re.search(r"\b(season\s*[2-9]|part\s*[2-9]|cour\s*[2-9]|2nd season|3rd season|hashira training|entertainment district|swordsmith village|arise from the shadow|chronicle|recap)\b", t_low_cmp) and not re.search(r"\b(season\s*[2-9]|part\s*[2-9]|2nd|3rd|arc|hashira|entertainment|swordsmith)\b", msg_low) else 0.0
+            total_sc = score + pop_bonus + tv_bonus + seq_pen
+            fkey = it.get("franchise") or _vg_base(it) or str(it["anime_id"])
+            prev = scored_by_franchise.get(fkey)
+            if not prev or total_sc > prev[0]:
+                # Check if a specific episode title matched
+                matched_ep = 1
+                if it.get("ep_titles") and raw_words:
+                    best_ep_hits = 0
+                    for ep_num, ep_t in it["ep_titles"]:
+                        ep_low = ep_t.lower()
+                        eh = sum(1 for rw in raw_words if len(rw) >= 4 and rw in ep_low)
+                        if eh > best_ep_hits:
+                            best_ep_hits = eh
+                            matched_ep = ep_num
+                scored_by_franchise[fkey] = (total_sc, it, matched_ep, matched_clues)
+
+    ranked = sorted(scored_by_franchise.values(), key=lambda x: x[0], reverse=True)
+    if sig_matched_item and not ranked:
+        return [(50.0, sig_matched_item, 1, ["plot match"])]
+    return [r for r in ranked[:limit] if r[0] >= 5.5]
+
+
+def _find_by_plot_description(msg_low: str, items: list, kb: dict = None) -> tuple:
+    """Identify an anime from a story background / scene / plot description across both servers."""
+    cands = _vg_identify_scene_candidates(msg_low, items, kb=kb, limit=1)
+    if cands:
+        _, best_item, _, _ = cands[0]
+        return best_item, best_item.get("title_english") or best_item.get("title")
     return None, None
 
 
@@ -3064,7 +3260,7 @@ _VG_CMD_VERBS = (
     "play", "start", "watch", "stream", "resume", "continue", "add", "save", "bookmark", "remove",
     "delete", "drop", "open", "show", "go", "take", "navigate", "search", "look up", "switch", "change",
     "next", "skip", "previous", "prev", "put", "launch", "browse", "explore", "surprise", "pull up",
-    "bring up", "set", "turn", "dub", "sub",
+    "bring up", "set", "turn", "dub", "sub", "boost", "increase", "pause", "fullscreen", "mute", "unmute",
 )
 _VG_LIST_WORDS = r"(?:my\s+)?(?:list|watchlist|watch\s+list|library|collection|favorites|favourites|saved)"
 
@@ -3388,7 +3584,13 @@ def _vg_resolve_target(phrase, kb, ctx, history):
             except Exception:
                 return None
         return None
+    if _vg_is_scene_or_plot_query(p):
+        it_scene, _ = _find_by_plot_description(p, kb["items"], kb=kb)
+        if it_scene:
+            return it_scene
     it, _ = _find_exact_or_fuzzy_title(p, kb["items"])
+    if not it and len(p.split()) >= 3:
+        it, _ = _find_by_plot_description(p, kb["items"], kb=kb)
     return it
 
 
@@ -3472,6 +3674,26 @@ def _vg_parse_clause(clause, kb, ctx, history):
     if m:
         lang = "dub" if m.group(1) in ("dub", "dubbed", "english") else "sub"
         return {"type": "player", "command": lang}
+
+    # 2.5. Player: sound boost / pause / resume / fullscreen
+    m_boost = re.match(r"^(?:boost|increase|set|turn)\s+(?:the\s+)?(?:sound|volume|audio)(?:\s+boost(?:er)?)?(?:\s+to)?\s*(200|150|100)?%?$", c) \
+        or re.match(r"^(?:turn\s+on|enable)\s+(?:sound|volume|audio)\s+boost(?:er)?$", c)
+    if m_boost:
+        lvl = m_boost.group(1) if m_boost.lastindex and m_boost.group(1) else "200"
+        return {"type": "player", "command": f"boost_{lvl}"}
+    if c in ("pause", "pause video", "pause player", "pause it"):
+        return {"type": "player", "command": "pause"}
+    if c in ("fullscreen", "full screen", "go fullscreen"):
+        return {"type": "player", "command": "fullscreen"}
+
+    # 2.8. Watch Trailer command
+    m_tr = re.match(r"^(?:watch|play|show|open|launch)\s+(?:the\s+)?(?:official\s+)?trailer\s+(?:for|of)\s+(.+)$", c) \
+        or re.match(r"^(?:official\s+)?trailer\s+(?:for|of)\s+(.+)$", c) \
+        or re.match(r"^(?:watch|play|show)\s+(.+?)\s+trailer$", c)
+    if m_tr:
+        it = _vg_resolve_target(m_tr.group(1), kb, ctx, history)
+        if it:
+            return {"type": "trailer", "anime_id": it["anime_id"], "title": _vg_title(it)}
 
     # 3. My List: remove / add
     m = re.match(rf"^(?:remove|delete|drop|take)\s+(.*?)\s*(?:from|off|out of)\s+{_VG_LIST_WORDS}$", c) \
@@ -3605,14 +3827,25 @@ def _vg_describe_action(a):
         ep_val = a.get("episode", 1)
         return f"{verb} **{t}**, Episode {ep_val}{extra}{lang} [Watch on KuroAnime](#anime/{a.get('anime_id')}?ep={ep_val})"
     if typ == "open":
-        return f"Opening the **{t}** page"
+        return f"Opening the **{t}** page [Watch on KuroAnime](#anime/{a.get('anime_id')})"
+    if typ == "trailer":
+        return f"Launching the official trailer for **{t}** [Watch on KuroAnime](#anime/{a.get('anime_id')})"
     if typ == "add_to_list":
         return f"Adding **{t}** to your list"
     if typ == "remove_from_list":
         return f"Removing **{t}** from your list"
     if typ == "player":
-        return {"next": "Skipping to the next episode", "previous": "Going back one episode",
-                "dub": "Switching audio to English Dub", "sub": "Switching audio to Japanese with subs"}.get(a.get("command"), "Adjusting the player")
+        return {
+            "next": "Skipping to the next episode",
+            "previous": "Going back one episode",
+            "dub": "Switching audio to English Dub",
+            "sub": "Switching audio to Japanese with subs",
+            "boost_200": "Boosting player audio to 200%",
+            "boost_150": "Setting player audio boost to 150%",
+            "boost_100": "Resetting player audio to 100%",
+            "pause": "Pausing playback",
+            "fullscreen": "Toggling fullscreen mode",
+        }.get(a.get("command"), "Adjusting the player")
     if typ == "navigate":
         v = a.get("view")
         if v == "search":
@@ -3650,7 +3883,7 @@ def _vg_validate_actions(actions, kb):
     for a in actions or []:
         if not isinstance(a, dict) or not a.get("type"):
             continue
-        if a["type"] in ("play", "open", "add_to_list", "remove_from_list"):
+        if a["type"] in ("play", "open", "trailer", "add_to_list", "remove_from_list"):
             try:
                 aid = int(a.get("anime_id"))
             except Exception:
@@ -3740,6 +3973,46 @@ def _vg_smart_answer(user_msg, kb, ctx, history):
                     f"Hmph. If **{_vg_title(seed)}** got your blood pumping, these share its DNA:", sims,
                     "Say \"play the first one\" or \"add the second one to my list\" and I'll handle it."), []
 
+    if _vg_is_scene_or_plot_query(low):
+        cands = _vg_identify_scene_candidates(low, items, kb=kb, limit=3)
+        if cands:
+            _, p_item, p_ep, _ = cands[0]
+            p_ep = p_ep or 1
+            p_title = _vg_title(p_item)
+            p_aid = p_item["anime_id"]
+            p_syn = re.sub(r"<[^>]+>", "", (p_item.get("synopsis") or "A legendary battle chronicled in the archives.")).strip()
+            if len(p_syn) > 280:
+                p_syn = p_syn[:277].rsplit(" ", 1)[0] + "..."
+            p_genres = p_item.get("genres") or "Action, Fantasy"
+            p_score = p_item.get("score") or "8.6+"
+            reply = (
+                f"Hmph! You thought a vague memory of a scene could stump the Prince of all Saiyans? My Royal Scouter locked onto that signature in a microsecond!\n\n"
+                f"🔥 **Primary Scouter Lock: [{p_title}](#anime/{p_aid}?ep={p_ep})**\n"
+                f"- **Power Rating:** ⭐ `{p_score}` | **Format:** `{p_item.get('type') or 'TV'}` (`{p_item.get('episode_count') or '?'} eps`)\n"
+                f"- **Genres:** {p_genres}\n"
+                f"- **Archive Synopsis:** {p_syn}\n"
+                f"- **Direct Command:** **[Watch {p_title} (Ep {p_ep}) Now](#anime/{p_aid}?ep={p_ep})**"
+            )
+            if len(cands) > 1:
+                runners = []
+                for _, r_it, r_ep, _ in cands[1:3]:
+                    r_ep = r_ep or 1
+                    r_sc = r_it.get("score") or "8.0+"
+                    r_tit = _vg_title(r_it)
+                    runners.append(f"- **[{r_tit}](#anime/{r_it['anime_id']}?ep={r_ep})** (⭐ `{r_sc}`, {r_it.get('genres') or 'Anime'})")
+                reply += "\n\n⚡ **Secondary Scouter Matches (if you meant another timeline):**\n" + "\n".join(runners)
+            wants_play = bool(re.search(r"\b(play|watch|start|stream|open|launch|put on)\b", low)) and not bool(re.search(r"\b(what is|which anime|what anime|tell me|name of|identify|find the anime)\b", low))
+            acts = []
+            if wants_play:
+                acts.append({
+                    "type": "play",
+                    "anime_id": p_aid,
+                    "title": p_title,
+                    "episode": p_ep,
+                    "audio": "dub" if "dub" in low else "sub"
+                })
+            return reply, acts
+
     filters = _vg_parse_filters(low)
     is_request = re.search(r"\b(recommend|suggest|give me|show me|list|top|best|any|some|find|what are|which|good|need|want|looking for)\b", low)
 
@@ -3825,6 +4098,31 @@ def _vg_execute_tool(name, args, kb, ctx):
             return {"error": "Seed anime not found"}
         sims = _vg_find_similar(seed, items, limit=args.get("limit", 5))
         return {"seed": _vg_title(seed), "results": [_vg_card(it, syn_len=140) for it in sims]}
+    elif name == "identify_anime_from_description":
+        desc = str(args.get("description") or "").strip().lower()
+        cands = _vg_identify_scene_candidates(desc, items, kb=kb, limit=5)
+        out = []
+        for _, it, matched_ep, _ in cands:
+            out.append({
+                "anime_id": it["anime_id"],
+                "title": _vg_title(it),
+                "matched_episode": matched_ep or 1,
+                "score": it.get("score"),
+                "genres": it.get("genres"),
+                "synopsis": (it.get("synopsis") or "")[:360]
+            })
+        return {"identified_candidates": out}
+    elif name == "watch_trailer":
+        q = str(args.get("title") or "").strip()
+        it = _vg_resolve_target(q, kb, ctx)
+        if not it:
+            return {"error": f"Anime '{q}' not found in database."}
+        return {
+            "action_queued": True,
+            "type": "trailer",
+            "anime_id": int(it["anime_id"]),
+            "title": _vg_title(it)
+        }
     elif name == "get_user_profile":
         t = _vg_taste(kb, ctx)
         return {"watched_titles": t["titles"], "top_genres": t["top_genres"]}
@@ -3924,6 +4222,28 @@ _GEMINI_TOOLS_DECLARATIONS = [
                 "title": {"type": "STRING", "description": "Source anime title if ID unknown"},
                 "limit": {"type": "INTEGER", "description": "Max results (default 5)"}
             }
+        }
+    },
+    {
+        "name": "identify_anime_from_description",
+        "description": "Identify an anime (and specific episode if applicable) from a user's scene description, plot summary, character traits, or vague memory.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "description": {"type": "STRING", "description": "The full scene, plot, or character description from the user."}
+            },
+            "required": ["description"]
+        }
+    },
+    {
+        "name": "watch_trailer",
+        "description": "Open an anime's detail page and immediately play its official trailer in the browser.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Exact or approximate title or description of the anime."}
+            },
+            "required": ["title"]
         }
     },
     {
@@ -5015,6 +5335,31 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
             }
             return reply, action
 
+    if _vg_is_scene_or_plot_query(msg_low):
+        scene_cands = _vg_identify_scene_candidates(msg_low, items, kb=kb, limit=3)
+        if scene_cands:
+            _, p_item, p_ep, _ = scene_cands[0]
+            p_ep = p_ep or 1
+            p_title = _vg_title(p_item)
+            p_aid = p_item["anime_id"]
+            syn = re.sub(r"<[^>]+>", "", (p_item.get("synopsis") or "A renowned battle recorded in the archives.")).strip()
+            if len(syn) > 260:
+                syn = syn[:257].rsplit(" ", 1)[0] + "..."
+            genres_str = p_item.get("genres") or "Action, Fantasy"
+            score_val = p_item.get("score") or "8.6+"
+            out_txt = (
+                f"Hmph! You describe the scene well enough—my Royal Scouter locked onto that plot signature immediately!\n\n"
+                f"🔥 **Identified Anime: [{p_title}](#anime/{p_aid}?ep={p_ep})**\n"
+                f"- **Power Rating:** ⭐ `{score_val}` | **Format:** `{p_item.get('type') or 'TV'}` (`{p_item.get('episode_count') or '?'} eps`)\n"
+                f"- **Genres:** {genres_str}\n"
+                f"- **Synopsis:** {syn}\n\n"
+                f"👉 **[Watch {p_title} (Ep {p_ep}) on KuroAnime](#anime/{p_aid}?ep={p_ep})**"
+            )
+            if len(scene_cands) > 1:
+                alts = [f"**[{_vg_title(r_it)}](#anime/{r_it['anime_id']}?ep={r_ep or 1})**" for _, r_it, r_ep, _ in scene_cands[1:3]]
+                out_txt += f"\n\n⚡ *Other closest Scouter matches:* {', '.join(alts)}"
+            return out_txt
+
     # 2. Character & Lore Inquiries (who is tanjiro, who is his sister, why did sasuke leave, gojo, sukuna, etc.)
     char_inq = _vg_handle_character_inquiry(msg_low, active_anime, kb)
     if char_inq:
@@ -5114,6 +5459,32 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
         specific, related = _find_exact_or_fuzzy_title(user_msg, items)
         if specific:
             return _vg_generate_human_anime_review(specific)
+
+    # 8.5. Fallback Scene / Plot Identification before genre recommendations
+    if not is_rec_query and len(msg_low.split()) >= 5:
+        scene_cands = _vg_identify_scene_candidates(msg_low, items, kb=kb, limit=3)
+        if scene_cands:
+            _, p_item, p_ep, _ = scene_cands[0]
+            p_ep = p_ep or 1
+            p_title = _vg_title(p_item)
+            p_aid = p_item["anime_id"]
+            syn = re.sub(r"<[^>]+>", "", (p_item.get("synopsis") or "A renowned battle recorded in the archives.")).strip()
+            if len(syn) > 260:
+                syn = syn[:257].rsplit(" ", 1)[0] + "..."
+            genres_str = p_item.get("genres") or "Action, Fantasy"
+            score_val = p_item.get("score") or "8.6+"
+            out_txt = (
+                f"Hmph! Based on that description, my Royal Scouter has locked onto your target!\n\n"
+                f"🔥 **Identified Anime: [{p_title}](#anime/{p_aid}?ep={p_ep})**\n"
+                f"- **Power Rating:** ⭐ `{score_val}` | **Format:** `{p_item.get('type') or 'TV'}` (`{p_item.get('episode_count') or '?'} eps`)\n"
+                f"- **Genres:** {genres_str}\n"
+                f"- **Synopsis:** {syn}\n\n"
+                f"👉 **[Watch {p_title} (Ep {p_ep}) on KuroAnime](#anime/{p_aid}?ep={p_ep})**"
+            )
+            if len(scene_cands) > 1:
+                alts = [f"**[{_vg_title(r_it)}](#anime/{r_it['anime_id']}?ep={r_ep or 1})**" for _, r_it, r_ep, _ in scene_cands[1:3]]
+                out_txt += f"\n\n⚡ *Other closest Scouter matches:* {', '.join(alts)}"
+            return out_txt
 
     # 9. Explicit Recommendations Request (ONLY if user actually asked for recommendations!)
     is_rec_query = bool(re.search(r"\b(recommend|suggest|what should i watch|give me (?:an|some)|top anime|best anime to watch|what to watch|good anime to watch|surprise me)\b", msg_low))
@@ -5319,9 +5690,13 @@ def get_vegeta_full_knowledge():
             if meta.get("mal"):
                 it["mal_id"] = int(meta["mal"])
                 by_mal_id.setdefault(int(meta["mal"]), it)
-            if not it.get("synopsis") and meta.get("ds"):
-                it["synopsis"] = meta["ds"]
-                it["synopsis_lower"] = meta["ds"].lower()
+            if meta.get("ds"):
+                ds_txt = str(meta["ds"]).strip()
+                cur_syn = str(it.get("synopsis") or "").strip()
+                if not cur_syn or len(ds_txt) > len(cur_syn):
+                    it["synopsis"] = ds_txt
+                comb_syn = (cur_syn + " " + ds_txt).strip().lower()
+                it["synopsis_lower"] = comb_syn
             if (not it.get("studios") or it.get("studios") == "Unknown Studio") and meta.get("st"):
                 it["studios"] = ", ".join(meta["st"])
                 it["studios_lower"] = it["studios"].lower()
@@ -5359,6 +5734,63 @@ def get_vegeta_full_knowledge():
     # Sort character_index entries so Main characters and highest-popularity anime rank first
     for ck in char_index:
         char_index[ck].sort(key=lambda x: (1 if x[1] == "M" else 0, x[2].get("popularity") or 0), reverse=True)
+
+    # Load named episode titles from hianime.db for episode-level scene recognition
+    try:
+        ep_rows = rows(
+            "SELECT anime_id, episode_number, title FROM episodes "
+            "WHERE title IS NOT NULL AND title != '' AND title NOT LIKE 'Episode %'"
+        )
+        for er in ep_rows:
+            aid = er.get("anime_id")
+            ep_num = er.get("episode_number")
+            ep_title = er.get("title")
+            it_obj = by_id.get(int(aid)) if aid is not None else None
+            if it_obj is not None and ep_title:
+                t_clean = str(ep_title).strip()
+                if "ep_titles" not in it_obj:
+                    it_obj["ep_titles"] = []
+                if len(it_obj["ep_titles"]) < 60:
+                    it_obj["ep_titles"].append((int(ep_num or 1), t_clean))
+        for it_obj in items:
+            if it_obj.get("ep_titles"):
+                it_obj["ep_titles_lower"] = " ".join(x[1].lower() for x in it_obj["ep_titles"])
+    except Exception:
+        pass
+
+    # Precompute stemmed plot tokens and IDF weights across all anime
+    try:
+        import math
+        df_counts = {}
+        n_docs = max(len(items), 1)
+        for it_obj in items:
+            blob = " ".join([
+                (it_obj.get("title") or "").lower(),
+                (it_obj.get("title_english") or "").lower(),
+                (it_obj.get("title_romaji") or "").lower(),
+                (it_obj.get("synonyms") or "").lower(),
+                it_obj.get("synopsis_lower") or "",
+                it_obj.get("characters_lower") or "",
+                it_obj.get("tags_lower") or "",
+                it_obj.get("ep_titles_lower") or "",
+            ])
+            raw_toks = set(re.findall(r"[a-z0-9']{3,}", blob))
+            stemmed_set = set()
+            for tok in raw_toks:
+                if len(tok) >= 4 or tok in _VG_SHORT_SCENE_WORDS:
+                    stemmed_set.add(tok)
+                    st = _vg_stem_word(tok)
+                    if len(st) >= 3:
+                        stemmed_set.add(st)
+            it_obj["stemmed_plot_tokens"] = stemmed_set
+            for st in stemmed_set:
+                df_counts[st] = df_counts.get(st, 0) + 1
+        idf_map = {}
+        for tok, df in df_counts.items():
+            idf_map[tok] = round(math.log(1.0 + (n_docs - df + 0.5) / (df + 0.5)), 3)
+        kb["idf"] = idf_map
+    except Exception:
+        kb["idf"] = {}
 
     kb["by_mal_id"] = by_mal_id
     kb["character_index"] = char_index
@@ -5464,12 +5896,17 @@ def _vegeta_retrieve(user_msg, history, kb, image_search_result=None, has_image=
             )
 
     # 0. Reverse Plot / Description Identification Match
-    plot_item, plot_title = _find_by_plot_description(msg_low, items)
-    if plot_item and add(plot_item):
+    scene_cands = _vg_identify_scene_candidates(msg_low, items, kb=kb, limit=3)
+    if scene_cands:
+        cand_lines = []
+        for idx_c, (_, c_it, c_ep, _) in enumerate(scene_cands, 1):
+            add(c_it)
+            ep_hint = f" (Matched Episode #{c_ep})" if c_ep and c_ep != 1 else ""
+            cand_lines.append(f"  {idx_c}. {_vegeta_line(c_it, 340).lstrip('- ')}{ep_hint}")
         blocks.append(
-            f"REVERSE PLOT SCOUTING IDENTIFICATION:\n"
-            f"- Identified Anime: {_vegeta_line(plot_item, 320).lstrip('- ')}\n"
-            f"- Action Directive: Verify if this matches the story/background the user described; if another anime fits better from your knowledge, call `search_anime` for that title instead!"
+            "REVERSE PLOT & SCENE SCOUTING IDENTIFICATION (TOP MATCHES):\n"
+            + "\n".join(cand_lines) + "\n"
+            "- Action Directive: Present the #1 match confidently with its clickable `#anime/ID?ep=EP` link, synopsis, and episode match, and mention runner-up matches if relevant!"
         )
 
     # 0.5. Character Index Match (from MyAnimeList/AniList trained character database)
@@ -5870,6 +6307,392 @@ async def ai_chat(req: Request):
         "actions": actions,
         "used_gemini": False
     }
+
+
+# ─── Prince Vegeta Real Voice Cloning & Neural TTS Engine ────────────
+_VEGETA_TTS_CACHE: dict[str, tuple[bytes, str, str]] = {}
+_HF_ZEROGPU_BACKOFF_UNTIL: float = 0.0
+_HF_UPLOAD_PATH_CACHE: dict[str, str] = {}
+
+
+def _vg_tts_clean_text(raw: str) -> str:
+    txt = str(raw or "").strip()
+    if not txt:
+        return ""
+    txt = re.sub(r"\[([^\]]+)\]\([^\)]+\)", "", txt)
+    txt = re.sub(r"https?://\S+", "", txt)
+    txt = re.sub(r"^#{1,6}\s+", "", txt, flags=re.M)
+    txt = re.sub(r"[*_`~>#]", "", txt)
+    txt = re.sub(r"[\U00010000-\U0010ffff]", "", txt)
+    txt = re.sub(r"\bSaiyans?\b", lambda m: "Say-yans" if m.group(0).endswith("s") else "Say-yan", txt, flags=re.I)
+    txt = re.sub(r"\bKakarot\b", "Kacka-rot", txt, flags=re.I)
+    txt = re.sub(r"\bsh[oō]u?nen\b", "show-nen", txt, flags=re.I)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    if len(txt) > 340:
+        sents = re.findall(r"[^.!?]+[.!?]*", txt)
+        acc = ""
+        for s in sents:
+            if len(acc) + len(s) <= 320:
+                acc += s
+            else:
+                break
+        txt = (acc or txt[:320]).strip()
+    return txt
+
+
+def _vg_pcm_to_wav(pcm_bytes: bytes, sample_rate: int = 24000) -> bytes:
+    import io
+    import wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_bytes)
+    return buf.getvalue()
+
+
+def _vg_find_ref_audio() -> Optional[bytes]:
+    for cand in [
+        os.path.join(CURRENT_DIR, "vegeta_voice_ref.mp3"),
+        os.path.join(PARENT_DIR, "api", "vegeta_voice_ref.mp3"),
+        os.path.join(os.getcwd(), "api", "vegeta_voice_ref.mp3"),
+        os.path.join(os.getcwd(), "anime_app", "web", "public", "audio", "vegeta", "snapped.mp3"),
+    ]:
+        if os.path.exists(cand):
+            try:
+                with open(cand, "rb") as rf:
+                    data = rf.read()
+                if len(data) > 2000:
+                    return data
+            except Exception:
+                pass
+    return None
+
+
+def _vg_tts_chatterbox(text: str, hf_token: str = "") -> Optional[tuple[bytes, str]]:
+    """Zero-shot Vegeta clone via HuggingFace Chatterbox Spaces using Christopher Sabat ref."""
+    global _HF_ZEROGPU_BACKOFF_UNTIL
+    now = _time.time()
+    if not hf_token and now < _HF_ZEROGPU_BACKOFF_UNTIL:
+        return None
+    if len(text) > 250:
+        return None
+    ref_bytes = _vg_find_ref_audio()
+    if not ref_bytes:
+        return None
+
+    headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+    spaces = [
+        ("https://resembleai-chatterbox-turbo-demo.hf.space", "/generate", lambda up: [
+            text, {"path": up, "meta": {"_type": "gradio.FileData"}},
+            0.78, 0, 0.0, 0.95, 1000, 1.2, True,
+        ]),
+    ]
+    if hf_token:
+        spaces.append(
+            ("https://resembleai-chatterbox.hf.space", "/generate_tts_audio", lambda up: [
+                text, {"path": up, "meta": {"_type": "gradio.FileData"}},
+                0.65, 0.78, 0, 0.45, True,
+            ])
+        )
+    for host, ep, build_payload in spaces:
+        try:
+            up_path = _HF_UPLOAD_PATH_CACHE.get(host)
+            if not up_path:
+                ur = _STREAM_SESSION.post(
+                    f"{host}/gradio_api/upload",
+                    files={"files": ("vegeta_ref.mp3", ref_bytes, "audio/mpeg")},
+                    headers=headers,
+                    timeout=6,
+                )
+                if ur.status_code in (401, 429, 503):
+                    _HF_ZEROGPU_BACKOFF_UNTIL = now + 600
+                    return None
+                if ur.ok and isinstance(ur.json(), list) and ur.json():
+                    up_path = ur.json()[0]
+                    _HF_UPLOAD_PATH_CACHE[host] = up_path
+            if not up_path:
+                continue
+
+            cr = _STREAM_SESSION.post(
+                f"{host}/gradio_api/call{ep}",
+                json={"data": build_payload(up_path)},
+                headers=headers,
+                timeout=6,
+            )
+            if cr.status_code in (429, 503):
+                _HF_ZEROGPU_BACKOFF_UNTIL = now + 600
+                return None
+            if not cr.ok:
+                continue
+            eid = (cr.json() or {}).get("event_id")
+            if not eid:
+                continue
+
+            sr = _STREAM_SESSION.get(
+                f"{host}/gradio_api/call{ep}/{eid}",
+                headers=headers,
+                stream=True,
+                timeout=8.5,
+            )
+            for line in sr.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                if "zerogpu quota exceeded" in line.lower():
+                    _HF_ZEROGPU_BACKOFF_UNTIL = _time.time() + 600
+                    return None
+                if line.startswith("data:"):
+                    arr = json.loads(line[5:].strip() or "[]")
+                    if isinstance(arr, list) and arr and isinstance(arr[0], dict):
+                        out_url = arr[0].get("url") or (
+                            f"{host}/gradio_api/file={arr[0]['path']}" if arr[0].get("path") else None
+                        )
+                        if out_url:
+                            wr = _STREAM_SESSION.get(out_url, headers=headers, timeout=8)
+                            if wr.ok and len(wr.content) > 1000:
+                                ctype = "audio/mpeg" if out_url.endswith(".mp3") else "audio/wav"
+                                return wr.content, ctype
+        except Exception:
+            continue
+    return None
+
+
+def _vg_tts_gemini(text: str, api_key: str) -> Optional[tuple[bytes, str]]:
+    """Dramatic proud male voice synthesis via Gemini 2.5 Flash Preview TTS (Algenib/Fenrir)."""
+    if not api_key or api_key.startswith("0x"):
+        return None
+    prompt_txt = (
+        "Read the following line aloud in the sharp, proud, gravelly, commanding male baritone of a Saiyan warrior prince "
+        "(low resonant chest voice, crisp intensity, scornful superiority — do NOT add extra words): "
+        f"{text}"
+    )
+    for voice_name in ("Algenib", "Fenrir"):
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt_txt}]}],
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {
+                        "voiceConfig": {
+                            "prebuiltVoiceConfig": {"voiceName": voice_name}
+                        }
+                    },
+                },
+            }
+            res = _STREAM_SESSION.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=12)
+            if not res.ok:
+                continue
+            data = res.json()
+            parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+            for pt in parts:
+                inline = pt.get("inlineData") or {}
+                b64 = inline.get("data")
+                if b64:
+                    raw_bytes = base64.b64decode(b64)
+                    mime = str(inline.get("mimeType") or "").lower()
+                    if "pcm" in mime or "l16" in mime:
+                        rate_m = re.search(r"rate=(\d+)", mime)
+                        sr = int(rate_m.group(1)) if rate_m else 24000
+                        return _vg_pcm_to_wav(raw_bytes, sr), "audio/wav"
+                    return raw_bytes, (mime or "audio/wav")
+        except Exception:
+            continue
+    return None
+
+
+async def _vg_tts_edge(text: str) -> Optional[tuple[bytes, str, str]]:
+    """Guaranteed male deep baritone neural TTS via edge-tts (works free on Vercel & localhost)."""
+    try:
+        import edge_tts
+    except Exception:
+        return None
+    for voice_id, pitch, rate in (
+        ("en-US-EricNeural", "-22Hz", "+10%"),
+        ("en-US-ChristopherNeural", "-22Hz", "+10%"),
+        ("en-GB-RyanNeural", "-20Hz", "+8%"),
+    ):
+        try:
+            comm = edge_tts.Communicate(text, voice=voice_id, pitch=pitch, rate=rate)
+            chunks = []
+            async for msg in comm.stream():
+                if msg.get("type") == "audio" and msg.get("data"):
+                    chunks.append(msg["data"])
+            if chunks:
+                audio_bytes = b"".join(chunks)
+                if len(audio_bytes) > 600:
+                    return audio_bytes, "audio/mpeg", f"edge-{voice_id.split('-')[-1].lower()}"
+        except Exception:
+            continue
+    return None
+
+
+@router.post("/ai/vegeta-tts")
+async def ai_vegeta_tts(req: Request):
+    """Synthesize Prince Vegeta speech using RVC/Zero-Shot cloning, Gemini Gravelly Baritone, or Deep Male Edge TTS."""
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+
+    clean_text = _vg_tts_clean_text(body.get("text") or "")
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    cache_key = clean_text.lower()
+    cached = _VEGETA_TTS_CACHE.get(cache_key)
+    if cached:
+        audio_bytes, ctype, engine = cached
+        return Response(
+            content=audio_bytes,
+            media_type=ctype,
+            headers={
+                "X-Vegeta-Engine": f"{engine}-cache",
+                "Access-Control-Expose-Headers": "X-Vegeta-Engine",
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+
+    audio_bytes: Optional[bytes] = None
+    media_type = "audio/mpeg"
+    engine = "edge-male"
+
+    # Tier 1: Explicit RVC / Fish Audio / ElevenLabs Vegeta Voice Clone (if configured via env)
+    rvc_url = (os.environ.get("VEGETA_RVC_URL") or "").strip()
+    fish_key = (os.environ.get("FISH_AUDIO_API_KEY") or "").strip()
+    fish_model = (os.environ.get("FISH_AUDIO_VEGETA_ID") or "").strip()
+    if rvc_url:
+        try:
+            rr = _STREAM_SESSION.post(rvc_url, json={"text": clean_text}, timeout=12)
+            if rr.ok and len(rr.content) > 1000:
+                audio_bytes = rr.content
+                media_type = rr.headers.get("Content-Type", "audio/wav")
+                engine = "rvc-clone"
+        except Exception:
+            pass
+    if not audio_bytes and fish_key and fish_model:
+        try:
+            fr = _STREAM_SESSION.post(
+                "https://api.fish.audio/v1/tts",
+                json={"text": clean_text, "reference_id": fish_model, "format": "mp3"},
+                headers={"Authorization": f"Bearer {fish_key}", "Content-Type": "application/json"},
+                timeout=12,
+            )
+            if fr.ok and len(fr.content) > 1000:
+                audio_bytes = fr.content
+                media_type = "audio/mpeg"
+                engine = "fish-clone"
+        except Exception:
+            pass
+
+    # Tier 2: Zero-Shot Christopher Sabat Voice Clone (HF Chatterbox with optional HF_TOKEN)
+    if not audio_bytes:
+        hf_token = (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN") or "").strip()
+        cb_res = _vg_tts_chatterbox(clean_text, hf_token=hf_token)
+        if cb_res:
+            audio_bytes, media_type = cb_res
+            engine = "chatterbox-clone"
+
+    # Tier 3: Gemini 2.5 Native Dramatic Male Baritone (Algenib Gravelly) when GEMINI_API_KEY is active
+    if not audio_bytes:
+        gem_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("VITE_GEMINI_API_KEY") or "").strip()
+        if gem_key:
+            gem_res = _vg_tts_gemini(clean_text, gem_key)
+            if gem_res:
+                audio_bytes, media_type = gem_res
+                engine = "gemini-algenib"
+
+    # Tier 4: Guaranteed Vercel-free Deep Male Neural TTS (en-US-EricNeural / ChristopherNeural -22Hz)
+    if not audio_bytes:
+        edge_res = await _vg_tts_edge(clean_text)
+        if edge_res:
+            audio_bytes, media_type, engine = edge_res
+
+    if not audio_bytes:
+        raise HTTPException(status_code=503, detail="Vegeta TTS synthesis unavailable")
+
+    if len(_VEGETA_TTS_CACHE) >= 48:
+        _VEGETA_TTS_CACHE.pop(next(iter(_VEGETA_TTS_CACHE)), None)
+    _VEGETA_TTS_CACHE[cache_key] = (audio_bytes, media_type, engine)
+
+    return Response(
+        content=audio_bytes,
+        media_type=media_type,
+        headers={
+            "X-Vegeta-Engine": engine,
+            "Access-Control-Expose-Headers": "X-Vegeta-Engine",
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+@router.post("/ai/voice-transcribe")
+async def ai_voice_transcribe(req: Request):
+    """Universal mobile voice-search transcription fallback (Gemini Audio / Whisper) when Web Speech API is unavailable."""
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+
+    b64_raw = str(body.get("audio") or "").strip()
+    if not b64_raw:
+        raise HTTPException(status_code=400, detail="Audio payload is required")
+    mime_type = str(body.get("mimeType") or "audio/webm").split(";")[0].strip() or "audio/webm"
+    if "," in b64_raw:
+        header, b64_data = b64_raw.split(",", 1)
+        m_mime = re.search(r"data:([^;]+)", header)
+        if m_mime:
+            mime_type = m_mime.group(1)
+    else:
+        b64_data = b64_raw
+
+    try:
+        audio_bytes = base64.b64decode(b64_data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid audio encoding")
+    if len(audio_bytes) < 500 or len(audio_bytes) > 6 * 1024 * 1024:
+        return {"ok": False, "text": ""}
+
+    gem_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("VITE_GEMINI_API_KEY") or "").strip()
+    if gem_key and not gem_key.startswith("0x"):
+        for model in ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"):
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gem_key}"
+                payload = {
+                    "contents": [{
+                        "parts": [
+                            {"inlineData": {"mimeType": mime_type, "data": base64.b64encode(audio_bytes).decode("ascii")}},
+                            {"text": "Transcribe ONLY the exact spoken words or anime title from this short voice search clip. Return plain text only with no quotes, punctuation filler, or explanation. If silent or unintelligible, return empty string."},
+                        ]
+                    }],
+                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 60},
+                }
+                res = _STREAM_SESSION.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+                if res.ok:
+                    parts = (((res.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+                    txt = " ".join(str(p.get("text") or "") for p in parts).strip().strip('"\'.,!?')
+                    return {"ok": True, "text": txt, "engine": model}
+            except Exception:
+                continue
+
+    # Optional HF Inference Whisper fallback if HF_TOKEN is set
+    hf_token = (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN") or "").strip()
+    if hf_token:
+        try:
+            hr = _STREAM_SESSION.post(
+                "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo",
+                headers={"Authorization": f"Bearer {hf_token}", "Content-Type": mime_type},
+                data=audio_bytes,
+                timeout=12,
+            )
+            if hr.ok:
+                txt = str((hr.json() or {}).get("text") or "").strip().strip('"\'.,!?')
+                return {"ok": True, "text": txt, "engine": "hf-whisper"}
+        except Exception:
+            pass
+
+    return {"ok": False, "text": "", "error": "transcription_unavailable"}
 
 
 # ─── Episode & Anime Discussion System (Google Auth Restricted) ─────
