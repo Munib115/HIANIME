@@ -73,6 +73,7 @@ import {
   ArrowLeft, 
   Layers, 
   Volume2, 
+  VolumeX,
   Shield, 
   ShieldCheck,
   ShieldAlert,
@@ -82,7 +83,6 @@ import {
   ChevronRight, 
   ChevronLeft,
   RotateCcw,
-  Sparkles,
   Film,
   Bell,
   ExternalLink,
@@ -96,7 +96,12 @@ import {
   Copy,
   ChevronDown,
   Info,
-  Mic
+  Mic,
+  WifiOff,
+  ImagePlus,
+  Send,
+  MessageSquare,
+  Square
 } from 'lucide';
 
 // ─── Global State & Storage ─────────────────────────────────────────
@@ -207,11 +212,15 @@ let API_BASE = resolveApiBase();
 // ─── Lucide Icons Initializer ───────────────────────────────────────
 function refreshIcons() {
   createIcons({
+    attrs: {
+      'stroke-width': 1.5
+    },
     icons: {
       Home, Compass, Search, Bookmark, Play, Star, ArrowLeft,
-      Layers, Volume2, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
-      ChevronLeft, RotateCcw, Sparkles, Film, Bell, ExternalLink, Download, Plus,
-      User, Settings, LogOut, Trash2, Share2, Copy, ChevronDown, Info, Mic
+      Layers, Volume2, VolumeX, Shield, ShieldCheck, ShieldAlert, Clock, Check, X, ChevronRight,
+      ChevronLeft, RotateCcw, Film, Bell, ExternalLink, Download, Plus,
+      User, Settings, LogOut, Trash2, Share2, Copy, ChevronDown, Info, Mic,
+      WifiOff, ImagePlus, Send, MessageSquare, Square
     }
   });
 }
@@ -523,7 +532,7 @@ function switchTab(tabName) {
     showView('view-home');
     updatePageSeo({
       title: 'KuroAnime — Stream Anime in Sub & Dub',
-      description: 'Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface.',
+      description: 'Stream thousands of anime in English Sub and Dub with multi-server playback, ratings, and synced watchlists.',
       path: '/'
     });
   } else if (state.currentTab === 'browse') {
@@ -594,7 +603,7 @@ function toggleWatchlist(anime) {
       added_at: Date.now()
     };
     state.watchlist.unshift(item);
-    showToast(`Added to Watchlist!`);
+    showToast('Added to Watchlist');
     saveLibraryItemToCloud(item, true);
   }
   localStorage.setItem('kuro_watchlist', JSON.stringify(state.watchlist));
@@ -959,7 +968,7 @@ function renderPlayerFrameSkeleton() {
 function updatePageSeo(options = {}) {
   const {
     title = 'KuroAnime — Stream Anime in Sub & Dub',
-    description = 'Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface.',
+    description = 'Stream thousands of anime in English Sub and Dub with multi-server playback, ratings, and synced watchlists.',
     image = 'https://kuroanime-flax.vercel.app/goku-banner.jpg',
     path = window.location.pathname || '/',
     type = 'website',
@@ -1246,7 +1255,7 @@ function renderHeroContent(index) {
 
   // Build metadata tokens
   const metaParts = [];
-  if (score) metaParts.push(`<span class="score">★ ${score}</span>`);
+  if (score) metaParts.push(`<span class="score"><i data-lucide="star"></i> ${score}</span>`);
   if (year) metaParts.push(`<span>${year}</span>`);
   if (type) metaParts.push(`<span>${type}</span>`);
   if (eps) metaParts.push(`<span>${eps}</span>`);
@@ -2235,7 +2244,7 @@ async function openShareModal({ anime, episode = null, currentTime = 0, autoCopy
   const hasEp = episode && (episode.episode_number !== undefined || episode.number !== undefined);
   if (hasEp) {
     const epNum = episode.episode_number !== undefined ? episode.episode_number : episode.number;
-    if (captionEl) captionEl.textContent = 'SHARE EPISODE';
+    if (captionEl) captionEl.textContent = 'Share episode';
     if (subEl) subEl.textContent = `Episode ${epNum}${episode.title ? `: ${episode.title}` : ''}`;
     
     if (timePanel) {
@@ -2249,7 +2258,7 @@ async function openShareModal({ anime, episode = null, currentTime = 0, autoCopy
       }
     }
   } else {
-    if (captionEl) captionEl.textContent = 'SHARE ANIME';
+    if (captionEl) captionEl.textContent = 'Share anime';
     const epCount = anime.episode_count || anime.al_episodes || (state.activeEpisodes && state.activeEpisodes.length) || 0;
     if (subEl) subEl.textContent = `${anime.type || 'TV'}${epCount ? ` · ${epCount} Episodes` : ''} · Sub & Dub`;
     if (timePanel) timePanel.style.display = 'none';
@@ -2269,7 +2278,7 @@ async function openShareModal({ anime, episode = null, currentTime = 0, autoCopy
     const copied = await copyTextToClipboard(shareUrl);
     if (copied) {
       if (copyBtn) {
-        copyBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+        copyBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied</span>';
         refreshIcons();
         setTimeout(() => {
           if (copyBtn) {
@@ -2278,7 +2287,7 @@ async function openShareModal({ anime, episode = null, currentTime = 0, autoCopy
           }
         }, 2500);
       }
-      showToast(isTimeIncluded ? `Link copied with timestamp (${formatTimestamp(validCurrentTime)})!` : 'Link copied to clipboard!');
+      showToast(isTimeIncluded ? `Link copied with timestamp (${formatTimestamp(validCurrentTime)})` : 'Link copied to clipboard');
     }
   }
 }
@@ -2319,7 +2328,7 @@ function initShareModalListeners() {
   urlInput?.addEventListener('click', async () => {
     urlInput.select();
     const ok = await copyTextToClipboard(urlInput.value);
-    if (ok) showToast('Link copied to clipboard!');
+    if (ok) showToast('Link copied to clipboard');
   });
 
   // Copy Link Button
@@ -2329,9 +2338,9 @@ function initShareModalListeners() {
     const url = computeShareUrl(isChecked);
     const ok = await copyTextToClipboard(url);
     if (ok) {
-      copyBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+      copyBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied</span>';
       refreshIcons();
-      showToast('Link copied to clipboard!');
+      showToast('Link copied to clipboard');
       setTimeout(() => {
         if (copyBtn) {
           copyBtn.innerHTML = '<i data-lucide="copy"></i> <span id="btn-copy-share-label">Copy</span>';
@@ -2340,7 +2349,7 @@ function initShareModalListeners() {
       }, 2000);
     } else {
       urlInput?.select();
-      showToast('Please copy link manually');
+      showToast('Select link to copy manually');
     }
   });
 
@@ -2366,9 +2375,9 @@ ${url}`;
 
     const ok = await copyTextToClipboard(text);
     if (ok) {
-      copyInfoBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+      copyInfoBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied</span>';
       refreshIcons();
-      showToast('Share info copied to clipboard!');
+      showToast('Share details copied');
       setTimeout(() => {
         if (copyInfoBtn) {
           copyInfoBtn.innerHTML = '<i data-lucide="copy"></i> <span id="btn-copy-info-label">Copy Info</span>';
@@ -2404,12 +2413,12 @@ ${url}`;
       } catch (err) {
         if (err.name !== 'AbortError') {
           await copyTextToClipboard(url);
-          showToast('Link copied to clipboard!');
+          showToast('Link copied to clipboard');
         }
       }
     } else {
       await copyTextToClipboard(url);
-      showToast('Link copied to clipboard!');
+      showToast('Link copied to clipboard');
     }
   });
 }
@@ -2442,13 +2451,13 @@ async function requestNotificationPermission() {
 
   if (Notification.permission === 'granted') {
     localStorage.setItem('kuro_episode_notifications', 'true');
-    showToast('✓ Episode notifications are active');
+    showToast('Episode notifications active');
     updateNotificationUI();
     return true;
   }
 
   if (Notification.permission === 'denied') {
-    showToast('Notifications are blocked in your browser settings. Please enable them to get episode alerts.');
+    showToast('Notifications are blocked in your browser settings.');
     return false;
   }
 
@@ -2456,12 +2465,12 @@ async function requestNotificationPermission() {
     const result = await Notification.requestPermission();
     if (result === 'granted') {
       localStorage.setItem('kuro_episode_notifications', 'true');
-      showToast('✓ Browser alerts enabled for new episodes!');
+      showToast('Browser alerts enabled for new episodes');
       updateNotificationUI();
 
       try {
-        const notif = new Notification('KuroAnime Alerts Enabled 🎬', {
-          body: 'You will receive desktop alerts right here whenever new episodes drop!',
+        const notif = new Notification('KuroAnime Alerts Enabled', {
+          body: 'Desktop alerts will appear here when new episodes air.',
           icon: '/favicon.svg',
           badge: '/favicon.svg',
           tag: 'kuro-welcome-notif'
@@ -2549,8 +2558,8 @@ function showInAppNewEpisodeBanner({ animeId, animeTitle, episodeNumber, posterU
 function notifyNewEpisode({ animeId, animeTitle, episodeNumber, posterUrl }) {
   if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' && isEpisodeNotificationEnabled()) {
     try {
-      const notif = new Notification(`New Episode Available! 🎬`, {
-        body: `${animeTitle} Episode ${episodeNumber} is now streaming on KuroAnime. Click to watch now!`,
+      const notif = new Notification('New Episode Available', {
+        body: `${animeTitle} Episode ${episodeNumber} is now streaming on KuroAnime.`,
         icon: posterUrl || '/favicon.svg',
         badge: '/favicon.svg',
         tag: `kuro-ep-release-${animeId}-${episodeNumber}`,
@@ -2700,14 +2709,13 @@ async function startAnimeTrailer(anime, triggerBtn) {
     return;
   }
 
-  const originalTriggerHtml = triggerBtn ? triggerBtn.innerHTML : '';
-  if (triggerBtn) {
-    triggerBtn.innerHTML = `<span class="yt-skel-spinner" style="width:13px;height:13px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin 0.8s linear infinite;margin-right:6px;"></span><span>Loading...</span>`;
-    triggerBtn.disabled = true;
-  }
-
   let trailerId = anime?.trailer_id;
   if (!trailerId) {
+    const originalTriggerHtml = triggerBtn ? triggerBtn.innerHTML : '';
+    if (triggerBtn) {
+      triggerBtn.innerHTML = `<span>Loading...</span>`;
+      triggerBtn.disabled = true;
+    }
     try {
       const res = await fetchApi(`/anime/${anime.id || anime.anime_id}/trailer`);
       if (res && res.ok && res.trailer_id) {
@@ -2717,12 +2725,11 @@ async function startAnimeTrailer(anime, triggerBtn) {
     } catch (e) {
       console.warn('Failed to fetch anime trailer:', e);
     }
-  }
-
-  if (triggerBtn) {
-    triggerBtn.disabled = false;
-    triggerBtn.innerHTML = originalTriggerHtml;
-    refreshIcons();
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.innerHTML = originalTriggerHtml;
+      refreshIcons();
+    }
   }
 
   if (!trailerId) {
@@ -2742,9 +2749,12 @@ async function startAnimeTrailer(anime, triggerBtn) {
     refreshIcons();
   }
 
+  const originParam = typeof window !== 'undefined' && window.location?.origin
+    ? `&origin=${encodeURIComponent(window.location.origin)}`
+    : '';
   const iframe = document.createElement('iframe');
   iframe.className = 'detail-trailer-iframe';
-  iframe.src = `https://www.youtube.com/embed/${trailerId}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
+  iframe.src = `https://www.youtube.com/embed/${trailerId}?autoplay=1&playsinline=1&rel=0&modestbranding=1${originParam}`;
   iframe.title = `${escapeHtmlText(anime.title || 'Anime')} Trailer`;
   iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
   iframe.allowFullscreen = true;
@@ -2913,7 +2923,7 @@ async function openAnimeDetail(animeIdOrSlug, autoPlayFirst = false, startEpInde
         "name": `How many episodes are there in ${combinedTitle}?`,
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": `${combinedTitle} has ${totalEpisodeCount || 'multiple'} episodes available for instant streaming on KuroAnime.`
+          "text": `${combinedTitle} has ${totalEpisodeCount || 'multiple'} episodes available to stream on KuroAnime.`
         }
       },
       {
@@ -3117,7 +3127,7 @@ async function openAnimeDetail(animeIdOrSlug, autoPlayFirst = false, startEpInde
                 <i data-lucide="chevron-down" class="kuro-faq-chevron"></i>
               </summary>
               <div class="kuro-faq-body">
-                ${escapeHtmlText(anime.title)} features ${totalEps || 'multiple'} episodes available for instant streaming. Use the episode selector buttons above to browse and watch any episode.
+                ${escapeHtmlText(anime.title)} features ${totalEps || 'multiple'} episodes available to stream. Use the episode selector above to browse and watch any episode.
               </div>
             </details>
             <details class="kuro-faq-item">
@@ -3126,7 +3136,7 @@ async function openAnimeDetail(animeIdOrSlug, autoPlayFirst = false, startEpInde
                 <i data-lucide="chevron-down" class="kuro-faq-chevron"></i>
               </summary>
               <div class="kuro-faq-body">
-                Yes! KuroAnime provides high-speed streaming without mandatory subscription paywalls. Bookmark this anime to your personal Watchlist to track your progress and resume anytime.
+                Yes. KuroAnime provides free multi-server playback without subscription paywalls. Bookmark any series to your Watchlist to keep your place across sessions.
               </div>
             </details>
           </div>
@@ -3213,7 +3223,7 @@ async function openAnimeDetail(animeIdOrSlug, autoPlayFirst = false, startEpInde
       const shareBtn = e.currentTarget;
       const originalHtml = shareBtn ? shareBtn.innerHTML : '';
       if (shareBtn) {
-        shareBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+        shareBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied</span>';
         refreshIcons();
         setTimeout(() => {
           if (shareBtn) {
@@ -3565,7 +3575,7 @@ async function openWatchPlayer(episodeIndex, targetTime = 0) {
     const shareBtn = e.currentTarget;
     const originalHtml = shareBtn ? shareBtn.innerHTML : '';
     if (shareBtn) {
-      shareBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied!</span>';
+      shareBtn.innerHTML = '<i data-lucide="check"></i> <span>Copied</span>';
       refreshIcons();
       setTimeout(() => {
         if (shareBtn) {
@@ -5259,7 +5269,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('.icon-copy-check').forEach(el => el.style.display = 'block');
       if (copyWalletText) copyWalletText.textContent = 'Copied';
 
-      showToast('BNB Smart Chain address copied!');
+      showToast('BNB Smart Chain address copied');
 
       setTimeout(() => {
         document.querySelectorAll('#btn-copy-wallet, #wallet-card-box').forEach(el => el.classList.remove('copied'));
@@ -5447,24 +5457,24 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!active) {
         document.querySelectorAll('.vegeta-bubble-speak-btn.speaking').forEach(btn => {
           btn.classList.remove('speaking');
-          const icon = btn.querySelector('.material-symbols-rounded');
-          if (icon) icon.textContent = 'volume_up';
+          btn.innerHTML = '<i data-lucide="volume-2"></i> Hear Vegeta';
         });
+        refreshIcons();
       }
     },
 
     updateVoiceToggleUI() {
       if (!vegetaVoiceBtn) return;
-      const icon = vegetaVoiceBtn.querySelector('.material-symbols-rounded');
       if (this.enabled) {
         vegetaVoiceBtn.classList.add('active');
         vegetaVoiceBtn.title = 'Vegeta Voice: ON (Click to Mute)';
-        if (icon) icon.textContent = 'volume_up';
+        vegetaVoiceBtn.innerHTML = '<i data-lucide="volume-2"></i>';
       } else {
         vegetaVoiceBtn.classList.remove('active');
-        vegetaVoiceBtn.title = 'Vegeta Voice: MUTED (Click to Enable)';
-        if (icon) icon.textContent = 'volume_off';
+        vegetaVoiceBtn.title = 'Vegeta Voice: Muted (Click to Enable)';
+        vegetaVoiceBtn.innerHTML = '<i data-lucide="volume-x"></i>';
       }
+      refreshIcons();
     }
   };
 
@@ -5503,7 +5513,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleVegetaChat(false);
   });
 
-  // Markdown renderer for Vegeta's formatted output with Material You icons & Action Cards
+  // Markdown renderer for Vegeta's formatted output with Lucide icons & Action Cards
   function renderVegetaMarkdown(raw) {
     if (!raw) return '';
     let text = raw
@@ -5521,7 +5531,7 @@ document.addEventListener('DOMContentLoaded', () => {
     text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 
     // Star rating highlight: ★ [Score]
-    text = text.replace(/★\s*([\d\.]+(?:\/10)?(?:\s*\([^\)]+\))?)/g, '<span class="vegeta-star-pill">★ $1</span>');
+    text = text.replace(/★\s*([\d\.]+(?:\/10)?(?:\s*\([^\)]+\))?)/g, '<span class="vegeta-star-pill"><i data-lucide="star"></i> $1</span>');
 
     // Watch Links & Action Cards: [▶ Watch on KuroAnime](#anime/123) or [Watch on KuroAnime](#anime/123?ep=5)
     text = text.replace(/\[([^\]]+)\]\(#anime\/(\d+)(?:\?ep=(\d+))?\)/g, (match, label, animeId, epParam) => {
@@ -5540,17 +5550,17 @@ document.addEventListener('DOMContentLoaded', () => {
       return `
         <div class="vegeta-action-card" data-anime-id="${animeId}">
           <button type="button" class="vegeta-action-btn-play" data-anime-id="${animeId}"${dataEpAttr} title="Play on KuroAnime">
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg> ${resumeLabel}
+            <i data-lucide="play"></i> ${resumeLabel}
           </button>
           <button type="button" class="vegeta-action-btn-detail" data-anime-id="${animeId}" title="Show Details">
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg> Details
+            <i data-lucide="info"></i> Details
           </button>
         </div>
       `;
     });
 
     // Handle quote blocks: > Quote
-    text = text.replace(/^>\s*(.*?)$/gm, '<blockquote style="border-left: 2px solid #FF2A4D; padding-left: 8px; margin: 6px 0; color: #94A3B8; font-size: 0.72rem;">$1</blockquote>');
+    text = text.replace(/^>\s*(.*?)$/gm, '<blockquote class="vegeta-blockquote">$1</blockquote>');
 
     // Split paragraphs
     const paragraphs = text.split(/\n{2,}/).map(p => {
@@ -5598,7 +5608,7 @@ document.addEventListener('DOMContentLoaded', () => {
       footer.className = 'vegeta-bubble-footer';
       footer.innerHTML = `
         <button type="button" class="vegeta-bubble-speak-btn" title="Hear Prince Vegeta speak">
-          <span class="material-symbols-rounded">volume_up</span> Hear Vegeta
+          <i data-lucide="volume-2"></i> Hear Vegeta
         </button>
       `;
       bubble.appendChild(footer);
@@ -5610,20 +5620,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (VegetaVoice.isSpeaking && speakBtn.classList.contains('speaking')) {
           VegetaVoice.stop();
           speakBtn.classList.remove('speaking');
-          const icon = speakBtn.querySelector('.material-symbols-rounded');
-          if (icon) icon.textContent = 'volume_up';
+          speakBtn.innerHTML = '<i data-lucide="volume-2"></i> Hear Vegeta';
+          refreshIcons();
         } else {
           document.querySelectorAll('.vegeta-bubble-speak-btn.speaking').forEach(b => {
             b.classList.remove('speaking');
-            const icon = b.querySelector('.material-symbols-rounded');
-            if (icon) icon.textContent = 'volume_up';
+            b.innerHTML = '<i data-lucide="volume-2"></i> Hear Vegeta';
           });
           speakBtn.classList.add('speaking');
-          const icon = speakBtn.querySelector('.material-symbols-rounded');
-          if (icon) icon.textContent = 'stop';
+          speakBtn.innerHTML = '<i data-lucide="square"></i> Stop';
+          refreshIcons();
           VegetaVoice.speak(content, () => {
             speakBtn.classList.remove('speaking');
-            if (icon) icon.textContent = 'volume_up';
+            speakBtn.innerHTML = '<i data-lucide="volume-2"></i> Hear Vegeta';
+            refreshIcons();
           });
         }
       });
@@ -5674,6 +5684,7 @@ document.addEventListener('DOMContentLoaded', () => {
     row.appendChild(bubble);
     vegetaMessagesBox.appendChild(row);
     vegetaMessagesBox.scrollTop = vegetaMessagesBox.scrollHeight;
+    refreshIcons();
 
     // Automatically speak bot replies if Vegeta voice is enabled
     if (role === 'bot' && VegetaVoice.enabled && shouldSpeak) {
@@ -5736,7 +5747,7 @@ document.addEventListener('DOMContentLoaded', () => {
             vegetaAttachedImageBase64 = ev.target.result;
             if (vegetaPreviewImg) vegetaPreviewImg.src = vegetaAttachedImageBase64;
             if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'flex';
-            showToast('Anime screenshot attached from clipboard!');
+            showToast('Screenshot attached from clipboard');
           };
           reader.readAsDataURL(file);
           break;
@@ -5761,7 +5772,7 @@ document.addEventListener('DOMContentLoaded', () => {
         vegetaAttachedImageBase64 = ev.target.result;
         if (vegetaPreviewImg) vegetaPreviewImg.src = vegetaAttachedImageBase64;
         if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'flex';
-        showToast('Anime screenshot attached!');
+        showToast('Screenshot attached');
       };
       reader.readAsDataURL(files[0]);
     }
@@ -5892,7 +5903,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!isWatchlisted(aid)) {
             toggleWatchlist(item);
           } else {
-            showToast(`${a.title || 'Anime'} is already in your list!`);
+            showToast(`${a.title || 'Anime'} is already in your list`);
           }
         }
       } else if (a.type === 'remove_from_list') {
@@ -6107,7 +6118,7 @@ document.addEventListener('DOMContentLoaded', () => {
           handleAgenticActions(allActions);
         }
       } else {
-        const fallbackMsg = 'Hmph! Even the Prince of Saiyans got no answer from this archive. Try another genre, warrior!';
+        const fallbackMsg = 'No close match found in this catalog. Try another title or genre.';
         appendVegetaMessage('bot', fallbackMsg);
         saveVegetaChatMessageToCloud({
           role: 'model',
@@ -6117,7 +6128,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Vegeta Advisor error:', err);
       if (vegetaTypingIndicator) vegetaTypingIndicator.style.display = 'none';
-      appendVegetaMessage('bot', 'Tch! A temporary signal disruption stood in my way. Ask me again, warrior!');
+      appendVegetaMessage('bot', 'A temporary connection error interrupted the lookup. Ask again in a moment.');
     }
   }
 
@@ -6226,7 +6237,7 @@ function initUserMenuAndSettings() {
       }
     } else {
       if (userDisplayName) userDisplayName.textContent = 'Guest';
-      if (userDisplayStatus) userDisplayStatus.textContent = 'Ad-free streaming';
+      if (userDisplayStatus) userDisplayStatus.textContent = 'Local session';
       if (userStatusDot) {
         userStatusDot.classList.add('guest');
       }
@@ -6301,7 +6312,7 @@ function initUserMenuAndSettings() {
       if (session?.user) {
         applySupabaseUser(session.user);
         if (event === 'SIGNED_IN') {
-          showToast(`Welcome! Signed in as ${session.user.user_metadata?.full_name || session.user.email}`);
+          showToast(`Signed in as ${session.user.user_metadata?.full_name || session.user.email}`);
         }
       } else if (event === 'SIGNED_OUT') {
         applySupabaseUser(null);
@@ -6732,7 +6743,7 @@ function initSyncModal() {
         codeSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
 
-      showToast(`Share code ${res.code} generated successfully!`);
+      showToast(`Share code ${res.code} generated`);
     } catch (e) {
       console.error('[Sync Generation Error]', e);
       showToast('Failed to generate sync code');
@@ -6749,7 +6760,7 @@ function initSyncModal() {
     if (!code) return;
     const ok = await copyTextToClipboard(code);
     if (ok) {
-      if (btnCopyCodeLabel) btnCopyCodeLabel.textContent = 'Copied!';
+      if (btnCopyCodeLabel) btnCopyCodeLabel.textContent = 'Copied';
       showToast(`Code ${code} copied to clipboard`);
       setTimeout(() => {
         if (btnCopyCodeLabel) btnCopyCodeLabel.textContent = 'Copy';
@@ -6765,7 +6776,7 @@ function initSyncModal() {
     if (!url) return;
     const ok = await copyTextToClipboard(url);
     if (ok) {
-      btnCopyLink.textContent = 'Copied!';
+      btnCopyLink.textContent = 'Copied';
       showToast('Direct sync link copied to clipboard');
       setTimeout(() => {
         btnCopyLink.textContent = 'Copy Link';
@@ -6921,7 +6932,7 @@ function initSyncModal() {
       updateWatchlistBadge();
       renderWatchlist();
 
-      showToast(`Successfully synced ${res.libraryCount} anime from ${res.authorName}!`);
+      showToast(`Synced ${res.libraryCount} anime from ${res.authorName}`);
       closeModal();
     } catch (e) {
       showToast('Sync error occurred');

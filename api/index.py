@@ -935,15 +935,98 @@ MUNIB_CARD_COLS = """anime_id, title, title_english, title_romaji, type, status,
 def clean_youtube_trailer_id(raw_id: str):
     if not raw_id:
         return None
-    m = re.search(r"[a-zA-Z0-9_-]{11}", str(raw_id))
+    s = str(raw_id).strip()
+    m_embed = re.search(r"(?:embed/|v=|youtu\.be/)([a-zA-Z0-9_-]{11})", s)
+    if m_embed:
+        return m_embed.group(1)
+    m = re.search(r"^[a-zA-Z0-9_-]{11}$", s) or re.search(r"[a-zA-Z0-9_-]{11}", s)
     return m.group(0) if m else None
 
 
-def resolve_trailer_id(anilist_id=None, title=None):
+def _lookup_cached_trailer(anime_id: int, anilist_id=None):
+    try:
+        t_row = one("SELECT trailer_id, site FROM anime_trailers WHERE anime_id = ?", (anime_id,))
+        if t_row and t_row.get("trailer_id"):
+            cid = clean_youtube_trailer_id(t_row["trailer_id"])
+            if cid:
+                return cid, (t_row.get("site") or "youtube")
+    except Exception:
+        pass
+    try:
+        m_rows_t = munib_rows("SELECT trailer_id, site FROM anime_trailers WHERE anime_id = ?", (anime_id,))
+        if m_rows_t and m_rows_t[0].get("trailer_id"):
+            cid = clean_youtube_trailer_id(m_rows_t[0]["trailer_id"])
+            if cid:
+                return cid, (m_rows_t[0].get("site") or "youtube")
+    except Exception:
+        pass
+    if anilist_id:
+        try:
+            t_al = one("""
+                SELECT t.trailer_id, t.site
+                FROM anime_trailers t
+                JOIN anime a ON a.anime_id = t.anime_id
+                WHERE a.anilist_id = ? AND t.trailer_id IS NOT NULL AND t.trailer_id != ''
+                LIMIT 1
+            """, (int(anilist_id),))
+            if t_al and t_al.get("trailer_id"):
+                cid = clean_youtube_trailer_id(t_al["trailer_id"])
+                if cid:
+                    return cid, (t_al.get("site") or "youtube")
+        except Exception:
+            pass
+        try:
+            m_al = munib_rows("""
+                SELECT t.trailer_id, t.site
+                FROM anime_trailers t
+                JOIN anime a ON a.anime_id = t.anime_id
+                WHERE a.anilist_id = ? AND t.trailer_id IS NOT NULL AND t.trailer_id != ''
+                LIMIT 1
+            """, (int(anilist_id),))
+            if m_al and m_al[0].get("trailer_id"):
+                cid = clean_youtube_trailer_id(m_al[0]["trailer_id"])
+                if cid:
+                    return cid, (m_al[0].get("site") or "youtube")
+        except Exception:
+            pass
+    return None, None
+
+
+def _search_youtube_innertube_trailer(query_title: str):
+    if not query_title:
+        return None
+    try:
+        yt_url = (
+            "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
+            "&fields=contents.twoColumnSearchResultsRenderer.primaryContents.sectionListRenderer.contents.itemSectionRenderer.contents.videoRenderer.videoId"
+        )
+        r = _requests.post(
+            yt_url,
+            json={
+                "context": {"client": {"clientName": "WEB", "clientVersion": "2.20241114.01.00", "hl": "en", "gl": "US"}},
+                "query": f"{query_title} official anime trailer PV"
+            },
+            timeout=3.5
+        )
+        if r.status_code == 200:
+            matches = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', r.text)
+            if matches:
+                return matches[0]
+    except Exception:
+        pass
+    return None
+
+
+def resolve_trailer_id(anilist_id=None, title=None, alt_titles=None):
+    candidate_titles = []
+    for t in ([title] + (list(alt_titles) if alt_titles else [])):
+        if t and str(t).strip() and str(t).strip() not in candidate_titles:
+            candidate_titles.append(str(t).strip())
+
     if anilist_id:
         try:
             q = "query ($id: Int) { Media(id: $id, type: ANIME) { trailer { id site } } }"
-            r = _requests.post("https://graphql.anilist.co", json={"query": q, "variables": {"id": int(anilist_id)}}, timeout=4)
+            r = _requests.post("https://graphql.anilist.co", json={"query": q, "variables": {"id": int(anilist_id)}}, timeout=3)
             if r.status_code == 200:
                 tr = r.json().get("data", {}).get("Media", {}).get("trailer")
                 if tr and tr.get("site") == "youtube" and tr.get("id"):
@@ -953,27 +1036,21 @@ def resolve_trailer_id(anilist_id=None, title=None):
         except Exception:
             pass
 
-    if title:
-        try:
-            q = "query ($search: String) { Media(search: $search, type: ANIME) { trailer { id site } } }"
-            r = _requests.post("https://graphql.anilist.co", json={"query": q, "variables": {"search": title}}, timeout=4)
-            if r.status_code == 200:
-                tr = r.json().get("data", {}).get("Media", {}).get("trailer")
-                if tr and tr.get("site") == "youtube" and tr.get("id"):
-                    cid = clean_youtube_trailer_id(tr["id"])
-                    if cid:
-                        return cid
-        except Exception:
-            pass
+    # Fast YouTube InnerTube API search (946-byte field-filtered JSON, ~200ms)
+    for cand in candidate_titles[:2]:
+        cid = _search_youtube_innertube_trailer(cand)
+        if cid:
+            return cid
 
-    if title:
+    for cand in candidate_titles[:2]:
         try:
-            enc = urllib.parse.quote(title)
-            r = _requests.get(f"https://api.jikan.moe/v4/anime?q={enc}&limit=1", timeout=4)
+            enc = urllib.parse.quote(cand)
+            r = _requests.get(f"https://api.jikan.moe/v4/anime?q={enc}&limit=1", timeout=3.5)
             if r.status_code == 200:
                 d = r.json().get("data", [])
                 if d and isinstance(d, list) and len(d) > 0:
-                    yt_id = d[0].get("trailer", {}).get("youtube_id")
+                    tr_obj = d[0].get("trailer") or {}
+                    yt_id = tr_obj.get("youtube_id") or tr_obj.get("embed_url") or tr_obj.get("url")
                     if yt_id:
                         cid = clean_youtube_trailer_id(yt_id)
                         if cid:
@@ -981,21 +1058,22 @@ def resolve_trailer_id(anilist_id=None, title=None):
         except Exception:
             pass
 
-    if title:
+    for cand in candidate_titles[:1]:
         try:
-            enc = urllib.parse.quote(f"{title} official anime trailer")
+            enc = urllib.parse.quote(f"{cand} official anime trailer")
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cookie": "SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg"
             }
-            r = _requests.get(f"https://www.youtube.com/results?search_query={enc}", headers=headers, timeout=4)
+            r = _requests.get(f"https://www.youtube.com/results?search_query={enc}", headers=headers, timeout=3.5)
             if r.status_code == 200:
-                matches = re.findall(r"/watch\?v=([a-zA-Z0-9_-]{11})", r.text)
-                if matches:
-                    return matches[0]
                 json_matches = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', r.text)
                 if json_matches:
                     return json_matches[0]
+                matches = re.findall(r"/watch\?v=([a-zA-Z0-9_-]{11})", r.text)
+                if matches:
+                    return matches[0]
         except Exception:
             pass
 
@@ -1015,6 +1093,10 @@ def anime_detail(anime_ident: str):
         a["seasons"] = []
         a.update(audio_flags([anime_id]).get(anime_id, {"sub": True, "dub": False}))
         a["slug"] = get_anime_slug(anime_id, a.get("title_english") or a.get("title") or "")
+        tid, tsite = _lookup_cached_trailer(anime_id, a.get("anilist_id"))
+        if tid:
+            a["trailer_id"] = tid
+            a["trailer_site"] = tsite or "youtube"
         return a
     a["poster"] = a.get("poster_large") or a.get("poster_url")
     a["seasons"] = rows("""
@@ -1027,13 +1109,10 @@ def anime_detail(anime_ident: str):
         s["season_slug"] = get_anime_slug(s["season_anime_id"], s.get("season_name") or "")
     a.update(audio_flags([anime_id]).get(anime_id, {}))
     a["slug"] = get_anime_slug(anime_id, a.get("title_english") or a.get("title") or "")
-    try:
-        t_row = one("SELECT trailer_id, site FROM anime_trailers WHERE anime_id = ?", (anime_id,))
-        if t_row and t_row.get("trailer_id"):
-            a["trailer_id"] = clean_youtube_trailer_id(t_row["trailer_id"])
-            a["trailer_site"] = t_row.get("site") or "youtube"
-    except Exception:
-        pass
+    tid, tsite = _lookup_cached_trailer(anime_id, a.get("anilist_id"))
+    if tid:
+        a["trailer_id"] = tid
+        a["trailer_site"] = tsite or "youtube"
     a.pop("seasons_json", None)
     return a
 
@@ -1042,51 +1121,52 @@ def anime_detail(anime_ident: str):
 @router.get("/anime/{anime_ident}/trailer")
 def anime_trailer(anime_ident: str):
     anime_id = _resolve_anime_id(anime_ident)
-    # 1. Check local anime_trailers table
-    try:
-        t_row = one("SELECT trailer_id, site FROM anime_trailers WHERE anime_id = ?", (anime_id,))
-        if t_row and t_row.get("trailer_id"):
-            tid = clean_youtube_trailer_id(t_row["trailer_id"])
-            if tid:
-                return {
-                    "ok": True,
-                    "anime_id": anime_id,
-                    "trailer_id": tid,
-                    "site": t_row.get("site") or "youtube",
-                    "embed_url": f"https://www.youtube.com/embed/{tid}?autoplay=1&playsinline=1&rel=0&modestbranding=1"
-                }
-    except Exception:
-        pass
-
-    # 2. Get anime record
-    a = one("SELECT anime_id, title, title_english, anilist_id FROM anime WHERE anime_id = ?", (anime_id,))
+    # 1. Get anime record from either Server 1 (hianime.db) or Server 2 (munib_server.db)
+    a = one("SELECT anime_id, title, title_english, title_romaji, anilist_id FROM anime WHERE anime_id = ?", (anime_id,))
+    is_munib_only = False
     if not a:
-        m_list = munib_rows("SELECT anime_id, title, title_english, anilist_id FROM anime WHERE anime_id = ?", (anime_id,))
+        m_list = munib_rows("SELECT anime_id, title, title_english, title_romaji, anilist_id FROM anime WHERE anime_id = ?", (anime_id,))
         a = m_list[0] if m_list else None
+        is_munib_only = True
+
+    # 2. Check cached anime_trailers across both DBs (and by anilist_id)
+    tid, tsite = _lookup_cached_trailer(anime_id, a.get("anilist_id") if a else None)
+    if tid:
+        return {
+            "ok": True,
+            "anime_id": anime_id,
+            "trailer_id": tid,
+            "site": tsite or "youtube",
+            "embed_url": f"https://www.youtube.com/embed/{tid}?autoplay=1&playsinline=1&rel=0&modestbranding=1"
+        }
+
     if not a:
         raise HTTPException(404, "Anime not found")
 
     anilist_id = a.get("anilist_id")
     title = a.get("title_english") or a.get("title")
+    alt_titles = [a.get("title"), a.get("title_romaji")]
 
-    # 3. Dynamic multi-source resolution
-    tid = resolve_trailer_id(anilist_id, title)
+    # 3. Dynamic multi-source resolution (AniList + YouTube InnerTube + Jikan + YouTube Web)
+    tid = resolve_trailer_id(anilist_id, title, alt_titles=alt_titles)
     if tid:
         try:
-            conn = db()
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS anime_trailers (
-                    anime_id INTEGER PRIMARY KEY,
-                    trailer_id TEXT,
-                    site TEXT DEFAULT 'youtube',
-                    source TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            cur.execute("INSERT OR REPLACE INTO anime_trailers (anime_id, trailer_id, site, source) VALUES (?, ?, 'youtube', 'auto')", (anime_id, tid))
-            conn.commit()
-            conn.close()
+            target_db_fn = munib_db if is_munib_only else db
+            conn = target_db_fn()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS anime_trailers (
+                        anime_id INTEGER PRIMARY KEY,
+                        trailer_id TEXT,
+                        site TEXT DEFAULT 'youtube',
+                        source TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cur.execute("INSERT OR REPLACE INTO anime_trailers (anime_id, trailer_id, site, source) VALUES (?, ?, 'youtube', 'auto')", (anime_id, tid))
+                conn.commit()
+                conn.close()
         except Exception:
             pass
 

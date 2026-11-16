@@ -4,14 +4,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#07080b" />
+  <meta name="theme-color" content="#100F0D" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
 
   <title>KuroAnime — Stream Anime in Sub & Dub</title>
   <meta name="description"
-    content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface." />
+    content="Stream thousands of anime in English Sub and Dub with multi-server playback, ratings, and synced watchlists." />
   <link rel="canonical" href="https://kuroanime-flax.vercel.app/" id="kuro-canonical" />
 
   <!-- Open Graph / Facebook -->
@@ -20,7 +20,7 @@
   <meta property="og:url" content="https://kuroanime-flax.vercel.app/" id="kuro-og-url" />
   <meta property="og:title" content="KuroAnime — Stream Anime in Sub & Dub" id="kuro-og-title" />
   <meta property="og:description"
-    content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface."
+    content="Stream thousands of anime in English Sub and Dub with multi-server playback, ratings, and synced watchlists."
     id="kuro-og-desc" />
   <meta property="og:image" content="https://kuroanime-flax.vercel.app/goku-banner.jpg" id="kuro-og-image" />
 
@@ -29,7 +29,7 @@
   <meta name="twitter:url" content="https://kuroanime-flax.vercel.app/" id="kuro-tw-url" />
   <meta name="twitter:title" content="KuroAnime — Stream Anime in Sub & Dub" id="kuro-tw-title" />
   <meta name="twitter:description"
-    content="Stream thousands of anime in Sub and Dub with instant player servers, verified ratings, and clean ad-free interface."
+    content="Stream thousands of anime in English Sub and Dub with multi-server playback, ratings, and synced watchlists."
     id="kuro-tw-desc" />
   <meta name="twitter:image" content="https://kuroanime-flax.vercel.app/goku-banner.jpg" id="kuro-tw-image" />
 
@@ -40,7 +40,7 @@
       "@type": "WebSite",
       "name": "KuroAnime",
       "url": "https://kuroanime-flax.vercel.app/",
-      "description": "Stream thousands of anime in Sub and Dub with verified fast servers.",
+      "description": "Stream anime in English Sub and Dub with multi-server playback.",
       "potentialAction": {
         "@type": "SearchAction",
         "target": "https://kuroanime-flax.vercel.app/search?q={search_term_string}",
@@ -49,19 +49,15 @@
     }
     </script>
 
-  <!-- Typography: Satoshi, Inter, Outfit & Material Symbols Rounded (Material You) -->
+  <!-- Typography: Bricolage Grotesque (Display), DM Sans (UI/Body) & JetBrains Mono (Tabular) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700,800,900&display=swap" rel="stylesheet" />
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@600;700;800;900&family=Shippori+Mincho:wght@500;700;800&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@500&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet"
-    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
 
-  <!-- Clean Handcrafted SVG Favicon -->
-  <link rel="icon" type="image/svg+xml"
-    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2311141C' stroke='%23232836' stroke-width='4'/><polygon points='40,26 74,50 40,74' fill='%23EEF0F5'/><rect x='24' y='26' width='7' height='48' rx='3.5' fill='%23E5484D'/></svg>" />
+  <!-- Custom Kuro K-Gate Cinema Emblem Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </head>
 
 <body>
@@ -69,14 +65,16 @@
     <!-- Universal Header Bar -->
     <header class="app-header" id="app-header">
       <div class="header-container">
-        <div class="brand-logo" id="btn-brand-home">
-          <svg class="brand-mark" viewBox="0 0 36 36" width="28" height="28" aria-hidden="true">
-            <rect width="36" height="36" rx="8" fill="#151821" stroke="rgba(238, 240, 245, 0.1)" stroke-width="1" />
-            <rect x="9" y="10" width="2.5" height="16" rx="1.25" fill="#E5484D" />
-            <polygon points="15,10 28,18 15,26" fill="#EEF0F5" />
+        <div class="brand-logo" id="btn-brand-home" title="KuroAnime Home">
+          <svg class="brand-mark" viewBox="0 0 36 36" width="30" height="30" aria-hidden="true">
+            <rect x="1" y="1" width="34" height="34" rx="9" fill="#171512" stroke="#302B24" stroke-width="1.25" />
+            <rect x="8.5" y="8.5" width="4" height="19" rx="1.4" fill="#F4EFE6" />
+            <path d="M14.2 17.2L22.4 8.5H26.8L18 17.6L14.2 17.2Z" fill="#F4EFE6" />
+            <path d="M14.2 18.8L18 18.4L26.8 27.5H22.4L14.2 18.8Z" fill="#F4EFE6" />
+            <polygon points="20.6,14.2 27.6,18 20.6,21.8" fill="#E05638" />
           </svg>
           <div class="brand-text">
-            <span class="brand-title">Kuro<span class="brand-accent">Anime</span></span>
+            <span class="brand-title">Kuro<span class="brand-dot" aria-hidden="true"></span><span class="brand-accent">Anime</span></span>
           </div>
         </div>
 
@@ -114,7 +112,7 @@
                 </div>
                 <div class="user-info-text">
                   <div class="user-display-name" id="user-display-name">Guest</div>
-                  <div class="user-display-status" id="user-display-status">Ad-free streaming</div>
+                  <div class="user-display-status" id="user-display-status">Local session</div>
                 </div>
               </div>
 
@@ -480,21 +478,6 @@
             </div>
           </div>
         </section>
-
-        <!-- Editorial Catalog Footer -->
-        <footer class="app-footer">
-          <div class="footer-container">
-            <div class="footer-brand">
-              <span class="footer-title">Kuro<span class="brand-accent">Anime</span></span>
-              <span class="footer-tagline">Ad-free anime streaming in Sub &amp; Dub</span>
-            </div>
-            <div class="footer-meta">
-              <span class="footer-stat" id="footer-catalog-stats">Stream thousands of anime in Sub & Dub with fast
-                verified servers</span>
-              <span class="footer-copy">© 2026 KuroAnime</span>
-            </div>
-          </div>
-        </footer>
       </section>
 
       <!-- 2. Browse View -->
@@ -712,14 +695,14 @@
               <img src="/vegeta.gif?v=2" alt="Prince Vegeta AI Anime Advisor" class="advisor-hero-gif" />
             </div>
             <div class="advisor-hero-copy">
-              <span class="advisor-eyebrow">Official KuroAnime AI Bot &amp; Scene Scouter</span>
-              <h1 class="page-title advisor-title">Prince Vegeta — AI Anime Advisor</h1>
+              <span class="advisor-eyebrow">Vegeta Advisor</span>
+              <h1 class="page-title advisor-title">Prince Vegeta — Anime Advisor</h1>
               <p class="advisor-desc">
-                Tell Vegeta what mood, genre, or plot you are looking for — or upload any anime screenshot or character image to identify the exact series and episode instantly.
+                Describe the mood, genre, or plot you want — or upload a scene screenshot to identify the series and episode.
               </p>
               <div class="advisor-cta-row">
                 <button type="button" class="btn-primary" id="btn-advisor-launch-chat">
-                  <i data-lucide="sparkles"></i>
+                  <i data-lucide="message-square"></i>
                   <span>Chat with Prince Vegeta</span>
                 </button>
                 <button type="button" class="btn-secondary" id="btn-advisor-upload-img">
@@ -731,7 +714,7 @@
           </div>
 
           <div class="advisor-prompts-section">
-            <h2 class="advisor-subhead">Popular AI Anime Recommender Prompts</h2>
+            <h2 class="advisor-subhead">Starter prompts</h2>
             <div class="advisor-prompt-grid">
               <button type="button" class="advisor-prompt-card" data-prompt="Recommend top 5 peak action & fantasy anime in our catalog">
                 <strong>Peak Action &amp; Fantasy</strong>
@@ -759,12 +742,25 @@
     <footer class="kuro-site-footer" id="kuro-site-footer">
       <div class="kuro-footer-inner">
         <div class="kuro-footer-brand">
-          <div class="brand-text">
-            <span class="brand-title">Kuro<span class="brand-accent">Anime</span></span>
+          <div class="brand-logo kuro-footer-logo">
+            <svg class="brand-mark" viewBox="0 0 36 36" width="26" height="26" aria-hidden="true">
+              <rect x="1" y="1" width="34" height="34" rx="9" fill="#171512" stroke="#302B24" stroke-width="1.25" />
+              <rect x="8.5" y="8.5" width="4" height="19" rx="1.4" fill="#F4EFE6" />
+              <path d="M14.2 17.2L22.4 8.5H26.8L18 17.6L14.2 17.2Z" fill="#F4EFE6" />
+              <path d="M14.2 18.8L18 18.4L26.8 27.5H22.4L14.2 18.8Z" fill="#F4EFE6" />
+              <polygon points="20.6,14.2 27.6,18 20.6,21.8" fill="#E05638" />
+            </svg>
+            <div class="brand-text">
+              <span class="brand-title">Kuro<span class="brand-dot" aria-hidden="true"></span><span class="brand-accent">Anime</span></span>
+            </div>
           </div>
           <p class="kuro-footer-tagline">
-            Ad-free anime streaming in English Sub &amp; Dub with instant HD playback and Prince Vegeta AI discovery.
+            Anime streaming in English Sub and Dub with multi-server HD playback and Vegeta search.
           </p>
+          <div class="kuro-footer-meta">
+            <span class="footer-stat" id="footer-catalog-stats">Sub &amp; Dub catalog</span>
+            <span class="footer-copy">© 2026 KuroAnime</span>
+          </div>
         </div>
         <nav class="kuro-footer-nav" aria-label="Directory">
           <div class="kuro-footer-col">
@@ -817,26 +813,25 @@
       <div class="inbox-modal-card goku-promo-card" role="dialog" aria-modal="true" aria-labelledby="inbox-modal-title">
         <!-- Hero Visual: Unobstructed Goku Key Art with Seamless Fade -->
         <div class="goku-hero-stage">
-          <div class="goku-aura-glow" aria-hidden="true"></div>
           <div class="goku-art-wrap">
             <img src="/goku-banner.jpg" alt="Son Goku" class="goku-hero-img" decoding="async" fetchpriority="high" />
           </div>
           <div class="goku-stage-fade" aria-hidden="true"></div>
         </div>
 
-        <!-- Compact Editorial Body (Zero Icons / Zero Emojis) -->
+        <!-- Compact Editorial Body -->
         <div class="goku-promo-body">
           <div class="goku-meta-row">
-            <span class="goku-meta-label">Server Announcement</span>
+            <span class="goku-meta-label">Server note</span>
             <button type="button" class="goku-close-link" id="btn-close-inbox-modal"
               aria-label="Close announcement">Close</button>
           </div>
 
-          <h2 class="goku-promo-title" id="inbox-modal-title">Keep KuroAnime Ad-Free</h2>
+          <h2 class="goku-promo-title" id="inbox-modal-title">Keep KuroAnime Online</h2>
 
           <p class="goku-promo-desc">
-            KuroAnime is free of ads and popups. Our servers need <strong>$20</strong> this month to stay online &mdash;
-            even <strong>$1</strong> helps keep every episode playing for everyone.
+            KuroAnime runs without ads or popups. Servers cost <strong>$20</strong> a month to keep online —
+            even <strong>$1</strong> keeps streams playing for everyone.
           </p>
 
           <!-- Minimal Progress Bar -->
@@ -870,7 +865,6 @@
     <!-- Settings & Preferences Modal -->
     <div class="settings-modal-backdrop" id="kuro-settings-modal" aria-hidden="true">
       <div class="settings-modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
-        <div class="settings-modal-glow"></div>
 
         <!-- Header -->
         <div class="settings-modal-header">
@@ -1069,7 +1063,7 @@
       <div class="kuro-new-ep-left">
         <img class="kuro-new-ep-thumb" id="kuro-new-ep-thumb" src="/favicon.svg" alt="Anime thumbnail" onerror="this.onerror=null;this.src='/favicon.svg';" />
         <div class="kuro-new-ep-text">
-          <span class="kuro-new-ep-tag">NEW EPISODE RELEASED</span>
+          <span class="kuro-new-ep-tag">New episode</span>
           <h4 class="kuro-new-ep-title" id="kuro-new-ep-title">Attack on Titan · Ep 26</h4>
         </div>
       </div>
@@ -1096,7 +1090,7 @@
               onerror="this.onerror=null;this.src='/favicon.svg';" />
           </div>
           <div class="kuro-share-meta">
-            <span class="kuro-share-badge" id="kuro-share-caption">SHARE ANIME</span>
+            <span class="kuro-share-badge" id="kuro-share-caption">Share anime</span>
             <h3 class="kuro-share-title" id="kuro-share-title">Anime Title</h3>
             <p class="kuro-share-sub" id="kuro-share-sub">Stream in Sub &amp; Dub</p>
           </div>
@@ -1311,7 +1305,6 @@
         title="Ask Prince Vegeta for Anime Recommendations">
         <div class="vegeta-avatar-wrapper">
           <img src="/vegeta.gif?v=2" alt="Prince Vegeta" class="vegeta-avatar-img" />
-          <span class="saiyan-aura-ring"></span>
         </div>
         <span class="vegeta-trigger-label">
           <span class="vegeta-label-title">Prince Vegeta</span>
@@ -1321,7 +1314,6 @@
 
       <!-- Floating Chat Card -->
       <div class="vegeta-chat-card" id="vegeta-chat-card" aria-hidden="true">
-        <!-- Top Saiyan Aura Line -->
         <div class="vegeta-card-header-bar">
           <div class="vegeta-header-left">
             <div class="vegeta-header-avatar">
@@ -1330,7 +1322,7 @@
             <div class="vegeta-header-text">
               <h3 class="vegeta-name">Prince Vegeta</h3>
               <div class="vegeta-sub-row">
-                <span class="vegeta-subtitle">KuroAnime Official Advisor</span>
+                <span class="vegeta-subtitle">KuroAnime Advisor</span>
                 <span class="vegeta-voice-wave" id="vegeta-voice-wave" title="Speaking..." style="display:none">
                   <span></span><span></span><span></span><span></span>
                 </span>
@@ -1339,14 +1331,14 @@
           </div>
           <div class="vegeta-header-actions">
             <button type="button" class="vegeta-icon-btn" id="btn-vegeta-clear" title="Clear Chat History" aria-label="Clear Chat History">
-              <span class="material-symbols-rounded">delete_sweep</span>
+              <i data-lucide="trash-2"></i>
             </button>
             <button type="button" class="vegeta-icon-btn vegeta-voice-btn" id="btn-vegeta-voice" title="Vegeta Voice (Mute/Unmute)" aria-label="Toggle Voice">
-              <span class="material-symbols-rounded">volume_up</span>
+              <i data-lucide="volume-2"></i>
             </button>
             <button type="button" class="vegeta-icon-btn" id="btn-vegeta-close" title="Minimize Advisor"
               aria-label="Close">
-              <span class="material-symbols-rounded">close</span>
+              <i data-lucide="x"></i>
             </button>
           </div>
         </div>
@@ -1359,7 +1351,7 @@
               <img src="/vegeta.gif?v=2" alt="Vegeta" />
             </div>
             <div class="vegeta-msg-bubble">
-              <p><strong>Hmph.</strong> What anime are you looking for, warrior?</p>
+              <p><strong>Hmph.</strong> What anime are you looking for?</p>
               <div class="vegeta-quick-chips">
                 <button type="button" class="quick-chip" data-prompt="Recommend peak action and shounen anime with top tier fights">Peak Shounen</button>
                 <button type="button" class="quick-chip" data-prompt="Surprise me with an action anime">Surprise Me</button>
@@ -1376,7 +1368,7 @@
         <div class="vegeta-typing-indicator" id="vegeta-typing-indicator" style="display:none">
           <span class="vegeta-typing-avatar"><img src="/vegeta.gif?v=2" alt="Vegeta" /></span>
           <div class="typing-bubble">
-            <span class="typing-text">Vegeta is judging the catalog...</span>
+            <span class="typing-text">Vegeta is checking the catalog...</span>
             <div class="typing-dots">
               <span></span><span></span><span></span>
             </div>
@@ -1388,22 +1380,22 @@
           <div class="vegeta-preview-thumbnail-wrap">
             <img id="vegeta-preview-img" src="" alt="Screenshot preview" />
             <button type="button" class="vegeta-preview-remove-btn" id="btn-vegeta-remove-img" title="Remove screenshot">
-              <span class="material-symbols-rounded">close</span>
+              <i data-lucide="x"></i>
             </button>
           </div>
-          <span class="vegeta-preview-text">Screenshot attached • Vegeta will identify episode &amp; scene</span>
+          <span class="vegeta-preview-text">Screenshot attached · Identifies episode &amp; scene</span>
         </div>
 
         <!-- Input Bar -->
         <form class="vegeta-input-bar" id="vegeta-chat-form">
           <input type="file" id="vegeta-image-input" accept="image/*" style="display:none;" />
           <button type="button" class="vegeta-input-action-btn" id="btn-vegeta-image-upload" title="Upload anime screenshot (or paste with Ctrl+V)" aria-label="Upload screenshot">
-            <span class="material-symbols-rounded">add_photo_alternate</span>
+            <i data-lucide="image-plus"></i>
           </button>
           <input type="text" id="vegeta-chat-input" class="vegeta-text-input"
             placeholder="Ask or paste screenshot (Ctrl+V)..." autocomplete="off" />
           <button type="submit" class="vegeta-send-btn" id="btn-vegeta-send" aria-label="Send message">
-            <span class="material-symbols-rounded">send</span>
+            <i data-lucide="send"></i>
           </button>
         </form>
       </div>
