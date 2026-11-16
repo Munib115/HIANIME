@@ -243,9 +243,9 @@ def fetch_single_episode_servers(ep):
 
     soup = BeautifulSoup(data.get("html", ""), HTML_PARSER)
     out = []
+    seen_ep_type = set()
     for s in soup.select(".server-item"):
         sname = (s.get("data-server-name", "") or "ZokoAnime").strip()
-        if "HD-1" in sname or "HD 1" in sname: continue
         shash = s.get("data-hash", "")
         try:
             url = base64.b64decode(shash).decode("utf-8", errors="ignore").strip()
@@ -255,12 +255,20 @@ def fetch_single_episode_servers(ep):
         provider = re.search(r"https?://([^/]+)", url)
         prov_name = provider.group(1) if provider else ""
         if "megaplay" in prov_name.lower(): continue
+        if "zokoanime" in prov_name.lower():
+            sname = "ZokoAnime"
+        elif "hd-1" in sname.lower() or "hd 1" in sname.lower():
+            continue
+        stype = (s.get("data-type", "") or "sub").strip().lower()
+        if (stype, sname) in seen_ep_type:
+            continue
+        seen_ep_type.add((stype, sname))
         out.append({
             "episode_id": ep_id,
             "episode_number": ep_num,
             "episode_title": ep_title,
             "server_name": sname or "ZokoAnime",
-            "type": (s.get("data-type", "") or "sub").strip().lower(),
+            "type": stype,
             "embed_url": url,
             "provider": prov_name,
         })

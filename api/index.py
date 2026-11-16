@@ -509,17 +509,33 @@ def one(sql, params=()):
 
 
 def audio_flags(anime_ids):
-    """Return {anime_id: {'sub': bool, 'dub': bool}} for card badges."""
+    """Return {anime_id: {'sub': bool, 'dub': bool}} across strictly ZokoAnime + Munib Server."""
     if not anime_ids:
         return {}
-    q = ",".join("?" * len(anime_ids))
-    out = {i: {"sub": False, "dub": False} for i in anime_ids}
-    for r in rows(f"SELECT DISTINCT anime_id, type FROM streams WHERE anime_id IN ({q})", anime_ids):
-        if r["type"] in ("sub", "dub"):
-            out[r["anime_id"]][r["type"]] = True
-    for r in munib_rows(f"SELECT DISTINCT anime_id, type FROM streams WHERE anime_id IN ({q})", anime_ids):
+    clean_ids = [int(i) for i in anime_ids if i is not None]
+    q = ",".join("?" * len(clean_ids))
+    out = {i: {"sub": False, "dub": False} for i in clean_ids}
+    for r in rows(f"SELECT DISTINCT anime_id, type FROM streams WHERE anime_id IN ({q}) AND (server_name = 'ZokoAnime' OR provider LIKE '%zokoanime%')", clean_ids):
         if r["type"] in ("sub", "dub") and r["anime_id"] in out:
             out[r["anime_id"]][r["type"]] = True
+    for r in munib_rows(f"SELECT DISTINCT anime_id, type FROM streams WHERE anime_id IN ({q}) AND server_name = 'Munib Server'", clean_ids):
+        if r["type"] in ("sub", "dub") and r["anime_id"] in out:
+            out[r["anime_id"]][r["type"]] = True
+    # Also cross-check shared anilist_id for any entries not aligned by primary anime_id
+    al_map = {}
+    for r in rows(f"SELECT anime_id, anilist_id FROM anime WHERE anime_id IN ({q}) AND anilist_id > 0", clean_ids):
+        al_map[int(r["anilist_id"])] = int(r["anime_id"])
+    for r in munib_rows(f"SELECT anime_id, anilist_id FROM anime WHERE anime_id IN ({q}) AND anilist_id > 0", clean_ids):
+        al_i = int(r["anilist_id"])
+        if al_i not in al_map:
+            al_map[al_i] = int(r["anime_id"])
+    if al_map:
+        aq = ",".join("?" * len(al_map))
+        al_keys = list(al_map.keys())
+        for mr in munib_rows(f"SELECT DISTINCT anilist_id, type FROM streams WHERE anilist_id IN ({aq}) AND server_name = 'Munib Server'", al_keys):
+            aid = al_map.get(int(mr["anilist_id"]))
+            if aid in out and mr["type"] in ("sub", "dub"):
+                out[aid][mr["type"]] = True
     return out
 
 
@@ -726,20 +742,20 @@ _DUB_IDS_CACHE: Optional[tuple[float, set[int]]] = None
 
 
 def _get_dub_anime_ids() -> set[int]:
-    """Return cached set of anime_id values that have English Dub streams across both servers."""
+    """Return cached set of anime_id values that have English Dub streams across ZokoAnime + Munib Server."""
     global _DUB_IDS_CACHE
     now = _time.time()
     if _DUB_IDS_CACHE and (now - _DUB_IDS_CACHE[0]) < 1800:
         return _DUB_IDS_CACHE[1]
     dub_ids: set[int] = set()
     try:
-        for r in rows("SELECT DISTINCT anime_id FROM streams WHERE type = 'dub' AND server_name != 'HD-1'"):
+        for r in rows("SELECT DISTINCT anime_id FROM streams WHERE type = 'dub' AND (server_name = 'ZokoAnime' OR provider LIKE '%zokoanime%')"):
             if r.get("anime_id") is not None:
                 dub_ids.add(int(r["anime_id"]))
     except Exception:
         pass
     try:
-        for r in munib_rows("SELECT DISTINCT anime_id FROM streams WHERE type = 'dub'"):
+        for r in munib_rows("SELECT DISTINCT anime_id FROM streams WHERE type = 'dub' AND server_name = 'Munib Server'"):
             if r.get("anime_id") is not None:
                 dub_ids.add(int(r["anime_id"]))
     except Exception:
@@ -966,25 +982,58 @@ def _lookup_cached_trailer(anime_id: int, anilist_id=None):
 
 
 def _search_youtube_innertube_trailer(query_title: str):
+    """Search YouTube Innertube and score candidates to prefer official anime PVs and reject live-action/reactions."""
     if not query_title:
         return None
     try:
-        yt_url = (
-            "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
-            "&fields=contents.twoColumnSearchResultsRenderer.primaryContents.sectionListRenderer.contents.itemSectionRenderer.contents.videoRenderer.videoId"
-        )
+        yt_url = "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
         r = _requests.post(
             yt_url,
             json={
                 "context": {"client": {"clientName": "WEB", "clientVersion": "2.20241114.01.00", "hl": "en", "gl": "US"}},
                 "query": f"{query_title} official anime trailer PV"
             },
-            timeout=3.5
+            timeout=4.5
         )
         if r.status_code == 200:
-            matches = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', r.text)
-            if matches:
-                return matches[0]
+            data = r.json()
+            cands = []
+            stack = [data]
+            while stack and len(cands) < 12:
+                cur = stack.pop()
+                if isinstance(cur, dict):
+                    if "videoRenderer" in cur:
+                        vr = cur["videoRenderer"]
+                        vid = str(vr.get("videoId") or "").strip()
+                        title_t = "".join(t.get("text", "") for t in ((vr.get("title") or {}).get("runs") or [])).strip()
+                        chan_t = "".join(t.get("text", "") for t in ((vr.get("ownerText") or {}).get("runs") or [])).strip()
+                        if len(vid) == 11:
+                            cands.append((vid, title_t, chan_t))
+                    else:
+                        stack.extend(cur.values())
+                elif isinstance(cur, list):
+                    stack.extend(reversed(cur))
+
+            if cands:
+                q_low = query_title.lower()
+                scored = []
+                for idx, (vid, v_title, v_chan) in enumerate(cands):
+                    low = f"{v_title} {v_chan}".lower()
+                    score = max(0, 10 - idx)
+                    if any(bad in low for bad in ("live action", "live-action", "reaction", "explained", "review", "parody", "full episode", "amv")):
+                        score -= 50
+                    if "netflix" in low and "anime" not in low and "netflix" not in q_low:
+                        score -= 45
+                    if any(ch in low for ch in ("crunchyroll", "toei", "aniplex", "kadokawa", "toho", "muse asia", "ani-one", "netflix anime", "viz media", "bandai")):
+                        score += 25
+                    if any(tok in v_title.lower() for tok in ("official trailer", "teaser", "pv", "anime")):
+                        score += 12
+                    if q_low[:8] in v_title.lower():
+                        score += 8
+                    scored.append((score, vid))
+                scored.sort(key=lambda x: x[0], reverse=True)
+                if scored[0][0] > 0:
+                    return scored[0][1]
     except Exception:
         pass
     return None
@@ -1201,87 +1250,125 @@ def anime_episodes(anime_ident: str):
 
 @router.get("/episode/{episode_id}/streams")
 def episode_streams(episode_id: str, anime_id: Optional[int] = None):
-    sql = "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ? AND server_name != 'HD-1' AND provider NOT LIKE '%megaplay%'"
+    """Return streams strictly for the two active servers: ZokoAnime + Munib Server (symmetric cross-DB lookup)."""
+    # 1. Server 1: ZokoAnime (from hianime.db)
+    sql = "SELECT type, 'ZokoAnime' AS server_name, provider, embed_url FROM streams WHERE episode_id = ? AND (server_name = 'ZokoAnime' OR provider LIKE '%zokoanime%')"
     params = [episode_id]
     if anime_id is not None:
         sql += " AND anime_id = ?"
         params.append(anime_id)
-    data = rows(sql + " ORDER BY type, CASE WHEN server_name = 'ZokoAnime' THEN 0 ELSE 1 END, server_name", params)
+    zoko_data = rows(sql + " ORDER BY type", params)
 
-    # Query Server 2 ("Munib Server") from its independent munib_server.db
-    munib_data = munib_rows(
-        "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ?",
-        (episode_id,),
+    # Resolve canonical (anime_id, ep_no, anilist_id) across whichever DB holds this episode
+    a_id = anime_id
+    ep_no = None
+    al_id = None
+    ep_row = one(
+        "SELECT anime_id, episode_number FROM episodes WHERE episode_id = ?" + (" AND anime_id = ?" if anime_id is not None else ""),
+        (episode_id, anime_id) if anime_id is not None else (episode_id,),
     )
-    if not munib_data:
-        # Fallback match by (anime_id, episode_number) or (anilist_id, episode_number)
-        ep_row = one(
-            "SELECT anime_id, episode_number FROM episodes WHERE episode_id = ?" + (" AND anime_id = ?" if anime_id is not None else ""),
+    if ep_row:
+        a_id = a_id or ep_row.get("anime_id")
+        ep_no = ep_row.get("episode_number")
+    else:
+        m_ep_rows = munib_rows(
+            "SELECT anime_id, anilist_id, episode_number FROM episodes WHERE episode_id = ?" + (" AND anime_id = ?" if anime_id is not None else ""),
             (episode_id, anime_id) if anime_id is not None else (episode_id,),
         )
-        if ep_row:
-            a_id = ep_row["anime_id"]
-            ep_no = ep_row["episode_number"]
-            munib_data = munib_rows(
-                "SELECT type, server_name, provider, embed_url FROM streams WHERE anime_id = ? AND episode_number = ?",
+        if m_ep_rows:
+            a_id = a_id or m_ep_rows[0].get("anime_id")
+            al_id = m_ep_rows[0].get("anilist_id")
+            ep_no = m_ep_rows[0].get("episode_number")
+
+    if a_id is not None and not al_id:
+        al_row = one("SELECT anilist_id FROM anime WHERE anime_id = ?", (a_id,))
+        if al_row and al_row.get("anilist_id"):
+            al_id = al_row["anilist_id"]
+        else:
+            m_al = munib_rows("SELECT anilist_id FROM anime WHERE anime_id = ?", (a_id,))
+            if m_al and m_al[0].get("anilist_id"):
+                al_id = m_al[0]["anilist_id"]
+
+    if not zoko_data and ep_no is not None:
+        if a_id is not None:
+            zoko_data = rows(
+                "SELECT type, 'ZokoAnime' AS server_name, provider, embed_url FROM streams WHERE anime_id = ? AND episode_number = ? AND (server_name = 'ZokoAnime' OR provider LIKE '%zokoanime%') ORDER BY type",
                 (a_id, ep_no),
             )
-            if not munib_data:
-                al_row = one("SELECT anilist_id FROM anime WHERE anime_id = ?", (a_id,))
-                al_id = al_row.get("anilist_id") if al_row else None
-                if al_id:
-                    munib_data = munib_rows(
-                        "SELECT type, server_name, provider, embed_url FROM streams WHERE anilist_id = ? AND episode_number = ?",
-                        (al_id, ep_no),
-                    )
-                    # Live fallback to reanime.to flix API whenever Munib Server DB has no entry for this episode
-                    if not munib_data and ep_no is not None:
-                        try:
-                            fr = _STREAM_SESSION.get(
-                                f"https://reanime.to/api/flix/{al_id}/{ep_no}",
-                                headers={"User-Agent": _STREAM_HEADERS["User-Agent"], "Referer": "https://reanime.to/home"},
-                                timeout=1.5,
-                            )
-                            if fr.status_code == 200:
-                                fjson = fr.json()
-                                if fjson.get("success") and fjson.get("servers"):
-                                    sub_link, dub_link = None, None
-                                    for srv in fjson["servers"]:
-                                        dtype = (srv.get("dataType") or "").lower()
-                                        dlink = (srv.get("dataLink") or "").strip()
-                                        if not dlink:
-                                            continue
-                                        if dtype == "sub" and not sub_link:
-                                            sub_link = dlink
-                                        elif dtype in ("dub", "s-dub") and not dub_link:
-                                            sep = "&" if "?" in dlink else "?"
-                                            dub_link = f"{dlink}{sep}a=1" if "a=1" not in dlink else dlink
-                                    if sub_link:
-                                        munib_data.append({
-                                            "type": "sub",
-                                            "server_name": "Munib Server",
-                                            "provider": "reanime.to",
-                                            "embed_url": sub_link,
-                                        })
-                                    if dub_link:
-                                        munib_data.append({
-                                            "type": "dub",
-                                            "server_name": "Munib Server",
-                                            "provider": "reanime.to",
-                                            "embed_url": dub_link,
-                                        })
-                        except Exception:
-                            pass
+        if not zoko_data and al_id:
+            h_match = one("SELECT anime_id FROM anime WHERE anilist_id = ? ORDER BY episode_count DESC NULLS LAST LIMIT 1", (int(al_id),))
+            if h_match:
+                zoko_data = rows(
+                    "SELECT type, 'ZokoAnime' AS server_name, provider, embed_url FROM streams WHERE anime_id = ? AND episode_number = ? AND (server_name = 'ZokoAnime' OR provider LIKE '%zokoanime%') ORDER BY type",
+                    (h_match["anime_id"], ep_no),
+                )
 
-    combined = data + munib_data
-    if not combined:
-        # Last-resort fallback to HD-1 / MegaPlay if neither ZokoAnime nor Munib Server has this episode
-        fallback_sql = "SELECT type, server_name, provider, embed_url FROM streams WHERE episode_id = ?"
-        fallback_params = [episode_id]
-        if anime_id is not None:
-            fallback_sql += " AND anime_id = ?"
-            fallback_params.append(anime_id)
-        combined = rows(fallback_sql + " ORDER BY type, server_name", fallback_params)
+    # 2. Server 2: Munib Server (from munib_server.db + live reanime.to fallback)
+    m_sql = "SELECT type, 'Munib Server' AS server_name, provider, embed_url FROM streams WHERE episode_id = ? AND server_name = 'Munib Server'"
+    m_params = [episode_id]
+    if anime_id is not None:
+        m_sql += " AND anime_id = ?"
+        m_params.append(anime_id)
+    munib_data = munib_rows(m_sql, m_params)
+
+    if not munib_data and ep_no is not None:
+        if a_id is not None:
+            munib_data = munib_rows(
+                "SELECT type, 'Munib Server' AS server_name, provider, embed_url FROM streams WHERE anime_id = ? AND episode_number = ? AND server_name = 'Munib Server'",
+                (a_id, ep_no),
+            )
+        if not munib_data and al_id:
+            munib_data = munib_rows(
+                "SELECT type, 'Munib Server' AS server_name, provider, embed_url FROM streams WHERE anilist_id = ? AND episode_number = ? AND server_name = 'Munib Server'",
+                (al_id, ep_no),
+            )
+        if not munib_data and al_id:
+            try:
+                fr = _STREAM_SESSION.get(
+                    f"https://reanime.to/api/flix/{al_id}/{ep_no}",
+                    headers={"User-Agent": _STREAM_HEADERS["User-Agent"], "Referer": "https://reanime.to/home"},
+                    timeout=1.8,
+                )
+                if fr.status_code == 200:
+                    fjson = fr.json()
+                    if fjson.get("success") and fjson.get("servers"):
+                        sub_link, dub_link = None, None
+                        for srv in fjson["servers"]:
+                            dtype = (srv.get("dataType") or "").lower()
+                            dlink = (srv.get("dataLink") or "").strip()
+                            if not dlink:
+                                continue
+                            if dtype == "sub" and not sub_link:
+                                sub_link = dlink
+                            elif dtype in ("dub", "s-dub") and not dub_link:
+                                sep = "&" if "?" in dlink else "?"
+                                dub_link = f"{dlink}{sep}a=1" if "a=1" not in dlink else dlink
+                        if sub_link:
+                            munib_data.append({
+                                "type": "sub",
+                                "server_name": "Munib Server",
+                                "provider": "reanime.to",
+                                "embed_url": sub_link,
+                            })
+                        if dub_link:
+                            munib_data.append({
+                                "type": "dub",
+                                "server_name": "Munib Server",
+                                "provider": "reanime.to",
+                                "embed_url": dub_link,
+                            })
+            except Exception:
+                pass
+
+    combined = []
+    seen_key = set()
+    for s in (zoko_data + munib_data):
+        k = (s.get("type"), s.get("server_name"))
+        if k in seen_key:
+            continue
+        seen_key.add(k)
+        combined.append(s)
+
     return {
         "sub": [s for s in combined if s["type"] == "sub"],
         "dub": [s for s in combined if s["type"] == "dub"],
@@ -1292,49 +1379,67 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
 def search(q: str = Query(..., min_length=1), limit: int = 30):
     query_str = q.strip()
     like = f"%{query_str}%"
-    
-    # 1. Direct or exact substring match
+    prefix_like = f"{query_str}%"
+
+    # 1. Exact / prefix / substring matches sorted so flagship exact titles always rank #1
     res = rows(f"""
         SELECT {CARD_COLS} FROM anime
         WHERE title LIKE ? OR title_english LIKE ? OR title_romaji LIKE ? OR synonyms LIKE ?
-        ORDER BY anilist_popularity DESC NULLS LAST
+        ORDER BY
+            CASE
+                WHEN lower(title) = lower(?) OR lower(title_english) = lower(?) OR lower(title_romaji) = lower(?) THEN 0
+                WHEN lower(title) LIKE lower(?) OR lower(title_english) LIKE lower(?) THEN 1
+                ELSE 2
+            END,
+            COALESCE(anilist_popularity, 0) DESC,
+            COALESCE(episode_count, 0) DESC
         LIMIT ?
-    """, (like, like, like, like, min(limit, 60)))
-    
+    """, (like, like, like, like, query_str, query_str, query_str, prefix_like, prefix_like, min(limit, 60)))
+
     # 2. Tokenized multi-word search (handles missing colons, hyphens, and multi-word queries)
     clean_words = [w for w in re.sub(r'[:\-_,]+', ' ', query_str).split() if len(w) > 1]
+    seen_ids = {r["anime_id"] for r in res}
+    seen_al = {int(r["anilist_id"]) for r in res if r.get("anilist_id")}
     if len(res) < limit and len(clean_words) > 1:
-        seen = {r["anime_id"] for r in res}
         conds, params = [], []
         for w in clean_words:
             w_like = f"%{w}%"
             conds.append("(title LIKE ? OR title_english LIKE ? OR title_romaji LIKE ? OR synonyms LIKE ?)")
             params.extend([w_like, w_like, w_like, w_like])
-        
+
         multi_sql = f"""
             SELECT {CARD_COLS} FROM anime
             WHERE {" AND ".join(conds)}
-            ORDER BY anilist_popularity DESC NULLS LAST
+            ORDER BY COALESCE(anilist_popularity, 0) DESC, COALESCE(episode_count, 0) DESC
             LIMIT ?
         """
-        more = rows(multi_sql, params + [min(limit, 60)])
-        for r in more:
-            if r["anime_id"] not in seen:
+        for r in rows(multi_sql, params + [min(limit, 60)]):
+            al_v = int(r["anilist_id"]) if r.get("anilist_id") else None
+            if r["anime_id"] not in seen_ids and (not al_v or al_v not in seen_al):
                 res.append(r)
-                seen.add(r["anime_id"])
-                
-    # 3. Also search Munib Server DB for exclusive titles (e.g. Hentai & extra catalog)
-    seen = {r["anime_id"] for r in res}
+                seen_ids.add(r["anime_id"])
+                if al_v:
+                    seen_al.add(al_v)
+
+    # 3. Also search Munib Server DB for exclusive titles without duplicating shared AniList IDs
     m_res = munib_rows(f"""
         SELECT {MUNIB_CARD_COLS} FROM anime
         WHERE title LIKE ? OR title_english LIKE ? OR title_romaji LIKE ? OR japanese_name LIKE ?
-        ORDER BY anilist_popularity DESC NULLS LAST
+        ORDER BY
+            CASE
+                WHEN lower(title) = lower(?) OR lower(title_english) = lower(?) OR lower(title_romaji) = lower(?) THEN 0
+                ELSE 1
+            END,
+            COALESCE(anilist_popularity, 0) DESC
         LIMIT ?
-    """, (like, like, like, like, min(limit, 60)))
+    """, (like, like, like, like, query_str, query_str, query_str, min(limit, 60)))
     for mr in m_res:
-        if mr["anime_id"] not in seen:
+        al_v = int(mr["anilist_id"]) if mr.get("anilist_id") else None
+        if mr["anime_id"] not in seen_ids and (not al_v or al_v not in seen_al):
             res.append(mr)
-            seen.add(mr["anime_id"])
+            seen_ids.add(mr["anime_id"])
+            if al_v:
+                seen_al.add(al_v)
 
     return {"results": with_flags(res[:min(limit, 60)])}
 
@@ -2150,7 +2255,7 @@ def get_vegeta_knowledge_base(conn_or_fn=None):
                    mal_score, anilist_score, anilist_popularity,
                    studios, duration, episode_count, genres, al_genres,
                    synopsis, al_description, seasons_json, anilist_status,
-                   anilist_id
+                   anilist_id, poster_url, poster_large
             FROM anime
         """)
         kb_rows = c.fetchall()
@@ -2301,6 +2406,8 @@ def get_vegeta_knowledge_base(conn_or_fn=None):
             "synopsis": syn_clean,
             "synopsis_lower": syn_combined_lower,
             "seasons_json": r[20],
+            "poster_url": (r[23] or "").strip() if len(r) > 23 else "",
+            "poster_large": (r[24] or "").strip() if len(r) > 24 else "",
         }
         al_id = r[22] if len(r) > 22 else None
         item["anilist_id"] = al_id
@@ -2537,6 +2644,7 @@ def _find_exact_or_fuzzy_title(user_msg: str, kb_items: list):
 
 
 _CHAR_VISUAL_CACHE: dict = {"loaded": False, "features": None, "meta": None}
+_POSTER_VISUAL_CACHE: dict = {"loaded": False, "features": None, "dhashes": None, "meta": None}
 _VEGETA_BRAIN_CACHE: dict = {"loaded": False, "ready": False}
 _VG_HAIR_COLOR_ORDER = (
     "pink hair", "black hair", "brown hair", "blonde hair", "blue hair",
@@ -2554,6 +2662,21 @@ _VG_HAIR_BRIDGE = {
     "aqua hair": [("blue hair", 0.45)],
     "brown eyes": [("black eyes", 0.28)],
     "black eyes": [("brown eyes", 0.25)],
+}
+_VG_EYE_COLOR_GROUPS = (
+    ("blue eyes", "aqua eyes"),
+    ("red eyes",),
+    ("green eyes",),
+    ("yellow eyes", "orange eyes"),
+    ("purple eyes",),
+    ("pink eyes",),
+    ("brown eyes", "black eyes"),
+)
+_VG_SIGNATURE_VISUAL_TAGS = {
+    "straw hat", "blindfold", "eyepatch", "horns", "pointy ears", "animal ears",
+    "cat ears", "fox ears", "glasses", "goggles", "scar", "facial mark", "mustache",
+    "beard", "bald", "katana", "scythe", "bandages", "twintails", "ahoge", "halo",
+    "wings", "tail", "kimono", "headband", "mask", "cigarette", "red scarf", "white scarf",
 }
 
 
@@ -2620,9 +2743,17 @@ def _load_char_visuals() -> tuple:
         import gzip
         import numpy as np
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        npz_path = os.path.join(base_dir, "vegeta_char_visuals.npz")
-        meta_path = os.path.join(base_dir, "vegeta_char_visuals_meta.json.gz")
-        if not os.path.exists(npz_path) or not os.path.exists(meta_path):
+        npz_path = next((p for p in (
+            os.path.join(base_dir, "vegeta_char_visuals.npz"),
+            os.path.join(os.getcwd(), "api", "vegeta_char_visuals.npz"),
+            os.path.join(os.getcwd(), "anime_app", "web", "api", "vegeta_char_visuals.npz"),
+        ) if os.path.exists(p)), None)
+        meta_path = next((p for p in (
+            os.path.join(base_dir, "vegeta_char_visuals_meta.json.gz"),
+            os.path.join(os.getcwd(), "api", "vegeta_char_visuals_meta.json.gz"),
+            os.path.join(os.getcwd(), "anime_app", "web", "api", "vegeta_char_visuals_meta.json.gz"),
+        ) if os.path.exists(p)), None)
+        if not npz_path or not meta_path:
             return None, None
         data = np.load(npz_path)
         features = data["features"].astype(np.float32)
@@ -2633,6 +2764,110 @@ def _load_char_visuals() -> tuple:
         return features, meta
     except Exception:
         return None, None
+
+
+def _load_poster_visuals() -> tuple:
+    """Lazy-load the prebuilt Google-Lens anime cover/poster visual & dHash index."""
+    if _POSTER_VISUAL_CACHE["loaded"]:
+        return _POSTER_VISUAL_CACHE["features"], _POSTER_VISUAL_CACHE["dhashes"], _POSTER_VISUAL_CACHE["meta"]
+    _POSTER_VISUAL_CACHE["loaded"] = True
+    try:
+        import gzip
+        import numpy as np
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        npz_path = next((p for p in (
+            os.path.join(base_dir, "vegeta_poster_visuals.npz"),
+            os.path.join(os.getcwd(), "api", "vegeta_poster_visuals.npz"),
+            os.path.join(os.getcwd(), "anime_app", "web", "api", "vegeta_poster_visuals.npz"),
+        ) if os.path.exists(p)), None)
+        meta_path = next((p for p in (
+            os.path.join(base_dir, "vegeta_poster_meta.json.gz"),
+            os.path.join(os.getcwd(), "api", "vegeta_poster_meta.json.gz"),
+            os.path.join(os.getcwd(), "anime_app", "web", "api", "vegeta_poster_meta.json.gz"),
+        ) if os.path.exists(p)), None)
+        if not npz_path or not meta_path:
+            return None, None, None
+        data = np.load(npz_path)
+        features = data["features"].astype(np.float32)
+        dhashes = data["dhashes"].astype(np.uint64)
+        with gzip.open(meta_path, "rb") as f:
+            meta = json.loads(f.read().decode("utf-8"))
+        _POSTER_VISUAL_CACHE["features"] = features
+        _POSTER_VISUAL_CACHE["dhashes"] = dhashes
+        _POSTER_VISUAL_CACHE["meta"] = meta
+        return features, dhashes, meta
+    except Exception:
+        return None, None, None
+
+
+def _compute_img_dhash64(img_bgr) -> int:
+    """Compute a 64-bit difference hash invariant to brightness/scaling."""
+    import cv2
+    gray = cv2.cvtColor(cv2.resize(img_bgr, (9, 8), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+    diff = gray[:, 1:] > gray[:, :-1]
+    val = 0
+    for bit in diff.ravel():
+        val = (val << 1) | int(bool(bit))
+    return int(val)
+
+
+def _match_poster_visual(raw_bytes: bytes, kb: dict, top_k: int = 3) -> list[dict]:
+    """Match an uploaded poster, cover art, or banner image against catalog covers."""
+    features, dhashes, meta = _load_poster_visuals()
+    if features is None or dhashes is None or not meta:
+        return []
+    try:
+        import cv2
+        import numpy as np
+        img = cv2.imdecode(np.frombuffer(raw_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None or img.size == 0:
+            return []
+        ph_i, pw_i = img.shape[:2]
+        variants = [img, cv2.flip(img, 1)]
+        if ph_i >= 80 and pw_i >= 80:
+            variants.append(img[int(ph_i * 0.06):int(ph_i * 0.94), int(pw_i * 0.06):int(pw_i * 0.94)])
+        best_cos = np.zeros(len(meta), dtype=np.float32)
+        best_dhash_sim = np.zeros(len(meta), dtype=np.float32)
+        for v_img in variants:
+            vec = _extract_visual_descriptor(v_img)
+            if vec is not None:
+                best_cos = np.maximum(best_cos, np.clip(features @ vec, 0.0, 1.0))
+            qh = np.uint64(_compute_img_dhash64(v_img))
+            xor_arr = np.bitwise_xor(dhashes, qh)
+            # Vectorized popcount via byte lookup table
+            bytes_view = xor_arr.view(np.uint8).reshape(-1, 8)
+            pop_lut = np.array([bin(i).count("1") for i in range(256)], dtype=np.int32)
+            hamming = pop_lut[bytes_view].sum(axis=1).astype(np.float32)
+            best_dhash_sim = np.maximum(best_dhash_sim, 1.0 - hamming / 64.0)
+
+        combined = best_cos * 0.72 + best_dhash_sim * 0.28
+        top_idx = np.argsort(combined)[::-1][:top_k]
+        by_al = kb.get("by_anilist_id") or {}
+        by_id = kb.get("by_id") or {}
+        results = []
+        for idx in top_idx:
+            i = int(idx)
+            m = meta[i]
+            matched_item = None
+            if m.get("al") and int(m["al"]) in by_al:
+                matched_item = by_al[int(m["al"])]
+            elif m.get("aid") and int(m["aid"]) in by_id:
+                matched_item = by_id[int(m["aid"])]
+            elif m.get("t"):
+                matched_item, _ = _find_exact_or_fuzzy_title(m["t"], kb["items"])
+            if not matched_item:
+                continue
+            results.append({
+                "score": float(combined[i]),
+                "cos": float(best_cos[i]),
+                "dhash_sim": float(best_dhash_sim[i]),
+                "anime_title": _vg_title(matched_item),
+                "matched_item": matched_item,
+                "source": "poster-lens",
+            })
+        return results
+    except Exception:
+        return []
 
 
 def _extract_artwork_crop(raw_bytes: bytes) -> bytes | None:
@@ -2965,13 +3200,66 @@ def _vg_call_gradio_tagger(base_url: str, model_repo: str, g_thresh: float, g_mc
 
 
 def _vg_hf_wd_tagger_identify(img_bytes: bytes) -> dict | None:
-    """Identify anime characters and visual tags using zero-key CPU HuggingFace WD-Tagger Spaces."""
+    """Run primary WD-SwinV2 and 2026 EVA02 tagger Spaces concurrently and fuse predictions."""
     norm_jpg = _vg_prepare_vision_jpeg(img_bytes, max_dim=768)
-    for base_url, model_repo, g_th, g_mc, c_th, c_mc in _VG_WD_TAGGER_BACKENDS:
-        out = _vg_call_gradio_tagger(base_url, model_repo, g_th, g_mc, c_th, c_mc, norm_jpg, wall_timeout=18.0)
-        if out and (out.get("characters") or out.get("tags")):
-            return out
-    return None
+    primary = _VG_WD_TAGGER_BACKENDS[:2]
+    outs = []
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futs = [
+            pool.submit(_vg_call_gradio_tagger, base_url, repo, g_th, g_mc, c_th, c_mc, norm_jpg, 16.0)
+            for base_url, repo, g_th, g_mc, c_th, c_mc in primary
+        ]
+        for fut in futs:
+            try:
+                res = fut.result()
+                if res and (res.get("characters") or res.get("tags")):
+                    outs.append(res)
+            except Exception:
+                pass
+
+    if not outs and len(_VG_WD_TAGGER_BACKENDS) > 2:
+        base_url, repo, g_th, g_mc, c_th, c_mc = _VG_WD_TAGGER_BACKENDS[2]
+        res = _vg_call_gradio_tagger(base_url, repo, g_th, g_mc, c_th, c_mc, norm_jpg, wall_timeout=16.0)
+        if res and (res.get("characters") or res.get("tags")):
+            outs.append(res)
+
+    if not outs:
+        return None
+    if len(outs) == 1:
+        return outs[0]
+
+    # Fuse character and visual tag confidences across both taggers cleanly
+    char_map: dict[str, dict] = {}
+    tag_map: dict[str, float] = {}
+    engines = []
+    for out in outs:
+        if out.get("engine"):
+            engines.append(out["engine"])
+        for c in (out.get("characters") or []):
+            lbl = str(c.get("label") or "").strip()
+            conf = float(c.get("confidence") or 0.0)
+            key = re.sub(r"[^a-z0-9]+", " ", lbl.lower()).strip()
+            if not key:
+                continue
+            if key in char_map:
+                prev = char_map[key]["confidence"]
+                # Dual-model agreement strengthens confidence safely below 1.0
+                char_map[key]["confidence"] = min(0.995, max(prev, conf) + 0.08 * min(prev, conf))
+            else:
+                char_map[key] = {"label": lbl, "confidence": conf}
+        for t_lbl, t_conf in (out.get("tag_scores") or []):
+            tag_map[t_lbl] = max(tag_map.get(t_lbl, 0.0), float(t_conf))
+
+    merged_chars = sorted(char_map.values(), key=lambda x: -x["confidence"])
+    merged_tag_scores = sorted(tag_map.items(), key=lambda x: -x[1])
+    merged_tags = [lbl for lbl, sc in merged_tag_scores if sc >= 0.28]
+    return {
+        "characters": merged_chars,
+        "tags": merged_tags,
+        "tag_scores": merged_tag_scores,
+        "engine": " + ".join(engines),
+    }
 
 
 def _vg_anilist_char_lookup(char_name: str, kb: dict) -> tuple[str, object | None]:
@@ -3088,15 +3376,15 @@ def _vg_lookup_char_in_kb(char_label: str, kb: dict) -> tuple[str, str | None, o
     return base_name.title(), series_hint or None, None, 0.0
 
 
-def _vg_predict_character_from_brain(wd_out: dict, kb: dict, img_bytes: bytes | None = None) -> dict | None:
-    """Match an uploaded anime artwork/fanart/closeup against the trained semantic+visual character brain."""
+def _vg_predict_characters_topk(wd_out: dict, kb: dict, img_bytes: bytes | None = None, top_k: int = 5) -> list[dict]:
+    """Return top ranked distinct anime/character candidates from the trained AniList+Danbooru neural brain."""
     brain = _vg_load_char_brain()
     feats, meta = _load_char_visuals()
     if not brain or not meta:
-        return None
+        return []
     tag_scores = wd_out.get("tag_scores") or [(t, 0.65) for t in (wd_out.get("tags") or [])]
     if not tag_scores:
-        return None
+        return []
 
     import numpy as np
     vmap = brain["vocab_map"]
@@ -3106,24 +3394,26 @@ def _vg_predict_character_from_brain(wd_out: dict, kb: dict, img_bytes: bytes | 
     raw_tag_dict: dict[str, float] = {}
 
     for lbl, conf in tag_scores:
-        raw_tag_dict[lbl] = max(raw_tag_dict.get(lbl, 0.0), float(conf))
+        cval = float(conf)
+        raw_tag_dict[lbl] = max(raw_tag_dict.get(lbl, 0.0), cval)
         if lbl in vmap:
             idx = vmap[lbl]
-            q_map[idx] = max(q_map.get(idx, 0.0), float(conf))
+            sig_mult = 1.35 if lbl in _VG_SIGNATURE_VISUAL_TAGS else 1.0
+            q_map[idx] = max(q_map.get(idx, 0.0), cval * sig_mult)
         for alt_lbl, mult in _VG_HAIR_BRIDGE.get(lbl, ()):
-            if alt_lbl in vmap and raw_tag_dict.get(alt_lbl, 0.0) < conf * mult:
+            if alt_lbl in vmap and raw_tag_dict.get(alt_lbl, 0.0) < cval * mult:
                 alt_idx = vmap[alt_lbl]
-                q_map[alt_idx] = max(q_map.get(alt_idx, 0.0), float(conf) * mult)
+                q_map[alt_idx] = max(q_map.get(alt_idx, 0.0), cval * mult)
 
     if len(q_map) < 2:
-        return None
+        return []
 
     q_vec = np.zeros(len(idf), dtype=np.float32)
     for ti, val in q_map.items():
         q_vec[ti] = val * idf[ti]
     q_norm = float(np.linalg.norm(q_vec))
     if q_norm < 1e-6:
-        return None
+        return []
     q_vec /= q_norm
 
     cos_sem = np.bincount(
@@ -3165,7 +3455,7 @@ def _vg_predict_character_from_brain(wd_out: dict, kb: dict, img_bytes: bytes | 
         if max_hair_p >= 0.65:
             score = np.where(~has_compat, score - 0.16, score)
 
-    # Visual portrait affinity tie-breaker
+    # Visual portrait affinity tie-breaker (kept gentle so color tones never overwhelm semantic traits)
     if img_bytes and feats is not None and len(feats) == n_chars:
         try:
             import cv2
@@ -3173,18 +3463,15 @@ def _vg_predict_character_from_brain(wd_out: dict, kb: dict, img_bytes: bytes | 
             dv = _extract_visual_descriptor(im)
             if dv is not None:
                 cos_vis = feats @ dv
-                score = score + 0.06 * np.clip(cos_vis, 0.0, 1.0)
+                score = score + 0.05 * np.clip(cos_vis, 0.0, 1.0)
         except Exception:
             pass
 
-    score = score + 0.06 * brain["pop_bonus"] + 0.025 * brain["role"]
+    score = score + 0.055 * brain["pop_bonus"] + 0.025 * brain["role"]
 
-    top_idxs = np.argsort(score)[::-1][:10]
+    top_idxs = np.argsort(score)[::-1][:45]
     by_al = kb.get("by_anilist_id") or {}
     by_mal = kb.get("by_mal_id") or {}
-    best_i = int(top_idxs[0])
-    if float(cos_sem[best_i]) < 0.24 or float(score[best_i]) < 0.34:
-        return None
 
     def _resolve_meta_item(m_row: dict):
         cands = []
@@ -3201,31 +3488,47 @@ def _vg_predict_character_from_brain(wd_out: dict, kb: dict, img_bytes: bytes | 
         cands.sort(key=_vg_anime_entry_priority, reverse=True)
         return cands[0]
 
-    m_best = meta[best_i]
-    matched_item = _resolve_meta_item(m_best)
-    if not matched_item:
-        for alt_idx in top_idxs[1:4]:
-            cand_m = meta[int(alt_idx)]
-            cand_it = _resolve_meta_item(cand_m)
-            if cand_it and float(cos_sem[int(alt_idx)]) >= 0.25:
-                m_best = cand_m
-                matched_item = cand_it
-                best_i = int(alt_idx)
-                break
-    if not matched_item:
-        return None
+    out: list[dict] = []
+    seen_fran: set[str] = set()
+    for raw_i in top_idxs:
+        idx_i = int(raw_i)
+        if float(cos_sem[idx_i]) < 0.17 or float(score[idx_i]) < 0.24:
+            continue
+        m_row = meta[idx_i]
+        matched_item = _resolve_meta_item(m_row)
+        if not matched_item:
+            continue
+        fran_key = str(matched_item.get("franchise") or matched_item["anime_id"])
+        if fran_key in seen_fran:
+            continue
+        seen_fran.add(fran_key)
+        conf_pct = min(0.95, max(0.45, 0.36 + float(score[idx_i]) * 0.72))
+        out.append({
+            "score": conf_pct,
+            "raw_score": float(score[idx_i]),
+            "cos_sem": float(cos_sem[idx_i]),
+            "character": m_row.get("n") or "Identified Character",
+            "characters_list": [m_row.get("n") or "Identified Character"],
+            "anime_title": _vg_title(matched_item),
+            "anilist_id": m_row.get("al"),
+            "mal_id": m_row.get("mal"),
+            "matched_item": matched_item,
+            "source": "vegeta-neural-brain",
+        })
+        if len(out) >= top_k:
+            break
+    return out
 
-    conf_pct = min(0.96, max(0.72, 0.45 + float(score[best_i]) * 0.65))
-    return {
-        "score": conf_pct,
-        "character": m_best.get("n") or "Identified Character",
-        "characters_list": [m_best.get("n") or "Identified Character"],
-        "anime_title": matched_item.get("title_english") or matched_item.get("title") or m_best.get("t"),
-        "anilist_id": m_best.get("al"),
-        "mal_id": m_best.get("mal"),
-        "matched_item": matched_item,
-        "source": "vegeta-neural-brain",
-    }
+
+def _vg_predict_character_from_brain(wd_out: dict, kb: dict, img_bytes: bytes | None = None) -> dict | None:
+    """Return top confident neural brain character prediction if it meets lock criteria."""
+    cands = _vg_predict_characters_topk(wd_out, kb, img_bytes=img_bytes, top_k=2)
+    if not cands:
+        return None
+    top = cands[0]
+    if top["cos_sem"] < 0.24 or top["raw_score"] < 0.34:
+        return None
+    return top
 
 
 def _vg_resolve_wd_results(wd_out: dict, kb: dict, img_bytes: bytes | None = None) -> dict | None:
@@ -3271,48 +3574,73 @@ def _vg_resolve_wd_results(wd_out: dict, kb: dict, img_bytes: bytes | None = Non
                 detected_names.append((al_name, conf))
 
     best_char_match = None
+    top_candidates: list[dict] = []
+    seen_fran: set[str] = set()
+
     if votes:
         ranked = sorted(
             votes.values(),
             key=lambda v: (v["score"], v["max_conf"], v["item"].get("popularity") or 0),
             reverse=True,
         )
-        top = ranked[0]
-        if top["score"] >= 0.45 or top["max_conf"] >= 0.45:
-            it = top["item"]
-            best_char_match = {
-                "score": min(0.99, max(top["max_conf"], min(0.98, top["score"]))),
-                "character": top["chars"][0] if top["chars"] else "Identified Character",
-                "characters_list": top["chars"][:6],
-                "anime_title": it.get("title_english") or it.get("title"),
-                "anilist_id": it.get("anilist_id"),
-                "mal_id": it.get("mal_id"),
-                "matched_item": it,
+        for v_entry in ranked[:4]:
+            v_it = v_entry["item"]
+            fk = str(v_it.get("franchise") or v_it["anime_id"])
+            if fk in seen_fran:
+                continue
+            seen_fran.add(fk)
+            cand_obj = {
+                "score": min(0.99, max(v_entry["max_conf"], min(0.98, v_entry["score"]))),
+                "character": v_entry["chars"][0] if v_entry["chars"] else "Identified Character",
+                "characters_list": v_entry["chars"][:6],
+                "anime_title": _vg_title(v_it),
+                "anilist_id": v_it.get("anilist_id"),
+                "mal_id": v_it.get("mal_id"),
+                "matched_item": v_it,
                 "source": wd_out.get("engine") or "wd-tagger",
             }
-    if not best_char_match:
-        brain_hit = _vg_predict_character_from_brain(wd_out, kb, img_bytes=img_bytes)
-        if brain_hit:
-            best_char_match = brain_hit
-            detected_names = [(brain_hit["character"], brain_hit["score"])]
+            top_candidates.append(cand_obj)
+        if top_candidates and (ranked[0]["score"] >= 0.45 or ranked[0]["max_conf"] >= 0.45):
+            best_char_match = top_candidates[0]
 
-    if not best_char_match and tags:
-        # Check distinctive franchise-specific tags if characters missed threshold
+    brain_cands = _vg_predict_characters_topk(wd_out, kb, img_bytes=img_bytes, top_k=5)
+    for bc in brain_cands:
+        bc_it = bc.get("matched_item")
+        fk = str((bc_it or {}).get("franchise") or (bc_it or {}).get("anime_id") or "")
+        if fk and fk not in seen_fran:
+            seen_fran.add(fk)
+            top_candidates.append(bc)
+
+    if not best_char_match and brain_cands:
+        top_bc = brain_cands[0]
+        if top_bc.get("cos_sem", 0.0) >= 0.24 and top_bc.get("raw_score", 0.0) >= 0.34:
+            best_char_match = top_bc
+            detected_names = [(top_bc["character"], top_bc["score"])]
+
+    if tags:
+        # Check distinctive franchise-specific tags for additional anime hints
         sig_tags = [t for t in tags if t not in _VG_GENERIC_WD_TAGS and not re.match(r"^\d+(?:boy|girl)s?$", t)]
-        tag_cands = _vg_identify_scene_candidates(" ".join(sig_tags[:10]), kb["items"], kb=kb, limit=2) if len(sig_tags) >= 3 else []
-        if tag_cands and tag_cands[0][0] >= 35.0:
-            t_it = tag_cands[0][1]
-            best_char_match = {
-                "score": min(0.84, 0.55 + tag_cands[0][0] / 120.0),
-                "character": f"Visual elements ({', '.join(sig_tags[:3])})",
-                "characters_list": [],
-                "anime_title": t_it.get("title_english") or t_it.get("title"),
-                "matched_item": t_it,
-                "source": "wd-tags-scene",
-            }
+        tag_cands = _vg_identify_scene_candidates(" ".join(sig_tags[:10]), kb["items"], kb=kb, limit=3) if len(sig_tags) >= 3 else []
+        for t_row in tag_cands:
+            t_score, t_it = t_row[0], t_row[1]
+            fk = str(t_it.get("franchise") or t_it["anime_id"])
+            if t_score >= 28.0 and fk not in seen_fran:
+                seen_fran.add(fk)
+                tag_obj = {
+                    "score": min(0.84, 0.52 + t_score / 120.0),
+                    "character": f"Visual motifs ({', '.join(sig_tags[:3])})",
+                    "characters_list": [],
+                    "anime_title": _vg_title(t_it),
+                    "matched_item": t_it,
+                    "source": "wd-tags-scene",
+                }
+                top_candidates.append(tag_obj)
+                if not best_char_match and t_score >= 38.0:
+                    best_char_match = tag_obj
 
     return {
         "best_char_match": best_char_match,
+        "top_candidates": top_candidates[:5],
         "vision_characters": detected_names[:6],
         "vision_tags": [t for t in tags[:14] if t not in {"english text", "fake screenshot"}],
         "vision_engine": wd_out.get("engine"),
@@ -3320,7 +3648,7 @@ def _vg_resolve_wd_results(wd_out: dict, kb: dict, img_bytes: bytes | None = Non
 
 
 def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision: bool = True) -> dict:
-    """Reverse search anime screenshots/portraits via trace.moe (?cutBorders), local MAL index, and zero-key WD-Tagger."""
+    """Google-Lens anime reverse search: 3-view trace.moe + poster dHash + dual WD-Tagger + AniList/Danbooru Neural Brain."""
     if not image_base64:
         return None
     clean_b64 = image_base64
@@ -3334,25 +3662,37 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision:
 
     try:
         # Reject solid blank / nearly blank frames to avoid trace.moe fade-to-black false positives
+        flipped_bytes = None
         try:
             import cv2 as _cv2
             import numpy as _np
             _arr = _np.frombuffer(img_bytes, dtype=_np.uint8)
-            _im = _cv2.imdecode(_arr, _cv2.IMREAD_GRAYSCALE)
-            if _im is not None and float(_np.std(_im)) < 4.0:
-                return {"similarity": 0.0, "confident": False, "matched_item": None, "best_char_match": None, "vision_tags": []}
+            _im_bgr = _cv2.imdecode(_arr, _cv2.IMREAD_COLOR)
+            if _im_bgr is not None and _im_bgr.size > 0:
+                _im = _cv2.cvtColor(_im_bgr, _cv2.COLOR_BGR2GRAY)
+                if float(_np.std(_im)) < 4.0:
+                    return {"similarity": 0.0, "confident": False, "matched_item": None, "best_char_match": None, "top_candidates": [], "vision_tags": []}
+                # Horizontally mirrored probe catches TikTok / Instagram copyright-flipped edits
+                _ok_f, _buf_f = _cv2.imencode(".jpg", _cv2.flip(_im_bgr, 1), [int(_cv2.IMWRITE_JPEG_QUALITY), 88])
+                if _ok_f:
+                    flipped_bytes = _buf_f.tobytes()
         except Exception:
             pass
 
         raw_jpg = _vg_prepare_vision_jpeg(img_bytes, max_dim=960)
         cropped_bytes = _extract_artwork_crop(raw_jpg)
 
-        # Query trace.moe concurrently with raw + artwork-cropped frames for maximum lock accuracy
-        probe_list = [cropped_bytes, raw_jpg] if cropped_bytes else [raw_jpg]
+        # Query trace.moe concurrently with raw + artwork-cropped + horizontally flipped frames
+        probe_list = [raw_jpg]
+        if cropped_bytes:
+            probe_list.insert(0, cropped_bytes)
+        if flipped_bytes:
+            probe_list.append(flipped_bytes)
+
         all_results: list[dict] = []
         if len(probe_list) > 1:
             from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            with ThreadPoolExecutor(max_workers=len(probe_list)) as pool:
                 futs = [pool.submit(_vg_query_trace_moe, b) for b in probe_list]
                 for f in futs:
                     try:
@@ -3380,6 +3720,29 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision:
                     m_it, _ = _find_exact_or_fuzzy_title(clean_fn, kb["items"])
             return m_it
 
+        # Collect top deduplicated trace.moe candidates (>= 0.62 similarity)
+        trace_candidates: list[dict] = []
+        seen_tr_fran: set[str] = set()
+        for cand in all_results[:8]:
+            tsim = float(cand.get("similarity") or 0.0)
+            if tsim < 0.62:
+                continue
+            t_it = _resolve_trace_item(cand)
+            if not t_it:
+                continue
+            fk = str(t_it.get("franchise") or t_it["anime_id"])
+            if fk in seen_tr_fran:
+                continue
+            seen_tr_fran.add(fk)
+            trace_candidates.append({
+                "score": tsim,
+                "episode": cand.get("episode") or 1,
+                "from_seconds": float(cand.get("from") or 0.0),
+                "anime_title": _vg_title(t_it),
+                "matched_item": t_it,
+                "source": "trace.moe",
+            })
+
         # High-confidence (>= 0.87) trace.moe episode frame lock
         if best_sim >= 0.87:
             for cand in all_results[:4]:
@@ -3397,18 +3760,41 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision:
                         "filename": cand.get("filename") or "",
                         "matched_item": matched_item,
                         "char_matches": [],
+                        "top_candidates": trace_candidates[:4],
+                        "trace_candidates": trace_candidates[:3],
                         "cropped": bool(cropped_bytes),
                     }
 
-        # Tier 2: Fast local MAL/AniList Character Portrait Visual Index
+        # Tier 2: Fast local Cover/Poster Lens + Strict Official Portrait Lock
         search_bytes = cropped_bytes if cropped_bytes else raw_jpg
+        poster_matches = _match_poster_visual(search_bytes, kb, top_k=3)
+        top_poster = poster_matches[0] if poster_matches else None
+        second_poster = poster_matches[1] if len(poster_matches) > 1 else None
+        poster_margin = (top_poster["score"] - (second_poster["score"] if second_poster else 0.0)) if top_poster else 0.0
+        poster_lock = None
+        if top_poster and (
+            (top_poster["score"] >= 0.89 and poster_margin >= 0.03)
+            or (top_poster.get("dhash_sim", 0.0) >= 0.88 and top_poster.get("cos", 0.0) >= 0.80)
+        ):
+            poster_lock = {
+                "score": min(0.98, max(top_poster["score"], 0.88)),
+                "character": "Official Poster / Key Visual",
+                "characters_list": [],
+                "anime_title": top_poster["anime_title"],
+                "matched_item": top_poster["matched_item"],
+                "source": "poster-lens",
+            }
+
         char_matches = _match_character_visual(search_bytes, kb, top_k=3)
         top_char = char_matches[0] if char_matches else None
-        local_char_lock = top_char if (top_char and top_char["score"] >= 0.90) else None
+        second_char = char_matches[1] if len(char_matches) > 1 else None
+        char_margin = (top_char["score"] - (second_char["score"] if second_char else 0.0)) if top_char else 0.0
+        # Only trust raw visual portrait histogram alone when near-identical official crop (high score + clear margin)
+        local_char_lock = top_char if (top_char and top_char["score"] >= 0.945 and char_margin >= 0.045) else None
 
-        # Tier 3: Zero-key AI Anime Vision (always scan full raw_jpg first so dark/edge characters aren't lost)
+        # Tier 3: Zero-key AI Anime Vision (always scan raw_jpg + cropped if helpful)
         vision_res = None
-        if not local_char_lock and use_remote_vision:
+        if not poster_lock and not local_char_lock and use_remote_vision:
             wd_raw = _vg_hf_wd_tagger_identify(raw_jpg)
             vision_res = _vg_resolve_wd_results(wd_raw, kb, img_bytes=raw_jpg)
             if (not vision_res or not vision_res.get("best_char_match")) and cropped_bytes:
@@ -3417,17 +3803,41 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision:
                 if crop_res and (crop_res.get("best_char_match") or not vision_res):
                     vision_res = crop_res
 
-        best_char_match = local_char_lock
+        best_char_match = poster_lock or local_char_lock
         if not best_char_match and vision_res and vision_res.get("best_char_match"):
             best_char_match = vision_res["best_char_match"]
-        elif not best_char_match and top_char and top_char["score"] >= 0.86:
-            best_char_match = top_char
 
-        # Cross-verify mid-confidence trace.moe (0.78 - 0.87) with vision tags/anime agreement
+        # Build unified ranked Lens candidate list across all active visual engines
+        merged_cands: list[dict] = []
+        seen_c_fran: set[str] = set()
+        for src_list in (
+            ([best_char_match] if best_char_match else []),
+            (vision_res or {}).get("top_candidates") or [],
+            [p for p in poster_matches[:2] if p.get("score", 0.0) >= 0.72],
+            [t for t in trace_candidates[:2] if t.get("score", 0.0) >= 0.66],
+        ):
+            for c_obj in src_list:
+                c_it = (c_obj or {}).get("matched_item")
+                if not c_it:
+                    continue
+                fk = str(c_it.get("franchise") or c_it["anime_id"])
+                if fk in seen_c_fran:
+                    continue
+                seen_c_fran.add(fk)
+                merged_cands.append(c_obj)
+
+        # Cross-verify mid-confidence trace.moe (0.78 - 0.87) with vision/poster agreement
         weak_trace_item = _resolve_trace_item(all_results[0]) if all_results else None
-        if best_char_match and weak_trace_item and best_sim >= 0.78:
-            bcm_item = best_char_match.get("matched_item")
-            if bcm_item and bcm_item["anime_id"] == weak_trace_item["anime_id"]:
+        if weak_trace_item and best_sim >= 0.78:
+            agrees = False
+            for mc in merged_cands[:3]:
+                mc_it = mc.get("matched_item")
+                if mc_it and (mc_it["anime_id"] == weak_trace_item["anime_id"] or (
+                    mc_it.get("franchise") and mc_it.get("franchise") == weak_trace_item.get("franchise")
+                )):
+                    agrees = True
+                    break
+            if agrees:
                 return {
                     "similarity": best_sim,
                     "confident": True,
@@ -3438,6 +3848,9 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision:
                     "matched_item": weak_trace_item,
                     "best_char_match": best_char_match,
                     "char_matches": char_matches,
+                    "poster_matches": poster_matches,
+                    "top_candidates": merged_cands[:5],
+                    "trace_candidates": trace_candidates[:3],
                     "vision_characters": (vision_res or {}).get("vision_characters") or [],
                     "vision_tags": (vision_res or {}).get("vision_tags") or [],
                     "vision_engine": (vision_res or {}).get("vision_engine"),
@@ -3453,7 +3866,10 @@ def _vegeta_reverse_image_search(image_base64: str, kb: dict, use_remote_vision:
             "filename": (all_results[0].get("filename") or "") if all_results else "",
             "matched_item": None,
             "char_matches": char_matches,
+            "poster_matches": poster_matches,
             "best_char_match": best_char_match,
+            "top_candidates": merged_cands[:5],
+            "trace_candidates": trace_candidates[:3],
             "vision_characters": (vision_res or {}).get("vision_characters") or [],
             "vision_tags": (vision_res or {}).get("vision_tags") or [],
             "vision_engine": (vision_res or {}).get("vision_engine"),
@@ -3538,6 +3954,8 @@ def _detect_play_intent(user_msg: str, items: list, user_context: dict = None) -
     # Only treat it as a command when the message STARTS with a play verb
     # ("what should i watch" / "watch order of naruto" must not auto-play anything)
     if re.match(r"^(?:\W*)(?:please\s+|can you\s+|could you\s+|vegeta\W*|let'?s\s+|i want to\s+|i wanna\s+)*watch\s+order\b", msg_low):
+        return None
+    if re.search(r"\b(?:add|ad|put|save|bookmark)\b.{0,80}\b(?:my\s+|ad\s+)?(?:list|watchlist|watch\s*list|library|libary|collection|favorites|favourites|saved)\b", msg_low):
         return None
     if not re.match(r"^(?:\W*)(?:please\s+|can you\s+|could you\s+|vegeta\W*|let'?s\s+|i want to\s+|i wanna\s+|agentic\s+)*(auto[- ]?play:?|auto[- ]?launch:?|autoplay:?|play|start|watch|stream|put on|launch|resume|continue)\b", msg_low):
         return None
@@ -3919,12 +4337,12 @@ import random as _vg_random
 import datetime as _vg_dt
 
 _VG_CMD_VERBS = (
-    "play", "start", "watch", "stream", "resume", "continue", "add", "save", "bookmark", "remove",
+    "play", "start", "watch", "stream", "resume", "continue", "add", "ad", "save", "bookmark", "remove",
     "delete", "drop", "open", "show", "go", "take", "navigate", "search", "look up", "switch", "change",
     "next", "skip", "previous", "prev", "put", "launch", "browse", "explore", "surprise", "pull up",
     "bring up", "set", "turn", "dub", "sub", "boost", "increase", "pause", "fullscreen", "mute", "unmute",
 )
-_VG_LIST_WORDS = r"(?:my\s+)?(?:list|watchlist|watch\s+list|library|collection|favorites|favourites|saved)"
+_VG_LIST_WORDS = r"(?:my\s+|your\s+|the\s+|our\s+|ad\s+)?(?:list|watchlist|watch\s*list|library|libary|collection|favorites|favourites|saved)"
 
 
 def _vg_title(it):
@@ -4070,9 +4488,12 @@ def _vg_parse_filters(msg_low):
         f["status"] = "airing"
     elif re.search(r"\b(?:finished|completed|complete series)\b", msg_low):
         f["status"] = "finished"
-    m = re.search(r"\btop\s+(\d{1,2})\b", msg_low) or re.search(r"\b(\d{1,2})\s+(?:anime|shows|series|movies|titles|recommendations|picks)\b", msg_low)
+    m = (
+        re.search(r"\btop\s+(\d{1,2})\b", msg_low)
+        or re.search(r"\b(\d{1,2})\s+(?:[a-z0-9-]+\s+){0,3}?(?:anime|shows|series|movies|titles|recommendations|picks)\b", msg_low)
+    )
     if m:
-        f["limit"] = max(1, min(int(m.group(1)), 10))
+        f["limit"] = max(1, min(int(m.group(1)), 30))
     if re.search(r"\b(?:best|top|highest rated|highest-rated|greatest|masterpiece|masterpieces|goated)\b", msg_low):
         f["sort"] = "score"
     elif re.search(r"\b(?:new|newest|latest|recent)\b", msg_low):
@@ -4092,7 +4513,7 @@ def _vg_search(items, genres=None, query=None, year_min=None, year_max=None, min
     exclude_ids = set(exclude_ids or [])
     want_adult = "hentai" in genres
     try:
-        limit = max(1, min(int(limit or 8), 15))
+        limit = max(1, min(int(limit or 8), 30))
     except Exception:
         limit = 8
     res = []
@@ -4365,12 +4786,15 @@ def _vg_parse_clause(clause, kb, ctx, history):
         if not it:
             return {"error": "not_found", "query": m.group(1)}
         return {"type": "remove_from_list", "anime_id": it["anime_id"], "title": _vg_title(it)}
-    m = re.match(rf"^(?:add|save|bookmark|put)\s+(.*?)\s*(?:to|in|into|on)\s+{_VG_LIST_WORDS}$", c) \
-        or re.match(r"^(?:add|save|bookmark)\s+(.+)$", c)
+    m = re.match(rf"^(?:add|ad|save|bookmark|put)\s+(.*?)\s*(?:to|in|into|on)\s+{_VG_LIST_WORDS}$", c) \
+        or re.match(r"^(?:add|ad|save|bookmark)\s+(.+)$", c)
     if m:
-        it = _vg_resolve_target(m.group(1), kb, ctx, history)
+        raw_target = m.group(1).strip()
+        if re.search(r"\b\d+\b", raw_target) or re.search(r"\b(?:anime|shows|movies|series|titles)\b", raw_target):
+            return None
+        it = _vg_resolve_target(raw_target, kb, ctx, history)
         if not it:
-            return {"error": "not_found", "query": m.group(1)}
+            return {"error": "not_found", "query": raw_target}
         return {"type": "add_to_list", "anime_id": it["anime_id"], "title": _vg_title(it)}
 
     # 4. Surprise me / random pick
@@ -4456,8 +4880,113 @@ def _vg_parse_clause(clause, kb, ctx, history):
             "title": _vg_title(it), "audio": audio}
 
 
+_VG_BATCH_LIST_RE = re.compile(
+    r"\b(?:add|ad|put|save|bookmark)\b.{0,80}\b(?:my\s+|ad\s+)?(?:list|watchlist|watch\s*list|library|libary|collection|favorites|favourites|saved)\b|"
+    r"\b(?:into|in|to|on)\s+(?:my\s+|ad\s+)?(?:list|watchlist|watch\s*list|library|libary|collection)\b",
+    re.I,
+)
+
+_VG_URL_OR_RESEARCH_RE = re.compile(
+    r"https?://|www\.|youtu\.be/|youtube\.com/|instagram\.com/|"
+    r"\bsearch\b.{0,24}\b(?:web|online|google|internet|youtube|insta(?:gram)?|news|articles?|wiki(?:pedia)?|headline)\b|"
+    r"\b(?:latest news|anime news|live (?:anime )?news|release date|announced|season \d+ release|what'?s new|upcoming season|browse|read (?:this )?(?:link|url|video|reel|post|page|article|site))\b|"
+    r"\b(?:find|pick|get|give|recommend|suggest|put|add|ad|save|bookmark)\s+\d+\s+.*?\b(?:list|library|libary|watchlist)\b",
+    re.I,
+)
+
+
+def _vg_is_batch_list_request(user_msg: str) -> bool:
+    """Return True when the user asks to find/curate/add anime (plural or filtered) into My List / Library."""
+    if not user_msg:
+        return False
+    low = user_msg.lower()
+    if not _VG_BATCH_LIST_RE.search(low):
+        return False
+    filters = _vg_parse_filters(low)
+    return bool(
+        re.search(r"\b\d+\b", low)
+        or filters.get("genres")
+        or filters.get("type")
+        or filters.get("year_min")
+        or filters.get("min_score")
+        or filters.get("status")
+        or re.search(r"\b(?:some|top|best|more|random|recommend|find|suggest|pick)\b", low)
+    )
+
+
+def _vg_deterministic_batch_add(user_msg: str, kb: dict, ctx: dict) -> Optional[dict]:
+    """Deterministically curate matching catalog titles (excluding saved IDs) and build a validated add_many_to_list payload."""
+    low = (user_msg or "").lower()
+    filters = _vg_parse_filters(low)
+    wanted_n = int(filters.get("limit") or 10)
+    wanted_n = max(1, min(wanted_n, 30))
+
+    saved_ids = set()
+    for row in ((ctx or {}).get("my_list") or []):
+        try:
+            saved_ids.add(int(row.get("anime_id")))
+        except Exception:
+            pass
+
+    picks = _vg_search(
+        kb["items"],
+        genres=filters.get("genres"),
+        year_min=filters.get("year_min"),
+        year_max=filters.get("year_max"),
+        min_score=filters.get("min_score"),
+        type=filters.get("type"),
+        max_eps=filters.get("max_eps"),
+        min_eps=filters.get("min_eps"),
+        status=filters.get("status"),
+        sort=filters.get("sort", "popularity"),
+        limit=wanted_n,
+        exclude_ids=saved_ids,
+    )
+    if len(picks) < wanted_n and saved_ids:
+        picks = _vg_search(
+            kb["items"],
+            genres=filters.get("genres"),
+            year_min=filters.get("year_min"),
+            year_max=filters.get("year_max"),
+            min_score=filters.get("min_score"),
+            type=filters.get("type"),
+            max_eps=filters.get("max_eps"),
+            min_eps=filters.get("min_eps"),
+            status=filters.get("status"),
+            sort=filters.get("sort", "popularity"),
+            limit=wanted_n,
+        )
+    if not picks:
+        return None
+
+    genre_txt = (" " + ", ".join(g.title() for g in (filters.get("genres") or []))) if filters.get("genres") else ""
+    raw_action = {"type": "add_many_to_list", "items": [{"anime_id": it["anime_id"]} for it in picks]}
+    valid_actions = _vg_validate_actions([raw_action], kb)
+    if not valid_actions:
+        return None
+    lines = [
+        f"Hmph. Done, warrior. Added **{len(picks)}{genre_txt}** anime directly to your library:",
+        "",
+    ]
+    for it in picks:
+        sc = it.get("score") or "8.0"
+        lines.append(f"- **{_vg_title(it)}** (★ {sc}/10) — [Watch on KuroAnime](#anime/{it['anime_id']})")
+    return {
+        "ok": True,
+        "reply": "\n".join(lines),
+        "action": valid_actions[0],
+        "actions": valid_actions,
+        "used_gemini": False,
+        "used_cline": False,
+        "provider": "local_batch",
+        "model": None,
+    }
+
+
 def _vegeta_plan_actions(user_msg, kb, ctx, history):
     if not user_msg:
+        return None
+    if _VG_URL_OR_RESEARCH_RE.search(user_msg) or _vg_is_batch_list_request(user_msg):
         return None
     actions, failed = [], []
     for clause in _vg_split_clauses(user_msg.strip()):
@@ -4545,6 +5074,36 @@ def _vg_validate_actions(actions, kb):
     for a in actions or []:
         if not isinstance(a, dict) or not a.get("type"):
             continue
+        if a["type"] == "add_many_to_list":
+            clean_items = []
+            seen_aids = set()
+            for entry in (a.get("items") or []):
+                try:
+                    aid = int(entry.get("anime_id") if isinstance(entry, dict) else entry)
+                except Exception:
+                    continue
+                if aid in seen_aids:
+                    continue
+                it = by_id.get(aid)
+                if not it:
+                    continue
+                seen_aids.add(aid)
+                clean_items.append({
+                    "anime_id": aid,
+                    "title": _vg_title(it),
+                    "poster": it.get("poster_large") or it.get("poster_url") or "",
+                    "anime_type": it.get("type") or "TV",
+                    "anilist_score": it.get("score"),
+                })
+                if len(clean_items) >= 30:
+                    break
+            if clean_items:
+                out.append({
+                    "type": "add_many_to_list",
+                    "items": clean_items,
+                    "count": len(clean_items),
+                })
+            continue
         if a["type"] in ("play", "open", "trailer", "add_to_list", "remove_from_list"):
             try:
                 aid = int(a.get("anime_id"))
@@ -4556,6 +5115,10 @@ def _vg_validate_actions(actions, kb):
             a["anime_id"] = aid
             if it:
                 a["title"] = a.get("title") or _vg_title(it)
+                if a["type"] == "add_to_list":
+                    a["poster"] = a.get("poster") or it.get("poster_large") or it.get("poster_url") or ""
+                    a["anime_type"] = a.get("anime_type") or it.get("type") or "TV"
+                    a["anilist_score"] = it.get("score")
             if a["type"] == "play":
                 try:
                     a["episode"] = max(1, int(a.get("episode") or 1))
@@ -4566,7 +5129,8 @@ def _vg_validate_actions(actions, kb):
                 except Exception:
                     a["time"] = 0
         out.append(a)
-    return out[:6]
+    max_cap = 30 if all(x.get("type") in ("add_to_list", "add_many_to_list", "remove_from_list") for x in out) else 6
+    return out[:max_cap]
 
 
 # ── Smart non-command answers (local brain, no API key needed) ──
@@ -4718,11 +5282,788 @@ def _vg_smart_answer(user_msg, kb, ctx, history):
     return None
 
 
+# ─── Vegeta Lite Agentic Web, YouTube & Instagram Browser Engine ──────────────
+_VG_WEB_CACHE: dict[str, tuple[float, dict]] = {}
+_VG_WEB_CACHE_TTL_SEC = 600.0
+_VG_WEB_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
+
+
+def _vg_validate_public_url(raw_url: str) -> tuple[bool, str, str]:
+    """Validate HTTP(S) URL and block loopback, private LAN, link-local, and metadata IPs (SSRF guard)."""
+    candidate = str(raw_url or "").strip()
+    if not candidate:
+        return False, "", "Empty URL"
+    if not re.match(r"^https?://", candidate, re.I):
+        if re.match(r"^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}(?:/|$)", candidate, re.I):
+            candidate = "https://" + candidate
+        else:
+            return False, candidate, "Only http:// and https:// URLs are allowed"
+    try:
+        parsed = urllib.parse.urlparse(candidate)
+    except Exception:
+        return False, candidate, "Malformed URL"
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        return False, candidate, "Invalid HTTP(S) URL"
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host or host in ("localhost", "localhost.localdomain") or host.endswith((".local", ".internal", ".localhost")):
+        return False, candidate, "Local/internal hostnames are blocked"
+    try:
+        if _is_ip_literal(host):
+            if not _ipaddress.ip_address(host).is_global:
+                return False, candidate, "Private or non-global IP addresses are blocked"
+        else:
+            infos = _socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=_socket.SOCK_STREAM)
+            if not infos:
+                return False, candidate, "Could not resolve hostname"
+            for info in infos:
+                ip_str = info[4][0].split("%")[0]
+                if not _ipaddress.ip_address(ip_str).is_global:
+                    return False, candidate, f"Resolved non-global IP ({ip_str}) blocked"
+    except Exception as err:
+        return False, candidate, f"DNS validation error: {err}"
+    return True, candidate, ""
+
+
+def _vg_safe_http_get(
+    url: str,
+    headers: Optional[dict] = None,
+    timeout: float = 9.0,
+    max_bytes: int = 1_600_000,
+) -> tuple[Optional[str], int, str, str]:
+    """Fetch public HTTP(S) URL safely with per-hop SSRF validation and bounded body read."""
+    cur_url = url
+    req_headers = {"User-Agent": _VG_WEB_UA, "Accept-Language": "en-US,en;q=0.9"}
+    if headers:
+        req_headers.update(headers)
+
+    for _hop in range(4):
+        ok, clean_url, err = _vg_validate_public_url(cur_url)
+        if not ok:
+            return None, 403, cur_url, err
+        try:
+            with _STREAM_SESSION.get(
+                clean_url,
+                headers=req_headers,
+                timeout=timeout,
+                allow_redirects=False,
+                stream=True,
+            ) as resp:
+                status = int(resp.status_code)
+                if status in (301, 302, 303, 307, 308):
+                    loc = resp.headers.get("Location") or ""
+                    if not loc:
+                        return None, status, clean_url, "Empty redirect"
+                    cur_url = urllib.parse.urljoin(clean_url, loc.strip())
+                    continue
+                chunks = []
+                total = 0
+                for chunk in resp.iter_content(chunk_size=16384):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_bytes:
+                        chunks.append(chunk[: max_bytes - (total - len(chunk))])
+                        break
+                    chunks.append(chunk)
+                raw_bytes = b"".join(chunks)
+                enc = resp.encoding or "utf-8"
+                text = raw_bytes.decode(enc, errors="replace")
+                ctype = (resp.headers.get("Content-Type") or "").lower()
+                return text, status, clean_url, ctype
+        except Exception as err:
+            return None, 0, clean_url, str(err)
+    return None, 310, cur_url, "Too many redirects"
+
+
+def _vg_sanitize_external_text(text: str, limit: int = 3800) -> str:
+    """Normalize untrusted external text and strip control chars / action-comment injections."""
+    txt = str(text or "")
+    txt = re.sub(r"<!--\s*ACTION:.*?-->", "", txt, flags=re.I | re.S)
+    txt = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", " ", txt)
+    txt = re.sub(r"[ \t]{2,}", " ", txt)
+    txt = re.sub(r"\n{3,}", "\n\n", txt).strip()
+    if len(txt) > limit:
+        cut = txt[:limit]
+        last_nl = cut.rfind("\n")
+        if last_nl > int(limit * 0.65):
+            cut = cut[:last_nl]
+        txt = cut.rstrip() + " ..."
+    return txt
+
+
+def _vg_cache_web_get(cache_key: str) -> Optional[dict]:
+    now = _time.time()
+    hit = _VG_WEB_CACHE.get(cache_key)
+    if hit and (now - hit[0]) < _VG_WEB_CACHE_TTL_SEC:
+        return hit[1]
+    return None
+
+
+def _vg_cache_web_set(cache_key: str, val: dict) -> dict:
+    if len(_VG_WEB_CACHE) >= 64:
+        oldest_key = min(_VG_WEB_CACHE.items(), key=lambda kv: kv[1][0])[0]
+        _VG_WEB_CACHE.pop(oldest_key, None)
+    _VG_WEB_CACHE[cache_key] = (_time.time(), val)
+    return val
+
+
+def _vg_extract_youtube_id(url_or_id: str) -> str:
+    s = str(url_or_id or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_-]{11}", s):
+        return s
+    m = re.search(
+        r"(?:youtube\.com/(?:watch\?.*?v=|shorts/|embed/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})",
+        s,
+        re.I,
+    )
+    return m.group(1) if m else ""
+
+
+def _vg_soup_xml(xml_text: str):
+    """Parse XML safely via BeautifulSoup without noisy XMLParsedAsHTMLWarning."""
+    import warnings
+    from bs4 import BeautifulSoup
+    try:
+        from bs4 import XMLParsedAsHTMLWarning
+    except Exception:
+        XMLParsedAsHTMLWarning = None
+    with warnings.catch_warnings():
+        if XMLParsedAsHTMLWarning:
+            warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+        return BeautifulSoup(xml_text, "html.parser")
+
+
+def _vg_parse_yt_caption_xml(xml_text: str) -> str:
+    if not xml_text or "<" not in xml_text:
+        return ""
+    try:
+        soup = _vg_soup_xml(xml_text)
+        lines = []
+        for node in soup.find_all(["p", "text"]):
+            txt = _html.unescape(node.get_text(" ", strip=True))
+            txt = re.sub(r"\s+", " ", txt).strip()
+            if not txt:
+                continue
+            t_attr = node.get("t") or node.get("start")
+            prefix = ""
+            if t_attr is not None:
+                try:
+                    sec = float(t_attr) / (1000.0 if node.name == "p" else 1.0)
+                    sec_i = int(max(0, sec))
+                    prefix = f"[{sec_i // 60}:{sec_i % 60:02d}] "
+                except Exception:
+                    pass
+            lines.append(prefix + txt)
+        return _vg_sanitize_external_text("\n".join(lines), limit=2400)
+    except Exception:
+        return ""
+
+
+def _vg_tool_read_youtube(url_or_id: str) -> dict:
+    """Lite YouTube reader via Innertube ANDROID player + oEmbed + XML caption extraction."""
+    vid = _vg_extract_youtube_id(url_or_id)
+    if not vid:
+        return {"ok": False, "error": "Could not extract a valid 11-character YouTube video ID."}
+    cache_key = f"yt:{vid}"
+    cached = _vg_cache_web_get(cache_key)
+    if cached:
+        return cached
+
+    canon_url = f"https://www.youtube.com/watch?v={vid}"
+    title = ""
+    channel = ""
+    duration_sec = 0
+    views = ""
+    description = ""
+    keywords = []
+    caption_lang = ""
+    transcript = ""
+
+    # Tier 1: YouTube Innertube ANDROID player (reliable metadata + live caption track URLs)
+    try:
+        ri = _STREAM_SESSION.post(
+            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+            json={
+                "context": {"client": {"clientName": "ANDROID", "clientVersion": "20.10.38"}},
+                "videoId": vid,
+            },
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
+            },
+            timeout=9,
+        )
+        if ri.status_code == 200:
+            di = ri.json()
+            vd = di.get("videoDetails") or {}
+            title = str(vd.get("title") or "").strip()
+            channel = str(vd.get("author") or "").strip()
+            duration_sec = int(vd.get("lengthSeconds") or 0)
+            views = str(vd.get("viewCount") or "").strip()
+            description = str(vd.get("shortDescription") or "").strip()
+            keywords = [str(k) for k in (vd.get("keywords") or [])[:12] if k]
+
+            caps = ((di.get("captions") or {}).get("playerCaptionsTracklistRenderer") or {}).get("captionTracks") or []
+            if caps:
+                # Prefer English manual captions, then English ASR, then first available track
+                def _cap_score(c_obj):
+                    lc = str(c_obj.get("languageCode") or "").lower()
+                    kind = str(c_obj.get("kind") or "").lower()
+                    is_en = 2 if lc == "en" else (1 if lc.startswith("en") else 0)
+                    is_manual = 1 if kind != "asr" else 0
+                    return (is_en, is_manual)
+
+                best_cap = max(caps, key=_cap_score)
+                caption_lang = str(best_cap.get("languageCode") or "")
+                cap_url = str(best_cap.get("baseUrl") or "").strip()
+                if cap_url:
+                    xml_txt, xml_st, _, _ = _vg_safe_http_get(cap_url, timeout=8, max_bytes=600_000)
+                    if xml_st == 200 and xml_txt:
+                        transcript = _vg_parse_yt_caption_xml(xml_txt)
+    except Exception as err:
+        print(f"YouTube Innertube error ({vid}): {err}")
+
+    # Tier 2 fallback: YouTube oEmbed + watch HTML meta if title still empty
+    if not title:
+        try:
+            oe_url = f"https://www.youtube.com/oembed?url={urllib.parse.quote(canon_url, safe='')}&format=json"
+            oe_txt, oe_st, _, _ = _vg_safe_http_get(oe_url, timeout=7, max_bytes=120_000)
+            if oe_st == 200 and oe_txt:
+                oe = json.loads(oe_txt)
+                title = str(oe.get("title") or "").strip()
+                channel = channel or str(oe.get("author_name") or "").strip()
+        except Exception:
+            pass
+
+    if not title:
+        return {"ok": False, "url": canon_url, "error": "Unable to read this YouTube video (unavailable, private, or region-locked)."}
+
+    chapters = re.findall(r"(?m)^(\d{1,2}:\d{2}(?::\d{2})?\s+[^\n]{2,80})$", description)[:15]
+    out = {
+        "ok": True,
+        "source": "youtube",
+        "url": canon_url,
+        "video_id": vid,
+        "title": title,
+        "channel": channel,
+        "duration_sec": duration_sec,
+        "views": views,
+        "keywords": keywords,
+        "chapters": chapters,
+        "description": _vg_sanitize_external_text(description, limit=1400),
+        "caption_language": caption_lang,
+        "transcript": transcript or "(No spoken captions/subtitles available for this video)",
+    }
+    return _vg_cache_web_set(cache_key, out)
+
+
+def _vg_tool_read_instagram(url: str) -> dict:
+    """Lite Instagram public post/reel/profile reader via captioned embed + OpenGraph/Jina fallback."""
+    clean_input = str(url or "").strip()
+    if clean_input.startswith("@"):
+        clean_input = f"https://www.instagram.com/{clean_input.lstrip('@').strip('/')}/"
+    ok, clean_url, err = _vg_validate_public_url(clean_input)
+    if not ok:
+        return {"ok": False, "error": err}
+    if "instagram.com" not in urllib.parse.urlparse(clean_url).netloc.lower():
+        return {"ok": False, "error": "URL must be an instagram.com link."}
+
+    cache_key = f"ig:{clean_url}"
+    cached = _vg_cache_web_get(cache_key)
+    if cached:
+        return cached
+
+    # Resolve /share/... short links if present
+    target_url = clean_url
+    if "/share/" in target_url:
+        _, _, resolved_u, _ = _vg_safe_http_get(target_url, timeout=8, max_bytes=200_000)
+        if resolved_u:
+            target_url = resolved_u
+
+    m_sc = re.search(r"instagram\.com/(?:[\w.]+/)?(reel|reels|p|tv)/([A-Za-z0-9_-]+)", target_url, re.I)
+    author = ""
+    caption = ""
+    hashtags = []
+    mentions = []
+    meta_desc = ""
+    gated = False
+
+    from bs4 import BeautifulSoup
+
+    if m_sc:
+        kind_raw, shortcode = m_sc.group(1).lower(), m_sc.group(2)
+        kind = "reel" if kind_raw.startswith("reel") else ("tv" if kind_raw == "tv" else "p")
+        embed_url = f"https://www.instagram.com/{kind}/{shortcode}/embed/captioned/"
+        html_txt, st, _, _ = _vg_safe_http_get(embed_url, timeout=9, max_bytes=900_000)
+        if st == 200 and html_txt:
+            low = html_txt.lower()
+            soup = BeautifulSoup(html_txt, "html.parser")
+            cap_el = soup.select_one(".Caption")
+            if cap_el:
+                # Strip nested username link from caption text while capturing author
+                user_el = cap_el.select_one(".CaptionUsername") or soup.select_one(".UsernameText")
+                if user_el:
+                    author = user_el.get_text(" ", strip=True)
+                caption = cap_el.get_text(" ", strip=True)
+            if not author:
+                u2 = soup.select_one(".UsernameText")
+                if u2:
+                    author = u2.get_text(" ", strip=True)
+            if not caption:
+                og_desc = soup.find("meta", attrs={"property": "og:description"}) or soup.find("meta", attrs={"name": "description"})
+                if og_desc and og_desc.get("content"):
+                    meta_desc = str(og_desc.get("content")).strip()
+                # Also inspect embedded additionalData / shortcode caption JSON
+                m_cap = re.search(r'"caption"\s*:\s*\{\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"', html_txt)
+                if not m_cap:
+                    m_cap = re.search(r'"edge_media_to_caption"\s*:\s*\{\s*"edges"\s*:\s*\[\s*\{\s*"node"\s*:\s*\{\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"', html_txt)
+                if m_cap:
+                    try:
+                        caption = json.loads('"' + m_cap.group(1) + '"')
+                    except Exception:
+                        pass
+            if not caption and not meta_desc and ("login" in low and "checkpoint" in low or "content isn't available" in low):
+                gated = True
+
+    # Fallback via r.jina.ai Markdown reader for profiles or when embed had no caption
+    jina_excerpt = ""
+    if not caption:
+        jina_url = f"https://r.jina.ai/{target_url}"
+        j_txt, j_st, _, _ = _vg_safe_http_get(jina_url, headers={"X-Return-Format": "markdown"}, timeout=9, max_bytes=400_000)
+        if j_st == 200 and j_txt:
+            low_j = j_txt.lower()
+            if "log in" in low_j and ("see photos and videos" in low_j or "sign up for instagram" in low_j) and len(j_txt) < 1500:
+                gated = True
+            else:
+                jina_excerpt = _vg_sanitize_external_text(j_txt, limit=1800)
+
+    combined_text = caption or meta_desc or jina_excerpt
+    if combined_text:
+        hashtags = list(dict.fromkeys(re.findall(r"#([A-Za-z0-9_]{2,40})", combined_text)))[:15]
+        mentions = list(dict.fromkeys(re.findall(r"@([A-Za-z0-9_.]{2,35})", combined_text)))[:10]
+
+    if not combined_text:
+        return {
+            "ok": False,
+            "gated": True,
+            "url": target_url,
+            "error": (
+                "Instagram blocked public access or this post/account requires login (private or gated by Meta). "
+                "Ask the user to paste the caption or upload a screenshot of the reel instead."
+            ),
+        }
+
+    out = {
+        "ok": True,
+        "source": "instagram",
+        "url": target_url,
+        "author": author,
+        "caption": _vg_sanitize_external_text(caption or meta_desc, limit=1800),
+        "page_excerpt": jina_excerpt if not (caption or meta_desc) else "",
+        "hashtags": hashtags,
+        "mentions": mentions,
+        "gated": gated,
+    }
+    return _vg_cache_web_set(cache_key, out)
+
+
+def _vg_html_to_clean_text(html_text: str, base_url: str, link_filter: str = "") -> tuple[str, str, str, list]:
+    """Extract (title, meta_description, main_text, outbound_links) cleanly from raw HTML."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html_text, "html.parser")
+    title = ""
+    if soup.title and soup.title.string:
+        title = soup.title.string.strip()
+    og_t = soup.find("meta", attrs={"property": "og:title"})
+    if not title and og_t and og_t.get("content"):
+        title = str(og_t.get("content")).strip()
+
+    meta_desc = ""
+    for sel in ({"property": "og:description"}, {"name": "description"}):
+        el = soup.find("meta", attrs=sel)
+        if el and el.get("content"):
+            meta_desc = str(el.get("content")).strip()
+            break
+
+    # Extract outbound links BEFORE stripping chrome navs inside main/article
+    main_container = soup.select_one("article") or soup.select_one("main") or soup.body or soup
+    links_out = []
+    seen_urls = set()
+    f_low = link_filter.strip().lower()
+    for a in main_container.find_all("a", href=True):
+        href = str(a["href"]).strip()
+        if not href or href.startswith(("#", "javascript:", "mailto:")):
+            continue
+        abs_u = urllib.parse.urljoin(base_url, href)
+        if not re.match(r"^https?://", abs_u, re.I) or abs_u in seen_urls:
+            continue
+        lbl = re.sub(r"\s+", " ", a.get_text(" ", strip=True))
+        if not lbl or len(lbl) < 3:
+            continue
+        if f_low and f_low not in lbl.lower() and f_low not in abs_u.lower():
+            continue
+        seen_urls.add(abs_u)
+        links_out.append({"text": lbl[:90], "url": abs_u})
+        if len(links_out) >= 10:
+            break
+
+    for tag in soup.find_all(["script", "style", "noscript", "svg", "iframe", "template"]):
+        tag.decompose()
+    for tag in main_container.find_all(["nav", "footer", "header", "aside"]):
+        tag.decompose()
+
+    text_blocks = []
+    for infobox in soup.select("table.infobox, .infobox")[:4]:
+        for tr in infobox.find_all("tr")[:16]:
+            th = tr.find("th")
+            td = tr.find("td")
+            if th and td:
+                k = re.sub(r"\s+", " ", th.get_text(" ", strip=True))
+                v = re.sub(r"\s+", " ", td.get_text(" ", strip=True))
+                if k and v and len(k) < 40 and len(v) < 180:
+                    text_blocks.append(f"{k}: {v}")
+
+    for node in main_container.find_all(["h1", "h2", "h3", "p", "li"]):
+        line = re.sub(r"\s+", " ", node.get_text(" ", strip=True))
+        if len(line) >= 18 or node.name in ("h1", "h2", "h3"):
+            if not text_blocks or text_blocks[-1] != line:
+                text_blocks.append(line)
+    clean_body = _vg_sanitize_external_text("\n".join(text_blocks), limit=3600)
+    if len(clean_body) < 120:
+        clean_body = _vg_sanitize_external_text(main_container.get_text("\n", strip=True), limit=3600)
+    return title, meta_desc, clean_body, links_out
+
+
+def _vg_tool_browse_url(url: str, follow_text_filter: str = "") -> dict:
+    """Lite headless HTTP + DOM/Jina Markdown webpage reader for anime sites, news, wikis, and articles."""
+    u = str(url or "").strip()
+    if "youtube.com/" in u.lower() or "youtu.be/" in u.lower():
+        if _vg_extract_youtube_id(u):
+            return _vg_tool_read_youtube(u)
+    if "instagram.com/" in u.lower():
+        return _vg_tool_read_instagram(u)
+
+    ok, clean_url, err = _vg_validate_public_url(u)
+    if not ok:
+        return {"ok": False, "error": err}
+
+    cache_key = f"url:{clean_url}|{follow_text_filter.strip().lower()}"
+    cached = _vg_cache_web_get(cache_key)
+    if cached:
+        return cached
+
+    html_txt, st, final_url, ctype = _vg_safe_http_get(clean_url, timeout=9, max_bytes=1_500_000)
+    title, meta_desc, content, links_out = "", "", "", []
+
+    if st == 200 and html_txt:
+        if "json" in ctype:
+            content = _vg_sanitize_external_text(html_txt, limit=3600)
+        else:
+            title, meta_desc, content, links_out = _vg_html_to_clean_text(html_txt, final_url, follow_text_filter)
+
+    # Escalate to Jina Reader Markdown extraction if direct HTML was blocked, JS-empty, or < 350 chars
+    if st != 200 or len(content) < 350:
+        jina_u = f"https://r.jina.ai/{final_url}"
+        j_txt, j_st, _, _ = _vg_safe_http_get(jina_u, headers={"X-Return-Format": "markdown"}, timeout=10, max_bytes=900_000)
+        if j_st == 200 and j_txt and len(j_txt.strip()) > len(content):
+            lines = j_txt.splitlines()
+            if not title and lines and lines[0].lower().startswith("title:"):
+                title = lines[0].split(":", 1)[1].strip()
+            md_marker = j_txt.find("Markdown Content:")
+            raw_md = j_txt[md_marker + len("Markdown Content:") :] if md_marker != -1 else j_txt
+            content = _vg_sanitize_external_text(raw_md, limit=3800)
+
+    if not content and not meta_desc:
+        return {"ok": False, "url": final_url, "status": st, "error": err or f"Failed to read webpage (HTTP {st})."}
+
+    out = {
+        "ok": True,
+        "url": final_url,
+        "title": title,
+        "description": meta_desc,
+        "content": content or meta_desc,
+        "links": links_out,
+    }
+    return _vg_cache_web_set(cache_key, out)
+
+
+def _vg_tool_web_search(query: str, scope: str = "general") -> dict:
+    """Zero-key live multi-engine search across Bing Web, Google News RSS, Wikipedia, and YouTube."""
+    q = str(query or "").strip()[:240]
+    sc = str(scope or "general").strip().lower()
+    if not q:
+        return {"ok": False, "error": "Search query is required."}
+
+    cache_key = f"search:{sc}:{q.lower()}"
+    cached = _vg_cache_web_get(cache_key)
+    if cached:
+        return cached
+
+    results = []
+    from bs4 import BeautifulSoup
+
+    if sc == "youtube":
+        yt_u = f"https://www.youtube.com/results?search_query={urllib.parse.quote(q)}"
+        html_txt, st, _, _ = _vg_safe_http_get(yt_u, timeout=9, max_bytes=1_800_000)
+        if st == 200 and html_txt:
+            m = re.search(r"ytInitialData\s*=\s*(\{.*?\});</script>", html_txt)
+            if m:
+                try:
+                    ydata = json.loads(m.group(1))
+                    # Recursive light walk for videoRenderer objects
+                    stack = [ydata]
+                    while stack and len(results) < 6:
+                        cur = stack.pop()
+                        if isinstance(cur, dict):
+                            if "videoRenderer" in cur:
+                                vr = cur["videoRenderer"]
+                                vid = vr.get("videoId")
+                                t_runs = ((vr.get("title") or {}).get("runs") or [{}])
+                                ch_runs = ((vr.get("ownerText") or {}).get("runs") or [{}])
+                                if vid:
+                                    results.append({
+                                        "title": str(t_runs[0].get("text") or ""),
+                                        "url": f"https://www.youtube.com/watch?v={vid}",
+                                        "channel": str(ch_runs[0].get("text") or ""),
+                                        "duration": str(((vr.get("lengthText") or {}).get("simpleText")) or ""),
+                                    })
+                            else:
+                                stack.extend(cur.values())
+                        elif isinstance(cur, list):
+                            stack.extend(reversed(cur))
+                except Exception:
+                    pass
+
+    elif sc == "wiki":
+        w_u = (
+            "https://en.wikipedia.org/w/api.php?action=query&list=search"
+            f"&srsearch={urllib.parse.quote(q)}&format=json&srlimit=5"
+        )
+        txt, st, _, _ = _vg_safe_http_get(w_u, timeout=8, max_bytes=300_000)
+        if st == 200 and txt:
+            try:
+                hits = ((json.loads(txt).get("query") or {}).get("search") or [])
+                for h in hits[:5]:
+                    t_str = str(h.get("title") or "")
+                    snip = BeautifulSoup(str(h.get("snippet") or ""), "html.parser").get_text(" ", strip=True)
+                    results.append({
+                        "title": t_str,
+                        "url": f"https://en.wikipedia.org/wiki/{urllib.parse.quote(t_str.replace(' ', '_'))}",
+                        "snippet": snip,
+                    })
+            except Exception:
+                pass
+
+    elif sc == "news":
+        gn_u = f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}&hl=en-US&gl=US&ceid=US:en"
+        xml_txt, st, _, _ = _vg_safe_http_get(gn_u, timeout=8, max_bytes=500_000)
+        if st == 200 and xml_txt:
+            soup = _vg_soup_xml(xml_txt)
+            for item in soup.find_all("item")[:6]:
+                t_el = item.find("title")
+                l_el = item.find("link")
+                d_el = item.find("pubdate")
+                s_el = item.find("source")
+                results.append({
+                    "title": t_el.get_text(strip=True) if t_el else "",
+                    "url": (l_el.get_text(strip=True) if l_el else "").strip(),
+                    "published": d_el.get_text(strip=True) if d_el else "",
+                    "source": s_el.get_text(strip=True) if s_el else "",
+                })
+
+    else:
+        b_u = f"https://www.bing.com/search?q={urllib.parse.quote(q)}"
+        html_txt, st, _, _ = _vg_safe_http_get(b_u, timeout=9, max_bytes=800_000)
+        if st == 200 and html_txt:
+            soup = BeautifulSoup(html_txt, "html.parser")
+            for li in soup.select("li.b_algo")[:6]:
+                a_el = li.select_one("h2 a")
+                p_el = li.select_one(".b_caption p") or li.select_one("p")
+                if not a_el or not a_el.get("href"):
+                    continue
+                results.append({
+                    "title": a_el.get_text(" ", strip=True),
+                    "url": str(a_el["href"]).strip(),
+                    "snippet": p_el.get_text(" ", strip=True) if p_el else "",
+                })
+        # Supplement with Google News RSS or Wikipedia if Bing returns too few hits
+        if len(results) < 2:
+            news_fb = _vg_tool_web_search(q, scope="news")
+            results.extend((news_fb.get("results") or [])[:4])
+            if len(results) < 2:
+                wiki_fb = _vg_tool_web_search(q, scope="wiki")
+                results.extend((wiki_fb.get("results") or [])[:3])
+
+    out = {"ok": True, "query": q, "scope": sc, "results": results[:6], "count": min(len(results), 6)}
+    return _vg_cache_web_set(cache_key, out)
+
+
+def _vg_tool_query_anilist_live(query: str, kb: dict) -> dict:
+    """Query live AniList GraphQL for upcoming seasons, airing countdowns, studios, trailers, and characters."""
+    q = str(query or "").strip()[:160]
+    if not q:
+        return {"ok": False, "error": "Query string is required."}
+    gql = """
+    query ($search: String) {
+      Page(page: 1, perPage: 5) {
+        media(search: $search, type: ANIME, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
+          id
+          title { english romaji native }
+          status
+          format
+          episodes
+          season
+          seasonYear
+          averageScore
+          popularity
+          nextAiringEpisode { episode airingAt timeUntilAiring }
+          studios(isMain: true) { nodes { name } }
+          trailer { id site }
+          description(asHtml: false)
+          characters(perPage: 5, sort: [ROLE, RELEVANCE]) {
+            edges {
+              role
+              node { name { full } }
+              voiceActors(language: JAPANESE, sort: [RELEVANCE]) { name { full } }
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        r = _STREAM_SESSION.post(
+            "https://graphql.anilist.co",
+            json={"query": gql, "variables": {"search": q}},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=8,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "error": f"AniList HTTP {r.status_code}"}
+        media_list = ((r.json().get("data") or {}).get("Page") or {}).get("media") or []
+    except Exception as err:
+        return {"ok": False, "error": str(err)}
+
+    by_al = kb.get("by_anilist_id") or {}
+    out_items = []
+    for m in media_list:
+        al_id = int(m.get("id") or 0)
+        t = m.get("title") or {}
+        local_match = by_al.get(al_id)
+        chars = []
+        for edge in ((m.get("characters") or {}).get("edges") or []):
+            cname = (((edge.get("node") or {}).get("name") or {}).get("full")) or ""
+            vas = [v.get("name", {}).get("full") for v in (edge.get("voiceActors") or []) if v.get("name", {}).get("full")]
+            if cname:
+                chars.append(f"{cname}" + (f" (CV: {vas[0]})" if vas else ""))
+        tr = m.get("trailer") or {}
+        tr_url = f"https://www.youtube.com/watch?v={tr['id']}" if tr.get("site") == "youtube" and tr.get("id") else None
+        out_items.append({
+            "anilist_id": al_id,
+            "kuroanime_id": local_match["anime_id"] if local_match else None,
+            "title": t.get("english") or t.get("romaji") or "",
+            "title_romaji": t.get("romaji") or "",
+            "status": m.get("status"),
+            "format": m.get("format"),
+            "episodes": m.get("episodes"),
+            "season": f"{m.get('season') or ''} {m.get('seasonYear') or ''}".strip(),
+            "score": round(float(m["averageScore"]) / 10.0, 1) if m.get("averageScore") else None,
+            "next_airing_episode": m.get("nextAiringEpisode"),
+            "studios": [n.get("name") for n in ((m.get("studios") or {}).get("nodes") or []) if n.get("name")],
+            "trailer_url": tr_url,
+            "characters": chars,
+            "synopsis": _vg_sanitize_external_text(re.sub(r"<[^>]+>", " ", str(m.get("description") or "")), limit=420),
+        })
+    return {"ok": True, "query": q, "results": out_items, "count": len(out_items)}
+
+
+def _vg_auto_browse_prompt_urls(user_msg: str, kb: dict) -> str:
+    """Proactively deploy Lite Browser on URLs pasted by the user so LLM never hallucinates link contents."""
+    urls = re.findall(r"https?://[^\s<>\"')]+", str(user_msg or ""), re.I)
+    if not urls:
+        return ""
+    blocks = []
+    seen = set()
+    for raw_u in urls[:2]:
+        if raw_u in seen:
+            continue
+        seen.add(raw_u)
+        try:
+            if "youtube.com/" in raw_u.lower() or "youtu.be/" in raw_u.lower():
+                res = _vg_tool_read_youtube(raw_u) if _vg_extract_youtube_id(raw_u) else _vg_tool_browse_url(raw_u)
+            elif "instagram.com/" in raw_u.lower():
+                res = _vg_tool_read_instagram(raw_u)
+            else:
+                res = _vg_tool_browse_url(raw_u)
+
+            if res.get("source") == "youtube" and res.get("ok"):
+                title_s = res.get("title") or ""
+                matched = _vg_search(kb["items"], query=title_s, limit=3) if title_s else []
+                kuro_hits = ", ".join(f"{_vg_title(m)} [Watch on KuroAnime](#anime/{m['anime_id']})" for m in matched)
+                blocks.append(
+                    f"[YOUTUBE VIDEO DATA FOR {res.get('url')}]\n"
+                    f"Title: {title_s}\n"
+                    f"Channel: {res.get('channel')}\n"
+                    f"DurationSec: {res.get('duration_sec')}\n"
+                    f"Keywords: {', '.join(res.get('keywords') or [])}\n"
+                    f"Description:\n{res.get('description')}\n"
+                    f"Transcript/Captions ({res.get('caption_language') or 'auto'}):\n{res.get('transcript')}\n"
+                    + (f"Matched KuroAnime Titles: {kuro_hits}\n" if kuro_hits else "")
+                )
+            elif res.get("source") == "instagram":
+                if res.get("ok"):
+                    blocks.append(
+                        f"[INSTAGRAM PUBLIC DATA FOR {res.get('url')}]\n"
+                        f"Author: {res.get('author')}\n"
+                        f"Caption: {res.get('caption') or res.get('page_excerpt')}\n"
+                        f"Hashtags: {', '.join(res.get('hashtags') or [])}\n"
+                    )
+                else:
+                    blocks.append(
+                        f"[INSTAGRAM ACCESS STATUS FOR {res.get('url')}]\n"
+                        f"Gated/Blocked: True\nReason: {res.get('error')}\n"
+                    )
+            elif res.get("ok"):
+                title_s = res.get("title") or ""
+                links_s = "; ".join(f"{l['text']} -> {l['url']}" for l in (res.get("links") or [])[:5])
+                blocks.append(
+                    f"[WEBPAGE DATA FOR {res.get('url')}]\n"
+                    f"Title: {title_s}\n"
+                    f"Description: {res.get('description')}\n"
+                    f"Content:\n{res.get('content')}\n"
+                    + (f"Key Outbound Links: {links_s}\n" if links_s else "")
+                )
+            else:
+                blocks.append(f"[URL FETCH STATUS FOR {raw_u}]\nError: {res.get('error')}\n")
+        except Exception as err:
+            blocks.append(f"[URL FETCH ERROR FOR {raw_u}]\nError: {err}\n")
+
+    if not blocks:
+        return ""
+    return (
+        "\nLIVE DEPLOYED BACKEND BROWSER REPORT (Use these EXACT verified facts; do NOT invent details or URLs):\n"
+        + "\n---\n".join(blocks)
+    )
+
+
 def _vg_execute_tool(name, args, kb, ctx):
     items = kb["items"]
     by_id = kb["by_id"]
     args = args or {}
-    if name == "search_catalog":
+    if name == "web_search":
+        return _vg_tool_web_search(args.get("query"), scope=args.get("scope", "general"))
+    elif name == "browse_url":
+        return _vg_tool_browse_url(args.get("url"), follow_text_filter=args.get("link_filter", ""))
+    elif name == "read_youtube":
+        return _vg_tool_read_youtube(args.get("url") or args.get("video_id"))
+    elif name == "read_instagram":
+        return _vg_tool_read_instagram(args.get("url"))
+    elif name == "query_anilist_live":
+        return _vg_tool_query_anilist_live(args.get("query"), kb)
+    elif name == "search_catalog":
         res = _vg_search(
             items,
             genres=args.get("genres"),
@@ -4810,13 +6151,53 @@ def _vg_execute_tool(name, args, kb, ctx):
             "title": _vg_title(it) if it else "Anime"
         }
     elif name == "add_to_my_list":
+        raw_ids = args.get("anime_ids")
+        if isinstance(raw_ids, list) and raw_ids:
+            batch_items = []
+            seen_ids = set()
+            for raw_id in raw_ids[:30]:
+                try:
+                    aid_i = int(raw_id)
+                except Exception:
+                    continue
+                if aid_i in seen_ids:
+                    continue
+                it = by_id.get(aid_i)
+                if not it:
+                    continue
+                seen_ids.add(aid_i)
+                batch_items.append({
+                    "anime_id": aid_i,
+                    "title": _vg_title(it),
+                    "poster": it.get("poster_large") or it.get("poster_url") or "",
+                    "anime_type": it.get("type") or "TV",
+                    "anilist_score": it.get("score"),
+                })
+            if not batch_items:
+                return {"error": "None of the provided anime_ids were found in the catalog."}
+            return {
+                "action_queued": True,
+                "type": "add_many_to_list",
+                "items": batch_items,
+                "count": len(batch_items),
+                "titles": [b["title"] for b in batch_items],
+            }
         aid = args.get("anime_id")
-        it = by_id.get(int(aid)) if aid else None
+        try:
+            aid_i = int(aid)
+        except Exception:
+            return {"error": "Provide anime_id (integer) or anime_ids (array of integers)."}
+        it = by_id.get(aid_i)
+        if not it:
+            return {"error": f"Anime #{aid_i} not found in catalog."}
         return {
             "action_queued": True,
             "type": "add_to_list",
-            "anime_id": int(aid),
-            "title": _vg_title(it) if it else "Anime"
+            "anime_id": aid_i,
+            "title": _vg_title(it),
+            "poster": it.get("poster_large") or it.get("poster_url") or "",
+            "anime_type": it.get("type") or "TV",
+            "anilist_score": it.get("score"),
         }
     elif name == "remove_from_my_list":
         aid = args.get("anime_id")
@@ -4943,13 +6324,13 @@ _GEMINI_TOOLS_DECLARATIONS = [
     },
     {
         "name": "add_to_my_list",
-        "description": "Add an anime to the user's saved watchlist / library.",
+        "description": "Add one anime OR a batch list of multiple anime (e.g. 5, 10, 20 shows) to the user's saved library / watchlist in one call.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "anime_id": {"type": "INTEGER", "description": "Numeric KuroAnime ID"}
-            },
-            "required": ["anime_id"]
+                "anime_id": {"type": "INTEGER", "description": "Single numeric KuroAnime ID to add"},
+                "anime_ids": {"type": "ARRAY", "items": {"type": "INTEGER"}, "description": "Array of multiple KuroAnime IDs (up to 30) to batch-add in one step"}
+            }
         }
     },
     {
@@ -4985,6 +6366,63 @@ _GEMINI_TOOLS_DECLARATIONS = [
                 "query": {"type": "STRING", "description": "Search query"}
             },
             "required": ["view"]
+        }
+    },
+    {
+        "name": "read_youtube",
+        "description": "Read a YouTube anime video, trailer, AMV, short, or review URL via the backend lite reader: fetches title, channel, description, chapters, and spoken caption/subtitle transcript.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "url": {"type": "STRING", "description": "Full YouTube URL (watch?v=, youtu.be/, /shorts/) or 11-char video ID"}
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "name": "read_instagram",
+        "description": "Read a public Instagram post, reel, or profile URL via the backend lite reader to extract caption, author, hashtags, mentions, and identify any anime referenced.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "url": {"type": "STRING", "description": "Instagram post/reel/profile URL or @username"}
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "name": "browse_url",
+        "description": "Deploy Vegeta's backend lite browser to visit and read any public anime webpage, article, wiki, news story, or link found via search (extracts main text + outbound links to follow).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "url": {"type": "STRING", "description": "Public http:// or https:// webpage URL to read"},
+                "link_filter": {"type": "STRING", "description": "Optional keyword to filter relevant outbound links on the page"}
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "name": "web_search",
+        "description": "Search the live web for anime news, season release dates, character trivia, YouTube videos, or Wikipedia articles, then follow up with browse_url or read_youtube.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Web search query"},
+                "scope": {"type": "STRING", "description": "'general' (Bing web), 'news' (Google News), 'wiki' (Wikipedia), or 'youtube' (YouTube video search)"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "query_anilist_live",
+        "description": "Query live AniList GraphQL for real-time upcoming seasons, next airing countdowns, studios, trailers, and voice actors, auto-matched to KuroAnime catalog IDs.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Anime title to query live on AniList"}
+            },
+            "required": ["query"]
         }
     }
 ]
@@ -6016,6 +7454,126 @@ def _vg_handle_franchise_watch_order(low: str, kb: dict):
     return None
 
 
+def _vg_lens_format_candidates(image_result: dict, limit: int = 3) -> list[dict]:
+    """Collect distinct anime candidates across all visual engines for Google-Lens output."""
+    if not isinstance(image_result, dict):
+        return []
+    out: list[dict] = []
+    seen_fran: set[str] = set()
+    sources = [
+        image_result.get("top_candidates") or [],
+        ([image_result["best_char_match"]] if image_result.get("best_char_match") else []),
+        image_result.get("trace_candidates") or [],
+        image_result.get("poster_matches") or [],
+    ]
+    for lst in sources:
+        for c in lst:
+            if not isinstance(c, dict):
+                continue
+            it = c.get("matched_item")
+            if not it:
+                continue
+            fk = str(it.get("franchise") or it["anime_id"])
+            if fk in seen_fran:
+                continue
+            seen_fran.add(fk)
+            out.append(c)
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def _vg_lens_response_from_result(image_result: Optional[dict], kb: dict) -> tuple[str, Optional[dict]]:
+    """Build a dynamic Google-Lens-style response with ranked matches & visual traits (never a canned dead-end)."""
+    cands = _vg_lens_format_candidates(image_result or {}, limit=3)
+    vtags = [t for t in ((image_result or {}).get("vision_tags") or []) if t][:8]
+    vchars = [c[0] for c in ((image_result or {}).get("vision_characters") or []) if c]
+    bcm = (image_result or {}).get("best_char_match")
+    ep_hint = int((image_result or {}).get("episode") or 1)
+
+    if bcm and bcm.get("matched_item"):
+        it = bcm["matched_item"]
+        score_pct = int(float(bcm.get("score") or 0.75) * 100)
+        char_list = bcm.get("characters_list") or ([bcm["character"]] if bcm.get("character") else [])
+        if len(char_list) > 1:
+            char_display = ", ".join(f"**{c}**" for c in char_list[:-1]) + f", and **{char_list[-1]}**"
+        else:
+            char_display = f"**{bcm.get('character') or 'Identified Subject'}**"
+        display_title = _vg_title(it)
+        tags_line = f"- **Visual Cues:** {', '.join(vtags[:6])}\n" if vtags else ""
+        syn = re.sub(r"<[^>]+>", "", (it.get("synopsis") or "")).strip()
+        syn_snip = (syn[:200].rsplit(" ", 1)[0] + "...") if len(syn) > 200 else syn
+        syn_line = f"- **The Prince's Verdict:** {syn_snip}\n" if syn_snip else ""
+
+        alt_lines = []
+        for alt in cands[1:3]:
+            alt_it = alt.get("matched_item")
+            if alt_it and alt_it["anime_id"] != it["anime_id"]:
+                alt_sc = int(float(alt.get("score") or 0) * 100)
+                alt_ch = alt.get("character") or "Visual similarity"
+                alt_lines.append(
+                    f"- **{_vg_title(alt_it)}** ({alt_ch} · ~{alt_sc}%) — [Watch on KuroAnime](#anime/{alt_it['anime_id']})"
+                )
+
+        if score_pct >= 84:
+            header = "## Prince Vegeta's Saiyan Scouter • Visual Match Confirmed!"
+            lead = f"My Scouter locks onto {char_display} from **{display_title}** (**{score_pct}%** Lens match)!"
+            action = {
+                "type": "play",
+                "anime_id": it["anime_id"],
+                "episode": ep_hint,
+                "time": int((image_result or {}).get("from_seconds") or 0),
+                "title": display_title,
+            }
+        else:
+            header = "## Prince Vegeta's Visual Lens • Top Candidate Matches"
+            lead = f"Hmph. This frame aligns closest with {char_display} in **{display_title}** (**{score_pct}%** visual probability)."
+            action = None
+
+        parts = [
+            f"{header}\n\n{lead}\n",
+            f"- **Rating:** ★ {it.get('score') or '8.0'}/10 • {it.get('episode_count') or '?'} Episodes ({it.get('type') or 'TV'})",
+            f"- **Genres:** {it.get('genres') or 'Anime'}",
+        ]
+        if tags_line:
+            parts.append(tags_line.rstrip("\n"))
+        if syn_line:
+            parts.append(syn_line.rstrip("\n"))
+        parts.append(f"\n- [Watch on KuroAnime](#anime/{it['anime_id']}?ep={ep_hint})")
+        if alt_lines:
+            parts.append("\n### Other Visually Similar Series\n" + "\n".join(alt_lines))
+        return "\n".join(parts), action
+
+    # Lower-confidence or multi-candidate visual cues — surface top Lens possibilities + traits cleanly
+    if cands:
+        lines = ["## Prince Vegeta's Visual Lens • Closest Series Candidates\n"]
+        if vtags:
+            lines.append(f"**Detected Visual Cues:** `{'`, `'.join(vtags[:6])}`\n")
+        for idx, c in enumerate(cands, 1):
+            cit = c["matched_item"]
+            csc = int(float(c.get("score") or 0.5) * 100)
+            c_desc = c.get("character") or f"Visual resemblance ({c.get('source') or 'lens'})"
+            lines.append(
+                f"{idx}. **{_vg_title(cit)}** — {c_desc} (~{csc}%) • [Watch on KuroAnime](#anime/{cit['anime_id']})"
+            )
+        lines.append("\nPick the matching series above, or share a brighter frame / one plot detail and I'll narrow it to the exact episode!")
+        return "\n".join(lines), None
+
+    trait_txt = f"Visual traits spotted: `{'`, `'.join(vtags[:6])}`." if vtags else "The crop is tightly framed or heavily stylized."
+    char_txt = f" Possible name hints: **{', '.join(vchars[:3])}**." if vchars else ""
+    picks = kb["items"][:3] if kb.get("items") else []
+    fallback_links = "\n".join(
+        f"- **{_vg_title(p)}** ({p.get('genres') or 'Anime'}) • [Watch on KuroAnime](#anime/{p['anime_id']})"
+        for p in picks
+    )
+    return (
+        f"## Prince Vegeta's Visual Lens • Trait Scan\n\n"
+        f"{trait_txt}{char_txt} Drop one clue (hair/eye color, weapon, or scene context) or a wider crop so I can lock the exact anime instantly!\n\n"
+        + (f"### Trending Catalog Picks\n{fallback_links}" if fallback_links else ""),
+        None,
+    )
+
+
 def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None, image_search_result: dict = None, history: list = None) -> tuple:
     """Generate intelligent, conversational in-character Prince Vegeta response grounded in live anime archives and multi-turn context."""
     items = kb["items"]
@@ -6051,43 +7609,12 @@ def _generate_vegeta_response(user_msg: str, kb: dict, user_context: dict = None
         }
         return reply, action
 
-    if image_search_result and image_search_result.get("best_char_match"):
-        bcm = image_search_result["best_char_match"]
-        score_pct = int(bcm["score"] * 100)
-        char_list = bcm.get("characters_list") or ([bcm["character"]] if bcm.get("character") else [])
-        if len(char_list) > 1:
-            char_display = ", ".join(f"**{c}**" for c in char_list[:-1]) + f", and **{char_list[-1]}**"
-        else:
-            char_display = f"**{bcm['character']}**"
-        anime_name = bcm["anime_title"]
-        it = bcm.get("matched_item")
-        tags_list = (image_search_result.get("vision_tags") or [])[:5]
-        tags_line = f"- **Visual Cues:** {', '.join(tags_list)}\n" if tags_list else ""
-        if it:
-            display_title = it["title_english"] or it["title"]
-            syn = re.sub(r"<[^>]+>", "", (it.get("synopsis") or "")).strip()
-            syn_snip = (syn[:210].rsplit(" ", 1)[0] + "...") if len(syn) > 210 else syn
-            syn_line = f"- **The Prince's Verdict:** {syn_snip}\n" if syn_snip else ""
-            reply = (
-                f"## Prince Vegeta's Saiyan Scouter • Visual Match Confirmed!\n\n"
-                f"Hmph! Even a cropped frame or cluttered screenshot cannot deceive the Prince of Saiyans! "
-                f"My Scouter locks onto {char_display} from **{display_title}** (**{score_pct}%** neural vision match)!\n\n"
-                f"- **Rating:** ★ {it['score']}/10 • {it.get('episode_count') or '?'} Episodes ({it.get('type') or 'TV'})\n"
-                f"- **Genres:** {it['genres']}\n"
-                f"{tags_line}"
-                f"{syn_line}\n"
-                f"- [Watch on KuroAnime](#anime/{it['anime_id']}?ep=1)"
-            )
-            action = {
-                "type": "play",
-                "anime_id": it["anime_id"],
-                "episode": 1,
-                "time": 0,
-                "title": display_title,
-            }
-            return reply, action
-        reply = f"Hmph! My Scouter locks onto {char_display} from **{anime_name}** (**{score_pct}%** visual match)!"
-        return reply, None
+    if image_search_result and (
+        image_search_result.get("best_char_match")
+        or image_search_result.get("top_candidates")
+        or image_search_result.get("vision_tags")
+    ):
+        return _vg_lens_response_from_result(image_search_result, kb)
 
     # 0. Agentic Play Command Execution
     play_action = _detect_play_intent(user_msg, items, user_context)
@@ -6940,19 +8467,22 @@ def _vegeta_retrieve(user_msg, history, kb, image_search_result=None, has_image=
                     + "- Action Directive: Confirm visually and present the character + anime clearly with its `[Watch on KuroAnime](#anime/ID)` link!"
                 )
         else:
-            hint = ""
-            if image_search_result and image_search_result.get("matched_item"):
-                h_it = image_search_result["matched_item"]
-                h_sim = int(image_search_result.get("similarity", 0) * 100)
-                hint = f" (Weak trace.moe hint {h_sim}%: {h_it.get('title_english') or h_it.get('title')} — DO NOT trust blindly!)"
+            cands = _vg_lens_format_candidates(image_search_result or {}, limit=4)
+            cand_lines = []
+            for idx_lc, lc in enumerate(cands, 1):
+                lc_it = lc["matched_item"]
+                add(lc_it)
+                lc_sc = int(float(lc.get("score") or 0) * 100)
+                lc_ch = lc.get("character") or "Visual similarity"
+                cand_lines.append(f"  {idx_lc}. {lc_ch} in {_vegeta_line(lc_it, 180).lstrip('- ')} (~{lc_sc}% via {lc.get('source') or 'lens'})")
             vtags = ", ".join((image_search_result or {}).get("vision_tags") or [])
-            vtag_line = f"- Neural Visual Cues Seen: {vtags}\n" if vtags else ""
+            vchars = ", ".join(c[0] for c in ((image_search_result or {}).get("vision_characters") or []) if c)
             blocks.append(
-                f"VISION IMAGE IDENTIFICATION REQUIRED{hint}:\n"
-                f"- The user attached an image (character portrait, fanart, poster, or cropped frame) and trace.moe could not confirm an exact episode frame.\n"
-                f"{vtag_line}"
-                f"- Examine the character's hair, eyes, outfit, uniform, weapons, markings, and art style using YOUR Vision.\n"
-                f"- Identify the exact character and anime series, then IMMEDIATELY call `search_anime` to look up that anime in KuroAnime's dual-server catalog (ZokoAnime + Munib Server) and give the `[Watch on KuroAnime](#anime/ID)` link!"
+                "GOOGLE-LENS ANIME VISION SCOUTER TELEMETRY:\n"
+                + (f"- Neural Appearance & Scene Tags: {vtags}\n" if vtags else "")
+                + (f"- Detected Character Tags: {vchars}\n" if vchars else "")
+                + ("- Ranked Visual Candidates in Catalog:\n" + "\n".join(cand_lines) + "\n" if cand_lines else "")
+                + "- Action Directive: Reason over the detected visual traits and candidate matches using your anime expertise and `search_catalog` / `get_anime_details`! Present the most accurate character & anime match(es) clearly with clickable `[Watch on KuroAnime](#anime/ID)` links—NEVER reply with a generic 'could not identify / error' fallback!"
             )
 
     # 0. Reverse Plot / Description Identification Match
@@ -7118,12 +8648,18 @@ ACCURACY RULES (very important)
 - Every time you recommend or mention an anime that appears in the facts, add its watch link exactly in this format on the same line: [Watch on KuroAnime](#anime/ID) using the numeric ID shown. No backticks around links. Never make up IDs.
 - Use simple Markdown: short paragraphs, **bold**, "- " bullet lists, and "## Title" headings only for multi-anime lists. No emojis spam, no tables.
 
-YOU ARE AN AGENT WITH TOOLS (very important)
-- Research tools: search_catalog, get_anime_details, find_similar_anime, identify_anime_from_description, get_user_profile. Use them BEFORE stating catalog facts, recommending, comparing, or answering "what should I watch". Chain several calls if needed (e.g. get_user_profile -> find_similar_anime -> search_catalog).
-- Action tools: play_anime, open_anime_page, add_to_my_list, remove_from_my_list, control_player, navigate. When the user asks you to DO something (play, resume, next episode, switch to dub, add/remove from list, open a page, browse a genre, search), CALL the action tool. Never claim you did something without calling the tool. You may call several action tools for compound requests ("add X to my list and play Y").
+YOU ARE AN AGENTIC RESEARCHER WITH A BACKEND BROWSER & TOOLS (very important)
+- Catalog tools: search_catalog, get_anime_details, find_similar_anime, identify_anime_from_description, get_user_profile. Use them BEFORE stating catalog facts, recommending, comparing, or answering "what should I watch". Chain multiple calls if needed.
+- Live Web, YouTube & Instagram Agent Tools:
+  - read_youtube(url): When the user shares a YouTube link (trailer, edit, AMV, short, review), IMMEDIATELY call read_youtube to inspect title, channel, description, chapters, and spoken transcript, then search_catalog to check if that anime is streamable on KuroAnime!
+  - read_instagram(url): When the user shares an Instagram Reel, post, or profile URL, IMMEDIATELY call read_instagram to extract its public caption, hashtags, and mentions, then match any mentioned anime via search_catalog or web_search. If Instagram returns gated=true (private/login wall), say so honestly without guessing.
+  - web_search(query, scope) & browse_url(url): Use web_search (scope='general', 'news', 'wiki', or 'youtube') and follow up with browse_url(url) to visit websites, follow outbound links, verify new season announcements, dates, studios, or read any pasted URL! Use query_anilist_live(query) for real-time airing schedules & upcoming seasons.
+  - Include brief clickable source citations like [YouTube](https://...) or [Anime News Network](https://...) alongside [Watch on KuroAnime](#anime/ID) when citing live external pages.
+- Action tools: play_anime, open_anime_page, add_to_my_list, remove_from_my_list, control_player, navigate. When the user asks you to DO something (play, resume, next episode, switch to dub, add/remove from list, open a page, browse a genre, search), CALL the action tool. Never claim you did something without calling the tool.
+- Batch Library Curation Skill: When the user asks to find/curate multiple shows and put/save/add them into their library or list (e.g. "find 10 romance anime and put them in my library", "add 5 top isekai to my list"), FIRST call search_catalog with the requested genre/filters and limit (up to 30), optionally avoid titles already in the user's My List / Continue Watching, and THEN call add_to_my_list ONCE passing all chosen IDs in anime_ids=[...]. List each added title with its [Watch on KuroAnime](#anime/ID) link!
 - Pronouns like "it", "this one", "the second one" refer to the anime currently on screen or the ones you just mentioned; resolve them to IDs from earlier tool results or watch state.
 - Only use anime IDs that came from tool results, the watch state, or the facts below. If a search returns nothing, say so honestly.
-- After the tools finish, reply briefly in character confirming what you did or found. Do not dump raw tool output.
+- After the tools finish, reply concisely in character confirming what you found or did. Do not dump raw tool output or JSON.
 
 KUROANIME CATALOG FACTS (live)
 - Total unique anime: {s.get('total_unique_anime', kb.get('total_anime'))}
@@ -7181,6 +8717,41 @@ def _vg_openai_tools_from_gemini() -> list:
     return _OPENAI_TOOLS_CACHE
 
 
+def _vg_parse_xml_tool_calls(text: str) -> tuple[list, str]:
+    """Parse Hermes/LFM <tool_call><function=...> XML blocks into structured OpenAI tool_calls."""
+    raw = str(text or "")
+    if "<tool_call" not in raw and "<function=" not in raw:
+        return [], raw
+    parsed_calls = []
+    idx = 0
+    for m_fn in re.finditer(r"<function=([A-Za-z0-9_]+)>\s*(.*?)\s*</function>", raw, re.S):
+        fname = m_fn.group(1).strip()
+        body = m_fn.group(2)
+        args = {}
+        for m_p in re.finditer(r"<parameter=([A-Za-z0-9_]+)>\s*(.*?)\s*</parameter>", body, re.S):
+            k = m_p.group(1).strip()
+            v = m_p.group(2).strip()
+            if v.isdigit():
+                args[k] = int(v)
+            elif v.startswith("[") or v.startswith("{"):
+                try:
+                    args[k] = json.loads(v)
+                except Exception:
+                    args[k] = v
+            else:
+                args[k] = v
+        parsed_calls.append({
+            "id": f"xmlcall_{idx}",
+            "type": "function",
+            "function": {"name": fname, "arguments": json.dumps(args, ensure_ascii=False)},
+        })
+        idx += 1
+    cleaned = re.sub(r"<tool_call>.*?</tool_call>", "", raw, flags=re.S)
+    cleaned = re.sub(r"<function=.*?</function>", "", cleaned, flags=re.S)
+    cleaned = re.sub(r"</?tool_call>", "", cleaned).strip()
+    return parsed_calls, cleaned
+
+
 def _vg_extract_cline_choice(resp_json: dict) -> tuple[dict, list, str]:
     """Extract (message_dict, tool_calls, content_text) from Cline/OpenAI chat completion payloads."""
     choices = resp_json.get("choices") or (resp_json.get("data") or {}).get("choices") or []
@@ -7201,6 +8772,11 @@ def _vg_extract_cline_choice(resp_json: dict) -> tuple[dict, list, str]:
     tool_calls = msg.get("tool_calls") or []
     if not isinstance(tool_calls, list):
         tool_calls = []
+    if not tool_calls and text_out:
+        xml_calls, clean_txt = _vg_parse_xml_tool_calls(text_out)
+        if xml_calls:
+            tool_calls = xml_calls
+            text_out = clean_txt
     return msg, tool_calls, text_out
 
 
@@ -7211,9 +8787,13 @@ def _vg_finalize_ai_result(
     image_result: Optional[dict],
     provider: str,
     model: str,
+    user_msg: str = "",
+    user_context: Optional[dict] = None,
 ) -> dict:
-    """Normalize <!--ACTION:...-->, attach confirmed vision playback, validate actions, and build response."""
+    """Normalize <!--ACTION:...-->, strip raw tool noise, validate actions, and build response."""
     reply_clean = str(final_reply or "").strip()
+    reply_clean = re.sub(r"<tool_call>.*?</tool_call>", "", reply_clean, flags=re.S)
+    reply_clean = re.sub(r"</?tool_call>", "", reply_clean).strip()
     reply_clean = re.sub(
         r'^\s*\{"(?:command|name|tool)"\s*:\s*"[^"]+"[^\n]*\}\s*\n*',
         "",
@@ -7246,7 +8826,51 @@ def _vg_finalize_ai_result(
             "title": _vg_title(it),
         })
 
+    # Safety net: if user requested adding/putting anime to library/list and LLM wrote #anime/ID links without invoking add_to_my_list
+    wants_list_add = bool(user_msg and re.search(
+        r"\b(?:add|ad|put|save|bookmark)\b.{0,80}\b(?:list|library|libary|watchlist|collection)\b|\b(?:into|in|to|on)\s+(?:my\s+|ad\s+)?(?:list|library|libary|watchlist|collection)\b",
+        user_msg,
+        re.I,
+    ))
+    has_list_add = any(a.get("type") in ("add_to_list", "add_many_to_list") for a in actions if isinstance(a, dict))
+    if not has_list_add and wants_list_add:
+        cited = []
+        seen_c = set()
+        for raw_cid in re.findall(r"#anime/(\d+)", reply_clean):
+            cid_i = int(raw_cid)
+            if cid_i not in seen_c and cid_i in kb.get("by_id", {}):
+                seen_c.add(cid_i)
+                cited.append(cid_i)
+        if len(cited) == 1:
+            actions.append({"type": "add_to_list", "anime_id": cited[0]})
+        elif len(cited) > 1:
+            actions.append({"type": "add_many_to_list", "items": [{"anime_id": x} for x in cited]})
+
     valid_actions = _vg_validate_actions(actions, kb)
+    has_valid_list_add = any(a.get("type") in ("add_to_list", "add_many_to_list") for a in valid_actions)
+
+    # Check if a batch-library request still produced 0 valid list additions (or 0 fresh unsaved items)
+    if _vg_is_batch_list_request(user_msg):
+        saved_ids = set()
+        for row in ((user_context or {}).get("my_list") or []):
+            try:
+                saved_ids.add(int(row.get("anime_id")))
+            except Exception:
+                pass
+        queued_ids = []
+        for va in valid_actions:
+            if va.get("type") == "add_many_to_list":
+                queued_ids.extend(int(it["anime_id"]) for it in (va.get("items") or []) if it.get("anime_id"))
+            elif va.get("type") == "add_to_list" and va.get("anime_id"):
+                queued_ids.append(int(va["anime_id"]))
+        fresh_count = sum(1 for qid in dict.fromkeys(queued_ids) if qid not in saved_ids)
+        wanted_m = _vg_parse_filters(user_msg.lower()).get("limit")
+        under_requested = bool(wanted_m and fresh_count < int(wanted_m))
+        if not has_valid_list_add or (saved_ids and fresh_count == 0) or under_requested:
+            det_res = _vg_deterministic_batch_add(user_msg, kb, user_context or {})
+            if det_res:
+                return det_res
+
     return {
         "ok": True,
         "reply": reply_clean,
@@ -7329,22 +8953,23 @@ def _vg_call_cline_chat(
 
     if image_data:
         vl_first = [m for m in healthy if m.get("supports_images")]
-        text_fallback = [m for m in healthy if not m.get("supports_images")] if has_scouter_match else []
-        candidates = vl_first[:2] + text_fallback[:4]
+        text_fallback = [m for m in healthy if not m.get("supports_images")]
+        candidates = vl_first[:2] + text_fallback[:3]
     else:
-        candidates = healthy[:6]
+        candidates = healthy[:4]
 
     openai_tools = _vg_openai_tools_from_gemini()
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    started_at = _time.time()
 
     for cand in candidates:
+        if (_time.time() - started_at) > 36.0:
+            break
         model_id = cand["id"]
         send_image = bool(image_uri and cand.get("supports_images"))
-        if image_uri and not send_image and not has_scouter_match:
-            continue
 
         working_messages = _vg_build_cline_messages(
             system_instruction, history, prompt_txt, image_uri=image_uri if send_image else ""
@@ -7355,15 +8980,19 @@ def _vg_call_cline_chat(
         last_tool_text = ""
         retry_no_image_used = False
 
-        for _round in range(3):
+        # Allow up to 4 tool-execution rounds + 1 guaranteed synthesis round (no tools)
+        for _round in range(5):
+            if (_time.time() - started_at) > 42.0 and _round > 0:
+                break
+            is_synthesis_turn = (_round == 4)
             payload = {
                 "model": model_id,
                 "messages": working_messages,
                 "temperature": 0.85,
                 "top_p": 0.95,
-                "max_tokens": 1100,
+                "max_tokens": 2200,
             }
-            if use_tools:
+            if use_tools and not is_synthesis_turn:
                 payload["tools"] = openai_tools
                 payload["tool_choice"] = "auto"
 
@@ -7372,7 +9001,7 @@ def _vg_call_cline_chat(
                     f"{_CLINE_API_BASE}/chat/completions",
                     json=payload,
                     headers=headers,
-                    timeout=22,
+                    timeout=24,
                 )
             except Exception as net_err:
                 print(f"Cline request error ({model_id}): {net_err}")
@@ -7383,17 +9012,15 @@ def _vg_call_cline_chat(
                 print(f"Cline HTTP {res.status_code} ({model_id}): {res.text[:160]}")
                 break
 
-            if res.status_code == 429:
+            if res.status_code == 429 or (res.status_code == 500 and ("429" in res.text[:240] or "rate limit" in res.text[:240].lower())):
                 _CLINE_BAD_MODELS[model_id] = (_time.time() + 60.0, "rate_limit")
-                print(f"Cline rate-limited ({model_id})")
+                print(f"Cline rate-limited ({model_id}): HTTP {res.status_code}")
                 break
 
             if res.status_code != 200:
                 err_low = res.text[:260].lower()
-                if send_image and not retry_no_image_used and ("image" in err_low or "vision" in err_low or "multimodal" in err_low):
+                if send_image and not retry_no_image_used:
                     cand["supports_images"] = False
-                    if not has_scouter_match:
-                        break
                     retry_no_image_used = True
                     send_image = False
                     working_messages = _vg_build_cline_messages(system_instruction, history, prompt_txt, image_uri="")
@@ -7410,7 +9037,7 @@ def _vg_call_cline_chat(
                 break
 
             msg, tool_calls, content_txt = _vg_extract_cline_choice(resp_json)
-            if not tool_calls:
+            if not tool_calls or is_synthesis_turn:
                 if content_txt:
                     final_reply = content_txt
                 break
@@ -7443,6 +9070,12 @@ def _vg_call_cline_chat(
                     "tool_call_id": str(tc.get("id") or f"call_{_round}_{idx}"),
                     "name": fname,
                     "content": json.dumps(fres, ensure_ascii=False),
+                })
+
+            if _round == 3:
+                working_messages.append({
+                    "role": "user",
+                    "content": "Give your final concise answer now in Prince Vegeta's voice using the verified tool results above.",
                 })
 
         if not final_reply and last_tool_text:
@@ -7512,6 +9145,10 @@ async def ai_chat(req: Request):
     has_gemini = bool(api_key and not api_key.startswith("0x"))
     if cline_key or has_gemini:
         context = _vegeta_retrieve(user_msg, history, kb, image_search_result=image_result, has_image=bool(image_data))
+        if not image_data and user_msg:
+            url_ctx = _vg_auto_browse_prompt_urls(user_msg, kb)
+            if url_ctx:
+                context = context + "\n" + url_ctx
         system_instruction = _vegeta_system_prompt(kb, context, user_context)
 
         # Default LLM Provider: Cline API dynamically fetching `:free` models
@@ -7529,7 +9166,7 @@ async def ai_chat(req: Request):
                 )
                 if cline_reply:
                     return _vg_finalize_ai_result(
-                        cline_reply, cline_actions, kb, image_result, provider="cline", model=cline_model
+                        cline_reply, cline_actions, kb, image_result, provider="cline", model=cline_model, user_msg=user_msg, user_context=user_context
                     )
             except Exception as cline_err:
                 print(f"Cline chat error: {cline_err}")
@@ -7582,8 +9219,8 @@ async def ai_chat(req: Request):
                     if "2.5" in model:
                         gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
 
-                    # Multi-turn tool execution loop (max 3 rounds)
-                    for _round in range(3):
+                    # Multi-turn tool execution loop (max 5 rounds)
+                    for _round in range(5):
                         cur_payload = {
                             "contents": working_contents,
                             "systemInstruction": {"parts": [{"text": system_instruction}]},
@@ -7631,30 +9268,58 @@ async def ai_chat(req: Request):
 
                     if final_reply:
                         return _vg_finalize_ai_result(
-                            final_reply, collected_actions, kb, image_result, provider="gemini", model=model
+                            final_reply, collected_actions, kb, image_result, provider="gemini", model=model, user_msg=user_msg, user_context=user_context
                         )
                 except Exception as gemini_err:
                     print(f"Gemini API error ({model}): {gemini_err}")
                     continue
 
-    # If image was uploaded and neither Gemini Vision nor trace.moe/WD-Tagger/MAL visual matcher locked onto an anime
-    if image_data and not (image_result and (image_result.get("matched_item") or image_result.get("best_char_match"))):
-        seen_tags = [t for t in ((image_result or {}).get("vision_tags") or []) if t][:6]
-        cues_note = (
-            f"\n\nMy scouter only picked up generic visual cues (`{', '.join(seen_tags)}`) without a confirmed anime character signature."
-            if seen_tags else ""
-        )
+    # If image was uploaded and external LLMs were unavailable, return Google-Lens visual analysis (never a static dead-end)
+    if image_data and not (image_result and image_result.get("matched_item") and image_result.get("confident")):
+        lens_reply, lens_act = _vg_lens_response_from_result(image_result, kb)
+        lens_valid = _vg_validate_actions([lens_act], kb) if lens_act else []
         return {
             "ok": True,
-            "reply": (
-                "Tch! Even after scanning both **trace.moe** and my **Neural Anime Vision** scouter, that image didn't contain a clear, recognizable anime character or episode frame."
-                f"{cues_note}\n\n"
-                "Try uploading a clearer frame, character closeup, or tell me a detail about the character or scene and I'll track down the anime immediately!"
-            ),
-            "action": None,
-            "actions": [],
+            "reply": lens_reply,
+            "action": lens_valid[0] if lens_valid else None,
+            "actions": lens_valid,
             "used_gemini": False,
+            "used_cline": False,
         }
+
+    # Offline URL Lite-Browser Fallback (if Cline & Gemini were both unavailable)
+    if not image_data:
+        url_m = re.search(r"https?://[^\s<>\"')]+", user_msg, re.I)
+        if url_m:
+            fetched = _vg_tool_browse_url(url_m.group(0))
+            if fetched.get("ok"):
+                head_txt = fetched.get("title") or fetched.get("author") or fetched.get("url")
+                body_snip = (fetched.get("caption") or fetched.get("description") or fetched.get("content") or "")[:450]
+                matched = _vg_search(kb["items"], query=head_txt, limit=2) if head_txt else []
+                watch_ln = f"\n\nFound on KuroAnime: **{_vg_title(matched[0])}** [Watch on KuroAnime](#anime/{matched[0]['anime_id']})" if matched else ""
+                return {
+                    "ok": True,
+                    "reply": f"Hmph. My scouter locked onto **{head_txt}** from [Source]({fetched.get('url', url_m.group(0))}).\n\n{body_snip}{watch_ln}",
+                    "action": None,
+                    "actions": [],
+                    "used_gemini": False,
+                    "used_cline": False,
+                }
+            elif fetched.get("gated"):
+                return {
+                    "ok": True,
+                    "reply": f"Tch! That link is locked behind an Instagram login wall, warrior — {fetched.get('error')}",
+                    "action": None,
+                    "actions": [],
+                    "used_gemini": False,
+                    "used_cline": False,
+                }
+
+    # 1.9. Deterministic Batch Library Curation fallback (runs cleanly when LLM providers are busy/offline)
+    if not image_data and _vg_is_batch_list_request(user_msg):
+        batch_res = _vg_deterministic_batch_add(user_msg, kb, user_context)
+        if batch_res:
+            return batch_res
 
     # 2. Smart Reasoning Engine (comparisons, similar anime, decade/format filters, personal taste)
     if not image_data:

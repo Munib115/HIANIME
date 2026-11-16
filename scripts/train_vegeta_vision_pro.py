@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import sys
 import time
 import urllib.error
@@ -30,9 +31,13 @@ import onnxruntime as ort
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KB_PATH = os.path.join(ROOT, "api", "vegeta_mal_knowledge.json.gz")
+HIANIME_DB = os.path.join(ROOT, "hianime.db")
+MUNIB_DB = os.path.join(ROOT, "munib_server.db")
 OUT_BRAIN = os.path.join(ROOT, "api", "vegeta_char_brain.npz")
 OUT_NPZ = os.path.join(ROOT, "api", "vegeta_char_visuals.npz")
 OUT_META = os.path.join(ROOT, "api", "vegeta_char_visuals_meta.json.gz")
+OUT_POSTER_NPZ = os.path.join(ROOT, "api", "vegeta_poster_visuals.npz")
+OUT_POSTER_META = os.path.join(ROOT, "api", "vegeta_poster_meta.json.gz")
 
 MIRRORS = [
     os.path.join(ROOT, "anime_app", "web", "api"),
@@ -47,7 +52,9 @@ INT8_MODEL_PATH = os.path.join(SCRATCH_DIR, "wd_vit_v3_int8.onnx")
 MODEL_PATH = INT8_MODEL_PATH if os.path.exists(INT8_MODEL_PATH) else os.path.join(SCRATCH_DIR, "wd_vit_v3.onnx")
 TAGS_CSV_PATH = os.path.join(SCRATCH_DIR, "selected_tags.csv")
 CHAR_CACHE_PATH = os.path.join(SCRATCH_DIR, "anilist_characters_cache.json.gz")
+DANBOORU_TAGS_PATH = os.path.join(SCRATCH_DIR, "danbooru_char_tags.jsonl.gz")
 IMG_CACHE_DIR = os.path.join(SCRATCH_DIR, "char_portraits")
+POSTER_CACHE_DIR = os.path.join(SCRATCH_DIR, "anime_posters")
 NN_CKPT_PATH = os.path.join(SCRATCH_DIR, "nn_traits_ckpt.npz")
 
 ANILIST_URL = "https://graphql.anilist.co"
@@ -105,28 +112,82 @@ DESC_TRAIT_PATTERNS = [
     ("scarf", r"\bscarf\b"),
     ("white scarf", r"\bwhite scarf\b"),
     ("red scarf", r"\bred scarf\b"),
-    ("pink hair", r"\bpink(?:ish)?(?: spiky)? hair\b|\bsalmon[- ]colored hair\b"),
-    ("white hair", r"\bwhite(?: spiky)? hair\b"),
-    ("silver hair", r"\bsilver hair\b"),
-    ("blonde hair", r"\bblonde? hair\b|\bgolden hair\b"),
-    ("black hair", r"\bblack(?: spiky)? hair\b"),
-    ("green hair", r"\bgreen hair\b"),
-    ("blue hair", r"\bblue hair\b"),
-    ("red hair", r"\bred hair\b|\bcrimson hair\b"),
+    ("pink hair", r"\bpink(?:ish)?(?:\s+spiky|\s+long|\s+short)?\s+hair\b|\bsalmon[- ]colored hair\b"),
+    ("white hair", r"\bwhite(?:\s+spiky|\s+long|\s+short)?\s+hair\b|\bsnow[- ]white hair\b"),
+    ("silver hair", r"\bsilver(?:[- ]colored)?(?:\s+long|\s+short)?\s+hair\b"),
+    ("grey hair", r"\bgr[ae]y(?:\s+long|\s+short)?\s+hair\b"),
+    ("blonde hair", r"\bblond[ea]?(?:\s+spiky|\s+long|\s+short)?\s+hair\b|\bgolden hair\b"),
+    ("black hair", r"\bblack(?:\s+spiky|\s+long|\s+short)?\s+hair\b|\bjet[- ]black hair\b|\braven hair\b"),
+    ("brown hair", r"\bbrown(?:\s+long|\s+short)?\s+hair\b|\bbrunette\b|\bchestnut hair\b"),
+    ("green hair", r"\bgreen(?:\s+long|\s+short)?\s+hair\b|\bemerald hair\b"),
+    ("blue hair", r"\bblue(?:\s+long|\s+short)?\s+hair\b|\bcyan hair\b|\baqua hair\b"),
+    ("red hair", r"\bred(?:\s+spiky|\s+long|\s+short)?\s+hair\b|\bcrimson hair\b|\bscarlet hair\b"),
+    ("orange hair", r"\borange hair\b|\bginger hair\b"),
+    ("purple hair", r"\bpurple hair\b|\bviolet hair\b|\blavender hair\b"),
+    ("long hair", r"\blong hair\b|\bwaist-length hair\b"),
+    ("short hair", r"\bshort hair\b"),
     ("spiked hair", r"\bspiky hair\b|\bspiked hair\b"),
+    ("ponytail", r"\bponytail\b"),
+    ("twintails", r"\btwintails?\b|\btwin[- ]tails?\b|\bpigtails?\b"),
+    ("hair ribbon", r"\bribbon\b"),
+    ("braid", r"\bbraid(?:s|ed)?\b"),
+    ("ahoge", r"\bahoge\b|\bcowlick\b"),
+    ("bald", r"\bbald\b|\bshaved head\b"),
+    ("blue eyes", r"\bblue eyes\b"),
+    ("red eyes", r"\bred eyes\b|\bcrimson eyes\b|\bscarlet eyes\b"),
+    ("green eyes", r"\bgreen eyes\b|\bemerald eyes\b"),
+    ("yellow eyes", r"\bgold(?:en)? eyes\b|\byellow eyes\b|\bamber eyes\b"),
+    ("purple eyes", r"\bpurple eyes\b|\bviolet eyes\b"),
+    ("brown eyes", r"\bbrown eyes\b"),
+    ("black eyes", r"\bblack eyes\b|\bdark eyes\b"),
+    ("pink eyes", r"\bpink eyes\b"),
+    ("heterochromia", r"\bheterochromia\b|\bmismatched eyes\b|\btwo different colored eyes\b"),
     ("glasses", r"\bglasses\b|\bspectacles\b|\beyeglasses\b"),
+    ("goggles", r"\bgoggles\b"),
     ("blindfold", r"\bblindfold\b"),
-    ("eyepatch", r"\beyepatch\b"),
+    ("eyepatch", r"\beyepatch\b|\beye patch\b"),
+    ("mask", r"\bmask\b"),
     ("straw hat", r"\bstraw hat\b"),
+    ("hat", r"\bhat\b|\bcap\b|\bberet\b"),
+    ("headband", r"\bheadband\b"),
+    ("bandana", r"\bbandana\b"),
+    ("earrings", r"\bearrings?\b"),
+    ("choker", r"\bchoker\b"),
     ("bandages", r"\bbandages?\b"),
-    ("scar", r"\bscar\b"),
+    ("scar", r"\bscar(?:red|s)?\b"),
+    ("tattoo", r"\btattoo(?:s|ed)?\b"),
+    ("facial mark", r"\bwhiskers?\b|\bmarkings?\b|\bcurse mark\b"),
+    ("beard", r"\bbeard\b|\bgoatee\b"),
+    ("mustache", r"\bmustache\b|\bmoustache\b"),
+    ("fangs", r"\bfangs?\b"),
+    ("pointy ears", r"\belf\b|\belven\b|\bpointed ears\b|\bpointy ears\b"),
+    ("animal ears", r"\bcat ears?\b|\bfox ears?\b|\bwolf ears?\b|\bdog ears?\b|\brabbit ears?\b|\bbunny ears?\b"),
+    ("tail", r"\btail\b"),
+    ("horns", r"\bhorns?\b"),
+    ("wings", r"\bwings?\b"),
+    ("halo", r"\bhalo\b"),
+    ("kimono", r"\bkimono\b|\byukata\b|\bhakama\b"),
+    ("school uniform", r"\bschool uniform\b|\bsailor uniform\b"),
+    ("suit", r"\bsuit\b|\btuxedo\b"),
+    ("necktie", r"\bnecktie\b|\btie\b"),
+    ("jacket", r"\bjacket\b|\bhoodie\b|\bblazer\b"),
+    ("cloak", r"\bcloak\b|\bmantle\b"),
+    ("cape", r"\bcape\b"),
+    ("coat", r"\bcoat\b|\btrench coat\b"),
+    ("armor", r"\barmor\b|\barmour\b"),
+    ("gloves", r"\bgloves\b"),
+    ("headphones", r"\bheadphones?\b"),
+    ("cigarette", r"\bcigarette\b|\bsmoking\b|\bcigar\b"),
+    ("katana", r"\bkatana\b|\bsamurai\b"),
+    ("sword", r"\bsword\b|\bblade\b"),
+    ("scythe", r"\bscythe\b"),
+    ("spear", r"\bspear\b|\blance\b"),
+    ("gun", r"\bgun\b|\bpistol\b|\brifle\b"),
+    ("guitar", r"\bguitar\b"),
     ("fire", r"\bfire\b|\bflames?\b"),
     ("dragon", r"\bdragon\b"),
-    ("katana", r"\bkatana\b"),
-    ("sword", r"\bsword\b"),
-    ("horns", r"\bhorns?\b"),
-    ("armor", r"\barmor\b"),
-    ("headphones", r"\bheadphones?\b"),
+    ("demon", r"\bdemon\b|\bdevil\b"),
+    ("muscular", r"\bmuscular\b|\bbuff\b"),
 ]
 
 
@@ -248,28 +309,119 @@ def fetch_anilist_batch(ids: list[int]) -> list[dict]:
     return []
 
 
+def _norm_char_key(name: str, fold: bool = False) -> str:
+    k = re.sub(r"[^a-z0-9\s]", " ", str(name or "").lower()).strip()
+    k = re.sub(r"\s+", " ", k)
+    if fold:
+        k = k.replace("ou", "o").replace("uu", "u")
+    return k
+
+
+def load_danbooru_char_tags() -> dict[str, list[str]]:
+    """Load 98k+ Danbooru character tag profiles indexed by exact, swapped, and macron-folded keys."""
+    if not os.path.exists(DANBOORU_TAGS_PATH):
+        return {}
+    tmap: dict[str, list[str]] = {}
+    with gzip.open(DANBOORU_TAGS_PATH, "rt", encoding="utf-8") as f:
+        for ln in f:
+            try:
+                obj = json.loads(ln)
+            except Exception:
+                continue
+            raw_char = str(obj.get("character") or "").replace("_", " ").strip()
+            raw_desc = str(obj.get("description") or "").strip()
+            if not raw_char or not raw_desc:
+                continue
+            tags = [t.strip().lower().replace("_", " ") for t in raw_desc.split(",") if t.strip()]
+            if not tags:
+                continue
+            base_char = re.sub(r"\s*\([^()]*\)\s*$", "", raw_char).strip()
+            for candidate in {raw_char, base_char}:
+                for fold in (False, True):
+                    k = _norm_char_key(candidate, fold=fold)
+                    if k and k not in tmap:
+                        tmap[k] = tags
+                    parts = k.split()
+                    if len(parts) == 2:
+                        swapped = f"{parts[1]} {parts[0]}"
+                        if swapped not in tmap:
+                            tmap[swapped] = tags
+    print(f"Loaded {len(tmap):,} Danbooru character appearance keys.", flush=True)
+    return tmap
+
+
+def _match_danbooru_tags(char_name: str, anime_title: str, db_tag_map: dict[str, list[str]]) -> list[str]:
+    if not db_tag_map or not char_name:
+        return []
+    t_clean = _norm_char_key(anime_title or "")
+    first_word = t_clean.split()[0] if t_clean else ""
+    keys = []
+    if first_word:
+        keys.append(_norm_char_key(f"{char_name} {first_word}", fold=False))
+        keys.append(_norm_char_key(f"{char_name} {first_word}", fold=True))
+    keys.append(_norm_char_key(char_name, fold=False))
+    keys.append(_norm_char_key(char_name, fold=True))
+    for k in keys:
+        if k in db_tag_map:
+            return db_tag_map[k]
+    return []
+
+
+def collect_target_anilist_ids(max_anime: int) -> list[int]:
+    """Collect top popularity + recent 2022-2026 AniList IDs across DBs + MAL knowledge."""
+    al_scores: dict[int, int] = {}
+    for db_path in (HIANIME_DB, MUNIB_DB):
+        if os.path.exists(db_path):
+            conn = sqlite3.connect(db_path)
+            for al_id, pop, yr in conn.execute(
+                "SELECT anilist_id, COALESCE(anilist_popularity, 0), COALESCE(season_year, 0) FROM anime WHERE anilist_id > 0"
+            ):
+                aid = int(al_id)
+                boost = int(pop or 0) + (60000 if int(yr or 0) >= 2023 else 0)
+                if boost > al_scores.get(aid, -1):
+                    al_scores[aid] = boost
+            conn.close()
+    if os.path.exists(KB_PATH):
+        with gzip.open(KB_PATH, "rb") as f:
+            kb = json.loads(f.read().decode("utf-8"))
+        for idx, k in enumerate(kb.keys()):
+            aid = int(k)
+            if aid not in al_scores:
+                al_scores[aid] = max(0, 50000 - idx * 5)
+    ranked = [aid for aid, _ in sorted(al_scores.items(), key=lambda kv: -kv[1])]
+    return ranked[:max_anime]
+
+
 def collect_characters(max_anime: int) -> list[dict]:
+    cached_chars: list[dict] = []
+    seen_cid: set[int] = set()
+    covered_al: set[int] = set()
+
     if os.path.exists(CHAR_CACHE_PATH):
         try:
             with gzip.open(CHAR_CACHE_PATH, "rb") as f:
                 cached = json.loads(f.read().decode("utf-8"))
-            if isinstance(cached, dict) and cached.get("max_anime", 0) >= max_anime and cached.get("chars"):
-                print(f"Loaded {len(cached['chars'])} cached AniList characters.", flush=True)
-                return cached["chars"]
+            if isinstance(cached, dict) and cached.get("chars"):
+                cached_chars = cached["chars"]
+                for c in cached_chars:
+                    if c.get("cid"):
+                        seen_cid.add(int(c["cid"]))
+                    if c.get("al"):
+                        covered_al.add(int(c["al"]))
+                print(f"Loaded {len(cached_chars)} cached AniList characters across {len(covered_al)} anime.", flush=True)
         except Exception:
-            pass
+            cached_chars = []
 
-    with gzip.open(KB_PATH, "rb") as f:
-        kb = json.loads(f.read().decode("utf-8"))
+    target_ids = collect_target_anilist_ids(max_anime)
+    missing_ids = [aid for aid in target_ids if aid not in covered_al]
+    if not missing_ids and cached_chars:
+        return cached_chars
 
-    anilist_ids = [int(k) for k in list(kb.keys())[:max_anime]]
-    print(f"Fetching character metadata & large portraits for top {len(anilist_ids)} anime...", flush=True)
-
-    candidates = []
-    seen = set()
+    print(f"Fetching missing AniList characters for {len(missing_ids)} anime (including 2023-2026 hits)...", flush=True)
+    candidates = list(cached_chars)
     batch_size = 50
-    for i in range(0, len(anilist_ids), batch_size):
-        batch = anilist_ids[i:i + batch_size]
+    for i in range(0, len(missing_ids), batch_size):
+        batch = missing_ids[i:i + batch_size]
         media_list = fetch_anilist_batch(batch)
         for m in media_list:
             al_id = m.get("id")
@@ -284,9 +436,9 @@ def collect_characters(max_anime: int) -> list[dict]:
                 img_url = img_obj.get("large") or img_obj.get("medium") or ""
                 if not cid or not cname or not img_url or "default.jpg" in img_url:
                     continue
-                if cid in seen:
+                if int(cid) in seen_cid:
                     continue
-                seen.add(cid)
+                seen_cid.add(int(cid))
                 candidates.append({
                     "cid": int(cid),
                     "n": cname,
@@ -299,9 +451,9 @@ def collect_characters(max_anime: int) -> list[dict]:
                     "ds": (node.get("description") or "")[:600],
                     "img": img_url,
                 })
-        if (i // batch_size + 1) % 10 == 0 or (i + batch_size) >= len(anilist_ids):
-            print(f"  Batch {i // batch_size + 1}/{(len(anilist_ids) + batch_size - 1) // batch_size}: {len(candidates)} chars", flush=True)
-        time.sleep(0.72)
+        if (i // batch_size + 1) % 8 == 0 or (i + batch_size) >= len(missing_ids):
+            print(f"  Batch {i // batch_size + 1}/{(len(missing_ids) + batch_size - 1) // batch_size}: {len(candidates)} total chars", flush=True)
+        time.sleep(0.68)
 
     os.makedirs(SCRATCH_DIR, exist_ok=True)
     with gzip.open(CHAR_CACHE_PATH, "wb") as f:
@@ -392,9 +544,107 @@ def estimate_portrait_hair_tag(img_bgr: np.ndarray) -> list[tuple[str, float]]:
     return out
 
 
+def compute_dhash64(img_bgr: np.ndarray) -> int:
+    """Compute a 64-bit horizontal difference hash invariant to brightness and resolution scaling."""
+    gray = cv2.cvtColor(cv2.resize(img_bgr, (9, 8), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+    diff = gray[:, 1:] > gray[:, :-1]
+    val = 0
+    for bit in diff.ravel():
+        val = (val << 1) | int(bool(bit))
+    return int(val)
+
+
+def train_poster_visuals(max_posters: int = 1200) -> None:
+    """Build compact cover/key-art visual + dHash index across top popular & 2023-2026 anime."""
+    rows_map: dict[int, tuple[int, str, str, int]] = {}
+    for db_path in (HIANIME_DB, MUNIB_DB):
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        for aid, al_id, title, title_en, purl, plarge, pop, yr in conn.execute(
+            """
+            SELECT anime_id, COALESCE(anilist_id, 0), title, title_english, poster_url, poster_large,
+                   COALESCE(anilist_popularity, 0), COALESCE(season_year, 0)
+            FROM anime
+            WHERE COALESCE(NULLIF(poster_large, ''), poster_url) IS NOT NULL
+            ORDER BY COALESCE(anilist_popularity, 0) DESC, season_year DESC
+            LIMIT 2500
+            """
+        ):
+            img_url = (plarge or purl or "").strip()
+            if not img_url.startswith("http"):
+                continue
+            key = int(al_id) if al_id and int(al_id) > 0 else -int(aid)
+            score = int(pop or 0) + (60000 if int(yr or 0) >= 2023 else 0)
+            if key not in rows_map or score > rows_map[key][3]:
+                rows_map[key] = (int(al_id or 0), (title_en or title or "").strip(), img_url, score, int(aid))
+        conn.close()
+
+    ordered = sorted(rows_map.values(), key=lambda x: -x[3])[:max_posters]
+    os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
+    print(f"Building Google-Lens cover/poster visual database for top {len(ordered)} anime...", flush=True)
+
+    def _fetch_poster(entry):
+        al_id, title, url, _, aid = entry
+        cache_key = f"al_{al_id}" if al_id > 0 else f"id_{aid}"
+        cpath = os.path.join(POSTER_CACHE_DIR, f"{cache_key}.bin")
+        raw = None
+        if os.path.exists(cpath) and os.path.getsize(cpath) > 200:
+            try:
+                raw = open(cpath, "rb").read()
+            except Exception:
+                raw = None
+        if raw is None:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    raw = resp.read()
+                if len(raw) > 200:
+                    with open(cpath, "wb") as f:
+                        f.write(raw)
+            except Exception:
+                return None
+        if not raw:
+            return None
+        bgr = decode_bgr_composited(raw)
+        if bgr is None:
+            return None
+        dv = extract_visual_descriptor(bgr)
+        if dv is None:
+            return None
+        dh = compute_dhash64(bgr)
+        return (al_id, aid, title, dv, dh)
+
+    vecs = []
+    dhashes = []
+    pmeta = []
+    with ThreadPoolExecutor(max_workers=24) as pool:
+        for res in pool.map(_fetch_poster, ordered):
+            if res is None:
+                continue
+            al_id, aid, title, dv, dh = res
+            vecs.append(dv)
+            dhashes.append(dh)
+            pmeta.append({"al": al_id, "aid": aid, "t": title})
+
+    if vecs:
+        np.savez_compressed(
+            OUT_POSTER_NPZ,
+            features=np.vstack(vecs).astype(np.float16),
+            dhashes=np.asarray(dhashes, dtype=np.uint64),
+        )
+        with gzip.open(OUT_POSTER_META, "wb") as f:
+            f.write(json.dumps(pmeta, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        for mirror_dir in MIRRORS:
+            if os.path.isdir(mirror_dir):
+                for p in (OUT_POSTER_NPZ, OUT_POSTER_META):
+                    shutil.copy2(p, os.path.join(mirror_dir, os.path.basename(p)))
+        print(f"Poster database ready: {len(pmeta)} covers ({os.path.getsize(OUT_POSTER_NPZ)/1e6:.2f} MB)", flush=True)
+
+
 def main():
-    max_anime = int(sys.argv[1]) if len(sys.argv) > 1 else 2600
-    nn_limit = int(sys.argv[2]) if len(sys.argv) > 2 else 1100
+    max_anime = int(sys.argv[1]) if len(sys.argv) > 1 else 3600
+    nn_limit = int(sys.argv[2]) if len(sys.argv) > 2 else 1350
     t_start = time.time()
 
     if not os.path.exists(MODEL_PATH) or not os.path.exists(TAGS_CSV_PATH):
@@ -404,6 +654,7 @@ def main():
     gen_cols_arr = np.asarray(gen_cols, dtype=np.int32)
     print(f"Curated semantic trait vocabulary: {len(vocab)} high-signal appearance tags", flush=True)
 
+    db_tag_map = load_danbooru_char_tags()
     candidates = collect_characters(max_anime)
     print(f"Downloading / loading portraits for {len(candidates)} characters...", flush=True)
 
@@ -509,7 +760,7 @@ def main():
                 os.replace(tmp_ckpt, NN_CKPT_PATH)
 
     # Assemble complete multi-modal appearance vectors across all n_chars characters
-    top_k = 56
+    top_k = 64
     char_top_idx: list[np.ndarray] = []
     char_top_val: list[np.ndarray] = []
     df = np.zeros(len(vocab), dtype=np.float32)
@@ -523,6 +774,7 @@ def main():
     idx_girl = vocab_map.get("1girl", -1)
     idx_ffocus = vocab_map.get("female focus", -1)
 
+    danbooru_hits = 0
     for ci in range(n_chars):
         item = valid_items[ci]
         vec = np.zeros(len(vocab), dtype=np.float32)
@@ -535,6 +787,17 @@ def main():
                 hi = vocab_map.get(htag, -1)
                 if hi >= 0:
                     vec[hi] = max(vec[hi], hprob)
+
+        # Infuse verified Danbooru character appearance profiles (hair, eyes, outfit, accessories)
+        db_tags = _match_danbooru_tags(item.get("n") or "", item.get("t") or "", db_tag_map)
+        if db_tags:
+            danbooru_hits += 1
+            for dt_tag in db_tags:
+                if dt_tag in STOP_APPEARANCE_TAGS:
+                    continue
+                ti = vocab_map.get(dt_tag, -1)
+                if ti >= 0:
+                    vec[ti] = max(vec[ti], 0.78)
 
         g = item.get("g") or ""
         if g == "M":
@@ -555,7 +818,7 @@ def main():
             for tag_name, pat in DESC_TRAIT_PATTERNS:
                 ti = vocab_map.get(tag_name, -1)
                 if ti >= 0 and re.search(pat, ds_low):
-                    vec[ti] = max(vec[ti], 0.62)
+                    vec[ti] = max(vec[ti], 0.68)
 
         hmask = 0
         for htag, hbit in HAIR_BITS.items():
@@ -574,6 +837,8 @@ def main():
         df[sub] += 1.0
         char_top_idx.append(sub.astype(np.uint16))
         char_top_val.append(vec[sub].astype(np.float16))
+
+    print(f"Infused Danbooru multi-tag appearance traits into {danbooru_hits:,}/{n_chars:,} AniList characters!", flush=True)
 
     # Compute smooth corpus IDF and L2-normalize each character's TF-IDF vector
     idf = np.log(1.0 + n_chars / (df + 3.0)).astype(np.float32)
@@ -620,10 +885,12 @@ def main():
             for p in (OUT_BRAIN, OUT_NPZ, OUT_META):
                 shutil.copy2(p, os.path.join(mirror_dir, os.path.basename(p)))
 
+    train_poster_visuals(1200)
+
     print(
         f"Training complete in {time.time() - t_start:.1f}s! "
-        f"Characters={n_chars:,} | brain={os.path.getsize(OUT_BRAIN)/1e6:.2f} MB | "
-        f"visuals={os.path.getsize(OUT_NPZ)/1e6:.2f} MB",
+        f"Characters={n_chars:,} | Danbooru={danbooru_hits:,} | NN_ViT={n_nn:,} | "
+        f"brain={os.path.getsize(OUT_BRAIN)/1e6:.2f} MB | visuals={os.path.getsize(OUT_NPZ)/1e6:.2f} MB",
         flush=True,
     )
 

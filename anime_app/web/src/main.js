@@ -211,6 +211,74 @@ function resolveApiBase() {
 let API_BASE = resolveApiBase();
 
 
+// ─── Animated Vector Nav Icons (pqoqubbw/icons + Unslop) ─────────────
+const _KURO_ANIMATED_NAV_ICONS = {
+  home: `
+    <svg class="kuro-anim-icon kuro-anim-icon--home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path class="kuro-home-frame" pathLength="100" d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <path class="kuro-home-door" pathLength="100" d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+    </svg>
+  `.trim(),
+  browse: `
+    <svg class="kuro-anim-icon kuro-anim-icon--browse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle class="kuro-compass-ring" pathLength="100" cx="12" cy="12" r="10" />
+      <polygon class="kuro-compass-needle" pathLength="100" points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+    </svg>
+  `.trim(),
+  search: `
+    <svg class="kuro-anim-icon kuro-anim-icon--search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <g class="kuro-search-rig">
+        <circle class="kuro-search-lens" pathLength="100" cx="11" cy="11" r="8" />
+        <path class="kuro-search-handle" pathLength="100" d="m21 21-4.3-4.3" />
+      </g>
+    </svg>
+  `.trim(),
+  watchlist: `
+    <svg class="kuro-anim-icon kuro-anim-icon--watchlist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <g class="kuro-bookmark-rig">
+        <path class="kuro-bookmark-body" pathLength="100" d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
+        <path class="kuro-bookmark-tab" pathLength="100" d="M9 7.5h6" />
+      </g>
+    </svg>
+  `.trim(),
+};
+
+const _KURO_ANIM_TIMERS = new WeakMap();
+
+function mountAnimatedNavIcons() {
+  document.querySelectorAll('[data-kuro-anim-icon]').forEach(slot => {
+    const key = slot.dataset.kuroAnimIcon;
+    const markup = _KURO_ANIMATED_NAV_ICONS[key];
+    if (markup && !slot.querySelector('.kuro-anim-icon')) {
+      slot.innerHTML = markup;
+    }
+  });
+}
+
+function playSvgVectorAnimation(svgEl, durationMs = 520) {
+  if (!svgEl) return;
+  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const prevTimer = _KURO_ANIM_TIMERS.get(svgEl);
+  if (prevTimer) clearTimeout(prevTimer);
+  svgEl.classList.remove('is-animating');
+  void svgEl.getBoundingClientRect();
+  svgEl.classList.add('is-animating');
+  const timer = setTimeout(() => {
+    svgEl.classList.remove('is-animating');
+    _KURO_ANIM_TIMERS.delete(svgEl);
+  }, durationMs);
+  _KURO_ANIM_TIMERS.set(svgEl, timer);
+}
+
+function triggerAnimatedNavIcon(tabName) {
+  const key = tabName === 'library' ? 'watchlist' : (tabName || 'home');
+  if (!_KURO_ANIMATED_NAV_ICONS[key]) return;
+  mountAnimatedNavIcons();
+  document.querySelectorAll(`[data-kuro-anim-icon="${key}"] .kuro-anim-icon`).forEach(svg => {
+    playSvgVectorAnimation(svg);
+  });
+}
+
 // ─── Lucide Icons Initializer ───────────────────────────────────────
 function refreshIcons() {
   createIcons({
@@ -947,6 +1015,7 @@ function switchTab(tabName) {
     state.currentTab = 'home';
     showView('view-home');
   }
+  triggerAnimatedNavIcon(state.currentTab);
 }
 
 // ─── API Fetch Helper ───────────────────────────────────────────────
@@ -995,8 +1064,11 @@ function toggleWatchlist(anime) {
   }
   localStorage.setItem('kuro_watchlist', JSON.stringify(state.watchlist));
   updateWatchlistBadge();
+  syncCardSavedBadges(animeId, willBeSaved);
+  refreshIcons();
+}
 
-  // Dynamically update card library badges across all visible lists
+function syncCardSavedBadges(animeId, willBeSaved) {
   document.querySelectorAll(`.anime-card[data-id="${animeId}"] .card-poster-wrapper`).forEach(pw => {
     const existingBadge = pw.querySelector('.card-saved-badge');
     if (willBeSaved && !existingBadge) {
@@ -1009,24 +1081,346 @@ function toggleWatchlist(anime) {
       existingBadge.remove();
     }
   });
-
-  refreshIcons();
 }
 
 function isWatchlisted(animeId) {
   return state.watchlist.some(a => Number(a.anime_id) === Number(animeId));
 }
 
-function updateWatchlistBadge() {
+function updateWatchlistBadge(countOverride = null) {
+  const actualCount = (state.watchlist || []).length;
+  const shownCount = countOverride === null ? actualCount : Math.max(0, Number(countOverride) || 0);
   const badge = document.getElementById('watchlist-badge');
   if (badge) {
-    badge.style.display = state.watchlist.length > 0 ? 'block' : 'none';
+    badge.style.display = actualCount > 0 ? 'block' : 'none';
   }
   const sideCount = document.getElementById('sidebar-watchlist-count');
   if (sideCount) {
-    sideCount.textContent = String((state.watchlist || []).length);
+    sideCount.textContent = String(shownCount);
   }
   KuroDynamicIsland.render();
+}
+
+let _botFlightSeq = 0;
+
+function _isVisibleViewportRect(el) {
+  if (!el || !el.getClientRects || el.getClientRects().length === 0) return null;
+  const style = window.getComputedStyle(el);
+  if (!style || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+    return null;
+  }
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  if (rect.bottom <= 0 || rect.top >= window.innerHeight || rect.right <= 0 || rect.left >= window.innerWidth) {
+    return null;
+  }
+  return rect;
+}
+
+function resolveLibraryDropTarget() {
+  const candidates = [
+    document.querySelector('#app-sidebar .sidebar-nav-item[data-sidebar-tab="watchlist"]'),
+    document.querySelector('.desktop-nav-menu .nav-btn[data-tab="watchlist"]'),
+    document.getElementById('tab-nav-watchlist'),
+    document.querySelector('[data-kdi-nav="watchlist"]'),
+    document.getElementById('kdi-pill-trigger'),
+  ];
+  for (const buttonEl of candidates) {
+    if (!_isVisibleViewportRect(buttonEl)) continue;
+    const iconEl = buttonEl.querySelector('[data-kuro-anim-icon="watchlist"]') || buttonEl;
+    const rect = _isVisibleViewportRect(iconEl) || _isVisibleViewportRect(buttonEl);
+    if (!rect) continue;
+    const countEl = buttonEl.querySelector('#sidebar-watchlist-count') || document.getElementById('sidebar-watchlist-count');
+    return {
+      buttonEl,
+      iconEl,
+      countEl,
+      x: rect.left + rect.width * 0.5,
+      y: rect.top + rect.height * 0.5,
+    };
+  }
+  return null;
+}
+
+function resolveVegetaFlightOrigin(animeId = null) {
+  const chatCard = document.getElementById('vegeta-chat-card');
+  const cardRect = chatCard?.classList.contains('open') ? _isVisibleViewportRect(chatCard) : null;
+  if (cardRect) {
+    const botRows = document.querySelectorAll('#vegeta-messages-box .vegeta-msg-row.vegeta-bot');
+    const lastRow = botRows.length ? botRows[botRows.length - 1] : null;
+    if (lastRow) {
+      const cardMatch = animeId
+        ? lastRow.querySelector(`.vegeta-action-card[data-anime-id="${animeId}"]`)
+        : null;
+      const anchorEl = cardMatch || lastRow.querySelector('.vegeta-msg-bubble') || lastRow.querySelector('.vegeta-msg-avatar');
+      if (anchorEl) {
+        const r = anchorEl.getBoundingClientRect();
+        const safeTop = cardRect.top + 68;
+        const safeBottom = cardRect.bottom - 64;
+        const rawX = cardMatch ? (r.left + Math.min(r.width * 0.35, 96)) : (r.left + r.width * 0.42);
+        const rawY = r.top + r.height * 0.5;
+        if (r.width > 0 && r.height > 0 && rawY >= safeTop - 28 && rawY <= safeBottom + 28) {
+          return {
+            x: Math.min(cardRect.right - 32, Math.max(cardRect.left + 32, rawX)),
+            y: Math.min(safeBottom, Math.max(safeTop, rawY)),
+            senderEl: chatCard.querySelector('.vegeta-header-avatar'),
+          };
+        }
+      }
+      return {
+        x: cardRect.left + cardRect.width * 0.38,
+        y: Math.max(cardRect.top + 88, cardRect.bottom - 128),
+        senderEl: chatCard.querySelector('.vegeta-header-avatar'),
+      };
+    }
+    const headerAvatar = chatCard.querySelector('.vegeta-header-avatar');
+    const avRect = _isVisibleViewportRect(headerAvatar);
+    if (avRect) {
+      return { x: avRect.left + avRect.width * 0.5, y: avRect.top + avRect.height * 0.5, senderEl: headerAvatar };
+    }
+    return { x: cardRect.left + cardRect.width * 0.5, y: cardRect.top + 88, senderEl: headerAvatar };
+  }
+
+  const fab = document.getElementById('btn-vegeta-toggle');
+  const fabRect = _isVisibleViewportRect(fab);
+  if (fabRect) {
+    const av = fab.querySelector('.vegeta-avatar-wrapper') || fab;
+    const avRect = _isVisibleViewportRect(av) || fabRect;
+    return { x: avRect.left + avRect.width * 0.5, y: avRect.top + avRect.height * 0.5, senderEl: fab };
+  }
+
+  const pill = document.getElementById('kdi-pill-trigger');
+  const pillRect = _isVisibleViewportRect(pill);
+  if (pillRect) {
+    return { x: pillRect.left + pillRect.width * 0.5, y: pillRect.top + pillRect.height * 0.5, senderEl: pill };
+  }
+  return null;
+}
+
+function _getFlightInitials(title) {
+  const words = String(title || 'KA').replace(/[^A-Za-z0-9\s]/g, ' ').trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return 'KA';
+}
+
+function _buildFlightPosterCard(item) {
+  const card = document.createElement('div');
+  card.className = 'kuro-flight-card';
+
+  const fallback = document.createElement('span');
+  fallback.className = 'kuro-flight-fallback';
+  fallback.textContent = _getFlightInitials(item?.title);
+  card.appendChild(fallback);
+
+  if (item?.poster) {
+    const img = document.createElement('img');
+    img.className = 'kuro-flight-poster';
+    img.alt = '';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    img.src = item.poster;
+    img.addEventListener('error', () => { img.style.display = 'none'; }, { once: true });
+    card.appendChild(img);
+  }
+
+  const mark = document.createElement('span');
+  mark.className = 'kuro-flight-mark';
+  mark.innerHTML = '<svg viewBox="0 0 8 11" width="7" height="10" fill="currentColor" aria-hidden="true"><path d="M0 0h8v11L4 8.2 0 11V0z"/></svg>';
+  card.appendChild(mark);
+  return card;
+}
+
+function _preloadPosterUrls(urls, maxWaitMs = 220) {
+  const unique = [...new Set((urls || []).filter(Boolean))];
+  if (!unique.length) return Promise.resolve();
+  const loaders = unique.map(src => new Promise(resolve => {
+    const im = new Image();
+    im.decoding = 'async';
+    im.referrerPolicy = 'no-referrer';
+    im.onload = () => resolve();
+    im.onerror = () => resolve();
+    im.src = src;
+  }));
+  return Promise.race([
+    Promise.allSettled(loaders),
+    new Promise(resolve => setTimeout(resolve, maxWaitMs)),
+  ]);
+}
+
+function _computeFlightArcKeyframes(startX, startY, endX, endY, fanIndex, fanTotal) {
+  const halfW = 18;
+  const halfH = 26;
+  const p0x = startX - halfW;
+  const p0y = startY - halfH;
+  const p1x = endX - halfW;
+  const p1y = endY - halfH;
+  const fanDelta = fanTotal > 1 ? (fanIndex - (fanTotal - 1) / 2) : 0;
+  const dist = Math.hypot(p1x - p0x, p1y - p0y);
+  const lift = Math.min(132, Math.max(44, dist * 0.18));
+
+  const cx = Math.min(
+    Math.max(24, (p0x + p1x) * 0.5 + fanDelta * 16),
+    Math.max(24, window.innerWidth - 60)
+  );
+  const cy = Math.max(20, Math.min(p0y, p1y) - lift + fanDelta * 6);
+
+  const steps = 8;
+  const frames = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const inv = 1 - t;
+    const x = inv * inv * p0x + 2 * inv * t * cx + t * t * p1x;
+    const y = inv * inv * p0y + 2 * inv * t * cy + t * t * p1y;
+    const rot = fanDelta * 3.6 * (1 - t);
+    let scale;
+    if (t <= 0.15) {
+      scale = 0.82 + (1.04 - 0.82) * (t / 0.15);
+    } else if (t <= 0.55) {
+      scale = 1.04 + (0.94 - 1.04) * ((t - 0.15) / 0.4);
+    } else {
+      scale = 0.94 + (0.38 - 0.94) * ((t - 0.55) / 0.45);
+    }
+    let opacity;
+    if (t === 0) opacity = 0;
+    else if (t <= 0.14) opacity = t / 0.14;
+    else if (t < 0.86) opacity = 1;
+    else opacity = Math.max(0, 1 - (t - 0.86) / 0.14);
+
+    frames.push({
+      offset: t,
+      opacity: Number(opacity.toFixed(3)),
+      transform: `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) scale3d(${scale.toFixed(3)}, ${scale.toFixed(3)}, 1) rotate(${rot.toFixed(2)}deg)`,
+    });
+  }
+  return frames;
+}
+
+function _getFlightStage() {
+  let stage = document.querySelector('.kuro-bot-flight-stage');
+  if (!stage) {
+    stage = document.createElement('div');
+    stage.className = 'kuro-bot-flight-stage';
+    stage.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(stage);
+  }
+  return stage;
+}
+
+async function animateBotSaveToLibrary(addedItems, prevCount = null) {
+  if (!Array.isArray(addedItems) || addedItems.length === 0) {
+    updateWatchlistBadge();
+    return;
+  }
+
+  const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const fallbackOrigin = resolveVegetaFlightOrigin(addedItems[0]?.anime_id);
+  const initialTarget = resolveLibraryDropTarget();
+
+  if (reducedMotion || !fallbackOrigin || !initialTarget || typeof HTMLElement.prototype.animate !== 'function') {
+    updateWatchlistBadge();
+    triggerAnimatedNavIcon('watchlist');
+    return;
+  }
+
+  const seq = ++_botFlightSeq;
+  const maxVisualCards = 6;
+  const sampleItems = addedItems.length <= maxVisualCards
+    ? addedItems
+    : Array.from({ length: maxVisualCards }, (_, idx) => {
+        const pick = Math.round((idx * (addedItems.length - 1)) / (maxVisualCards - 1));
+        return addedItems[pick];
+      });
+
+  const startCount = prevCount === null ? Math.max(0, (state.watchlist || []).length - addedItems.length) : prevCount;
+  updateWatchlistBadge(startCount);
+
+  try {
+    await _preloadPosterUrls(sampleItems.map(x => x?.poster), 420);
+
+    if (seq !== _botFlightSeq) return;
+
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    if (seq !== _botFlightSeq) return;
+
+    const target = resolveLibraryDropTarget() || initialTarget;
+    const stage = _getFlightStage();
+    const staggerMs = 56;
+    const flightDurationMs = 480;
+    const dockFraction = 0.85;
+    const totalAdded = addedItems.length;
+    const animations = [];
+    const stepTimers = [];
+
+    if (fallbackOrigin.senderEl) {
+      fallbackOrigin.senderEl.classList.add('is-bot-sending');
+      setTimeout(() => fallbackOrigin.senderEl?.classList.remove('is-bot-sending'), 200);
+    }
+
+    sampleItems.forEach((item, idx) => {
+      const perItemOrigin = resolveVegetaFlightOrigin(item?.anime_id) || fallbackOrigin;
+      const card = _buildFlightPosterCard(item);
+      stage.appendChild(card);
+
+      const delay = idx * staggerMs;
+      const frames = _computeFlightArcKeyframes(
+        perItemOrigin.x,
+        perItemOrigin.y,
+        target.x,
+        target.y,
+        idx,
+        sampleItems.length
+      );
+
+      const anim = card.animate(frames, {
+        duration: flightDurationMs,
+        delay,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'both',
+      });
+
+      const dockTimer = setTimeout(() => {
+        if (seq !== _botFlightSeq) return;
+        target.buttonEl.classList.add('is-library-receiving');
+        const stepped = startCount + Math.round(((idx + 1) / sampleItems.length) * totalAdded);
+        updateWatchlistBadge(stepped);
+
+        if (target.countEl) {
+          target.countEl.classList.remove('is-ticking');
+          void target.countEl.offsetWidth;
+          target.countEl.classList.add('is-ticking');
+        }
+
+        if (idx === 0 || idx === sampleItems.length - 1) {
+          triggerAnimatedNavIcon('watchlist');
+        }
+      }, Math.round(delay + flightDurationMs * dockFraction));
+      stepTimers.push(dockTimer);
+
+      const cleanup = () => {
+        if (card.isConnected) card.remove();
+      };
+      const fallbackTimeout = new Promise(resolve => setTimeout(resolve, delay + flightDurationMs + 250));
+      const donePromise = Promise.race([
+        anim.finished || Promise.resolve(),
+        fallbackTimeout,
+      ]).then(cleanup, cleanup);
+      animations.push(donePromise);
+    });
+
+    await Promise.allSettled(animations);
+    stepTimers.forEach(t => clearTimeout(t));
+  } finally {
+    if (seq === _botFlightSeq) {
+      updateWatchlistBadge();
+      setTimeout(() => {
+        if (seq === _botFlightSeq) {
+          document.querySelectorAll('.is-library-receiving').forEach(el => el.classList.remove('is-library-receiving'));
+          document.querySelectorAll('.sidebar-item-count.is-ticking').forEach(el => el.classList.remove('is-ticking'));
+        }
+      }, 180);
+    }
+  }
 }
 
 function syncSidebarActiveState() {
@@ -5310,6 +5704,8 @@ function renderWatchlist() {
 
 // ─── Global Event Listeners & App Mount ─────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  mountAnimatedNavIcons();
+  _getFlightStage();
   // Navigation Tabs (Mobile & Desktop)
   document.querySelectorAll('.tab-item').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
@@ -6373,7 +6769,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/>/g, '&gt;');
 
     // Strip stray backticks wrapped around watch links: `[Watch on KuroAnime](#anime/123)`
-    text = text.replace(/`(\[[^\]]+\]\(#anime\/\d+\))`/g, '$1');
+    text = text.replace(/`(\[[^\]]+\]\((?:#anime\/\d+|https?:\/\/[^\s<>"')]+)\))`/gi, '$1');
 
     // Headings: ## 1. Anime Title
     text = text.replace(/^##\s*(.*?)$/gm, '<div class="vegeta-rec-header"><span class="rec-hash">##</span> $1</div>');
@@ -6398,8 +6794,11 @@ document.addEventListener('DOMContentLoaded', () => {
         resumeLabel = 'Play Ep 1';
       }
       const dataEpAttr = epNum ? ` data-episode="${epNum}"` : '';
+      const cleanLabel = String(label || '').trim();
+      const showLabel = cleanLabel && !/^(?:▶\s*)?(?:watch(?:\s+on\s+kuroanime|\s+now)?|stream(?:\s+now)?|play)$/i.test(cleanLabel);
+      const labelHtml = showLabel ? `<span class="vegeta-link-title">${cleanLabel}</span>` : '';
       return `
-        <div class="vegeta-action-card" data-anime-id="${animeId}">
+        ${labelHtml}<div class="vegeta-action-card" data-anime-id="${animeId}">
           <button type="button" class="vegeta-action-btn-play" data-anime-id="${animeId}"${dataEpAttr} title="Play on KuroAnime">
             <i data-lucide="play"></i> ${resumeLabel}
           </button>
@@ -6412,6 +6811,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Handle quote blocks: > Quote
     text = text.replace(/^>\s*(.*?)$/gm, '<blockquote class="vegeta-blockquote">$1</blockquote>');
+
+    // Clickable external source links: [Source Title](https://...)
+    text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s<>"')]+)\)/gi, (match, label, url) => {
+      const safeUrl = url.replace(/"/g, '&quot;');
+      return `<a class="vegeta-ext-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    });
 
     // Split paragraphs
     const paragraphs = text.split(/\n{2,}/).map(p => {
@@ -6558,22 +6963,52 @@ document.addEventListener('DOMContentLoaded', () => {
     vegetaImageInput?.click();
   });
 
-  vegetaImageInput?.addEventListener('change', () => {
-    const file = vegetaImageInput.files?.[0];
-    if (file) {
-      if (!file.type.startsWith('image/')) {
-        showToast('Please select a valid anime image/screenshot');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        vegetaAttachedImageBase64 = ev.target.result;
-        if (vegetaPreviewImg) vegetaPreviewImg.src = vegetaAttachedImageBase64;
+  function attachVegetaImageFile(file, toastMsg = '') {
+    if (!file || !file.type?.startsWith('image/')) {
+      showToast('Please select a valid anime image or screenshot');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const rawDataUrl = ev.target.result;
+      const applyPreview = (finalUrl) => {
+        vegetaAttachedImageBase64 = finalUrl;
+        if (vegetaPreviewImg) vegetaPreviewImg.src = finalUrl;
         if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'flex';
+        if (toastMsg) showToast(toastMsg);
         vegetaChatInput?.focus();
       };
-      reader.readAsDataURL(file);
-    }
+      // Normalize oversized PNG/mobile screenshots to compact 1152px JPEG so uploads never stall
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1152;
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        if (w <= maxDim && h <= maxDim && rawDataUrl.length < 480000) {
+          applyPreview(rawDataUrl);
+          return;
+        }
+        try {
+          const scale = Math.min(1, maxDim / Math.max(w, h, 1));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(w * scale));
+          canvas.height = Math.max(1, Math.round(h * scale));
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          applyPreview(canvas.toDataURL('image/jpeg', 0.88));
+        } catch {
+          applyPreview(rawDataUrl);
+        }
+      };
+      img.onerror = () => applyPreview(rawDataUrl);
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  vegetaImageInput?.addEventListener('change', () => {
+    const file = vegetaImageInput.files?.[0];
+    if (file) attachVegetaImageFile(file);
   });
 
   vegetaRemoveImgBtn?.addEventListener('click', (e) => {
@@ -6593,14 +7028,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const file = item.getAsFile();
         if (file) {
           e.preventDefault();
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            vegetaAttachedImageBase64 = ev.target.result;
-            if (vegetaPreviewImg) vegetaPreviewImg.src = vegetaAttachedImageBase64;
-            if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'flex';
-            showToast('Screenshot attached from clipboard');
-          };
-          reader.readAsDataURL(file);
+          attachVegetaImageFile(file, 'Screenshot attached from clipboard');
           break;
         }
       }
@@ -6618,14 +7046,7 @@ document.addEventListener('DOMContentLoaded', () => {
     e.stopPropagation();
     const files = e.dataTransfer?.files;
     if (files && files[0] && files[0].type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        vegetaAttachedImageBase64 = ev.target.result;
-        if (vegetaPreviewImg) vegetaPreviewImg.src = vegetaAttachedImageBase64;
-        if (vegetaImagePreviewBar) vegetaImagePreviewBar.style.display = 'flex';
-        showToast('Screenshot attached');
-      };
-      reader.readAsDataURL(files[0]);
+      attachVegetaImageFile(files[0], 'Screenshot attached');
     }
   });
 
@@ -6738,25 +7159,58 @@ document.addEventListener('DOMContentLoaded', () => {
   async function handleAgenticActions(actionsList) {
     if (!Array.isArray(actionsList) || actionsList.length === 0) return;
 
+    const prevWatchlistCount = (state.watchlist || []).length;
+    const singleAddQueue = [];
+    for (const a of actionsList) {
+      if (a && a.type === 'add_many_to_list' && Array.isArray(a.items)) {
+        for (const it of a.items) singleAddQueue.push(it);
+      } else if (a && a.type === 'add_to_list') {
+        singleAddQueue.push(a);
+      }
+    }
+
+    if (singleAddQueue.length > 0) {
+      const addedItems = [];
+      for (const entry of singleAddQueue) {
+        const aid = Number(entry.anime_id);
+        if (!aid || isWatchlisted(aid)) continue;
+        const item = {
+          anime_id: aid,
+          title: entry.title || 'Anime',
+          poster: entry.poster || '',
+          type: entry.anime_type || (entry.type && entry.type !== 'add_to_list' ? entry.type : 'TV'),
+          anilist_score: entry.anilist_score,
+          added_at: Date.now(),
+        };
+        state.watchlist.unshift(item);
+        saveLibraryItemToCloud(item, true);
+        syncCardSavedBadges(aid, true);
+        addedItems.push(item);
+      }
+      if (addedItems.length > 0) {
+        localStorage.setItem('kuro_watchlist', JSON.stringify(state.watchlist));
+        if (getActiveViewId() === 'view-watchlist') renderWatchlist();
+        refreshIcons();
+        showToast(
+          addedItems.length === 1
+            ? `Added ${addedItems[0].title} to My List`
+            : `Added ${addedItems.length} anime to My List`
+        );
+        animateBotSaveToLibrary(addedItems, prevWatchlistCount);
+      } else {
+        showToast(
+          singleAddQueue.length === 1
+            ? `${singleAddQueue[0].title || 'Anime'} is already in your list`
+            : 'Those titles are already in My List'
+        );
+      }
+    }
+
     for (const a of actionsList) {
       if (!a || !a.type) continue;
 
-      if (a.type === 'add_to_list') {
-        const aid = Number(a.anime_id);
-        if (aid) {
-          const item = {
-            anime_id: aid,
-            title: a.title || 'Anime',
-            poster: a.poster || '',
-            type: a.type || 'TV',
-            added_at: Date.now()
-          };
-          if (!isWatchlisted(aid)) {
-            toggleWatchlist(item);
-          } else {
-            showToast(`${a.title || 'Anime'} is already in your list`);
-          }
-        }
+      if (a.type === 'add_many_to_list' || a.type === 'add_to_list') {
+        continue;
       } else if (a.type === 'remove_from_list') {
         const aid = Number(a.anime_id);
         if (aid) {
@@ -6939,7 +7393,7 @@ document.addEventListener('DOMContentLoaded', () => {
       duration_sec: Math.round(h.duration || 0)
     }));
 
-    const mySavedList = (state.watchlist || []).slice(0, 10).map(w => ({
+    const mySavedList = (state.watchlist || []).slice(0, 80).map(w => ({
       anime_id: w.anime_id,
       title: w.title
     }));
@@ -6961,23 +7415,28 @@ document.addEventListener('DOMContentLoaded', () => {
     vegetaConversation.push({ role: 'user', text: text || 'Identify this anime screenshot' });
 
     try {
-      let res;
-      try {
-        res = await fetch('/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-      } catch (networkErr) {
-        res = await fetch('http://127.0.0.1:8000/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+      const postChat = async (endpoint) => fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      let res = null;
+      const endpoints = ['/api/ai/chat', '/api/ai/chat', 'http://127.0.0.1:8000/api/ai/chat'];
+      for (const ep of endpoints) {
+        try {
+          const attempt = await postChat(ep);
+          if (attempt.ok) {
+            res = attempt;
+            break;
+          }
+        } catch {
+          // Retry next endpoint cleanly
+        }
       }
 
-      if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
+      if (!res || !res.ok) {
+        throw new Error(`Server returned ${res ? res.status : 'unreachable'}`);
       }
 
       const data = await res.json();
