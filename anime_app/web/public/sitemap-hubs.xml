@@ -194,13 +194,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/shoujo</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/mahou-shoujo</loc>
     <lastmod>2026-11-18</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/mahou-shoujo</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/shoujo</loc>
     <lastmod>2026-11-18</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
