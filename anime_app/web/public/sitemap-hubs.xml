@@ -188,13 +188,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/martial-arts</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/mahou-shoujo</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/mahou-shoujo</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/martial-arts</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -206,13 +206,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/military</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/psychological</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/psychological</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/military</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
