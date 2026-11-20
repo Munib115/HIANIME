@@ -530,6 +530,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/himitsu-no-aipri-ring-hen</loc>
+    <lastmod>2026-11-20</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/masamune-datenicle</loc>
     <lastmod>1792405174</lastmod>
     <changefreq>weekly</changefreq>
@@ -1414,12 +1420,6 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/new-gods-yang-jian</loc>
     <lastmod>2026-11-06</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://kuroanime-flax.vercel.app/anime/himitsu-no-aipri-ring-hen</loc>
-    <lastmod>2026-11-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -8782,6 +8782,12 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/yoshinaga-san-chi-no-gargoyle-specials</loc>
     <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/dou-hun-wei-zhi-xuan-yue-qi-yuan</loc>
+    <lastmod>2026-11-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
