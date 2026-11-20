@@ -428,6 +428,12 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/genre/animation</loc>
+    <lastmod>2026-11-20</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/genre/survival</loc>
     <lastmod>2026-11-20</lastmod>
     <changefreq>weekly</changefreq>
@@ -465,12 +471,6 @@
   </url>
   <url>
     <loc>https://kuroanime-flax.vercel.app/genre/high-stakes-game</loc>
-    <lastmod>2026-11-20</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/animation</loc>
     <lastmod>2026-11-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
