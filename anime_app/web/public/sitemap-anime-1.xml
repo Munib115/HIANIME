@@ -47565,7 +47565,7 @@
   </url>
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/yuusha-raideen</loc>
-    <lastmod>2026-11-20</lastmod>
+    <lastmod>2026-11-21</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -49924,6 +49924,12 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/grander-musashi</loc>
     <lastmod>2026-11-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/late-night-the-genius-bakabon</loc>
+    <lastmod>2026-11-21</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -53992,12 +53998,6 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/to-heart-special-mini-episodes</loc>
     <lastmod>2026-11-19</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://kuroanime-flax.vercel.app/anime/city-hunter-ryo-no-propose</loc>
-    <lastmod>2026-11-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
