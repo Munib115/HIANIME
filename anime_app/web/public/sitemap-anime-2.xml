@@ -2,6 +2,12 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <!-- Anime Detail Pages Part 2 -->
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/anime-tenchou-movie</loc>
+    <lastmod>2026-11-05</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/forbidden-love-club</loc>
     <lastmod>1793021833</lastmod>
     <changefreq>weekly</changefreq>
