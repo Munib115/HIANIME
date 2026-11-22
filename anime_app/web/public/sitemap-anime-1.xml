@@ -45128,6 +45128,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/anime/santa-company</loc>
+    <lastmod>2026-11-22</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/anime/jewelpet-sunshine</loc>
     <lastmod>2026-11-06</lastmod>
     <changefreq>weekly</changefreq>
@@ -45404,7 +45410,7 @@
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/anime/santa-company</loc>
+    <loc>https://kuroanime-flax.vercel.app/anime/santa-company-1016381</loc>
     <lastmod>2026-11-06</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
@@ -53992,12 +53998,6 @@
   <url>
     <loc>https://kuroanime-flax.vercel.app/anime/dawn-of-the-world</loc>
     <lastmod>2026-11-06</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://kuroanime-flax.vercel.app/anime/kishin-corps</loc>
-    <lastmod>1792406136</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
