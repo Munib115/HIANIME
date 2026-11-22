@@ -134,13 +134,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/seinen</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/music</loc>
     <lastmod>2026-11-22</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/music</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/seinen</loc>
     <lastmod>2026-11-22</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -152,13 +152,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/magic</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/horror</loc>
     <lastmod>2026-11-22</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/horror</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/magic</loc>
     <lastmod>2026-11-22</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -200,13 +200,13 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/shoujo</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/psychological</loc>
     <lastmod>2026-11-22</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/psychological</loc>
+    <loc>https://kuroanime-flax.vercel.app/genre/shoujo</loc>
     <lastmod>2026-11-22</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -410,6 +410,12 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://kuroanime-flax.vercel.app/genre/animation</loc>
+    <lastmod>2026-11-22</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://kuroanime-flax.vercel.app/genre/iyashikei</loc>
     <lastmod>2026-11-22</lastmod>
     <changefreq>weekly</changefreq>
@@ -423,12 +429,6 @@
   </url>
   <url>
     <loc>https://kuroanime-flax.vercel.app/genre/cgdct</loc>
-    <lastmod>2026-11-22</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://kuroanime-flax.vercel.app/genre/animation</loc>
     <lastmod>2026-11-22</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
