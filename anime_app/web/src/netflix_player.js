@@ -688,9 +688,9 @@ export class NetflixPlayer {
 
     const scheduleHideControls = (delay = 4200) => {
       clearTimeout(this.controlsTimeout);
-      if (!this.video.paused) {
+      if (this.video && !this.video.paused) {
         this.controlsTimeout = setTimeout(() => {
-          if (!this.isPopoverOpen() && !this.video.paused) {
+          if (!this.isPopoverOpen() && this.video && !this.video.paused) {
             this.root?.classList.remove('controls-visible');
           }
         }, delay);

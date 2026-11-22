@@ -118,6 +118,10 @@ def _load_catalog():
         "munib_server.db",
         [os.path.join(ROOT_DIR, "api", "munib_server.db.gz"), os.path.join(ROOT_DIR, "anime_app", "web", "api", "munib_server.db.gz")],
     )
+    db3_path, db3_tmp = _open_db_with_gz_fallback(
+        "haseeb_server.db",
+        [os.path.join(ROOT_DIR, "api", "haseeb_server.db.gz"), os.path.join(ROOT_DIR, "anime_app", "web", "api", "haseeb_server.db.gz")],
+    )
 
     records = []
     try:
@@ -175,8 +179,34 @@ def _load_catalog():
                     "lastmod": lastmod,
                 })
             conn2.close()
+
+        # Server 3 — Haseeb (haseeb_server.db) — unique anime only
+        if db3_path:
+            print(f"[Sitemap] Loading Server 3 DB: {db3_path}")
+            conn3 = sqlite3.connect(db3_path)
+            rows3 = conn3.execute(
+                """SELECT anime_id, title, title_english, genres, scraped_at, COALESCE(anilist_popularity, 0)
+                   FROM anime
+                   ORDER BY COALESCE(anilist_popularity, 0) DESC, anime_id ASC"""
+            ).fetchall()
+            for r in rows3:
+                aid = int(r[0])
+                if aid in seen_ids:
+                    continue
+                seen_ids.add(aid)
+                raw_ts = r[4]
+                lastmod = str(raw_ts)[:10] if raw_ts and len(str(raw_ts)) >= 10 else TODAY
+                records.append({
+                    "anime_id": aid,
+                    "title": r[1] or "",
+                    "title_english": r[2] or "",
+                    "genres": r[3] or "",
+                    "popularity": int(r[5] or 0),
+                    "lastmod": lastmod,
+                })
+            conn3.close()
     finally:
-        for p, is_tmp in ((db1_path, db1_tmp), (db2_path, db2_tmp)):
+        for p, is_tmp in ((db1_path, db1_tmp), (db2_path, db2_tmp), (db3_path, db3_tmp)):
             if is_tmp and p and os.path.exists(p):
                 try:
                     os.remove(p)

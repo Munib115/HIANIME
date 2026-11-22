@@ -203,7 +203,30 @@ def find_munib_db():
     return None
 
 
+def find_haseeb_db():
+    """Locate the independent Server 3 database (haseeb_server.db or compressed haseeb_server.db.gz)."""
+    root_dir = os.path.dirname(PARENT_DIR)
+    candidates = [
+        os.environ.get("HASEEB_DB"),
+        os.path.join(CURRENT_DIR, "haseeb_server.db"),
+        os.path.join(PARENT_DIR, "haseeb_server.db"),
+        os.path.join(root_dir, "haseeb_server.db"),
+        os.path.join(os.getcwd(), "haseeb_server.db"),
+        os.path.join(CURRENT_DIR, "haseeb_server.db.gz"),
+        os.path.join(PARENT_DIR, "haseeb_server.db.gz"),
+        os.path.join(CURRENT_DIR, "api", "haseeb_server.db.gz"),
+        os.path.join(PARENT_DIR, "api", "haseeb_server.db.gz"),
+        os.path.join(os.getcwd(), "api", "haseeb_server.db.gz"),
+        os.path.join(os.getcwd(), "anime_app", "web", "api", "haseeb_server.db.gz"),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return os.path.abspath(c)
+    return None
+
+
 _INITIALIZED_MUNIB_DB = None
+_INITIALIZED_HASEEB_DB = None
 _DB_STAGE_LOCK = _threading.Lock()
 
 
@@ -267,6 +290,28 @@ def get_munib_db_path():
     return None
 
 
+def get_haseeb_db_path():
+    global _INITIALIZED_HASEEB_DB
+    if _INITIALIZED_HASEEB_DB and os.path.exists(_INITIALIZED_HASEEB_DB):
+        return _INITIALIZED_HASEEB_DB
+
+    source = find_haseeb_db()
+    if not source or not os.path.exists(source):
+        return None
+
+    try:
+        staged = _stage_sqlite_file(source, "haseeb_server.db")
+        if staged and os.path.exists(staged) and os.path.getsize(staged) > 0:
+            _INITIALIZED_HASEEB_DB = staged
+            return _INITIALIZED_HASEEB_DB
+    except Exception:
+        if not source.endswith(".gz"):
+            _INITIALIZED_HASEEB_DB = source
+            return source
+        return None
+    return None
+
+
 def _open_sqlite_ro(path: str, timeout: int = 15):
     """Open SQLite safely on local disk or serverless /var/task (/tmp)."""
     if path.startswith("/tmp"):
@@ -311,6 +356,31 @@ def munib_db():
 def munib_rows(sql, params=()):
     """Query the independent munib_server.db without mixing into hianime.db."""
     conn = munib_db()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
+    except Exception:
+        return []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def haseeb_db():
+    path = get_haseeb_db_path()
+    if not path or not os.path.exists(path):
+        return None
+    return _open_sqlite_ro(path, timeout=10)
+
+
+def haseeb_rows(sql, params=()):
+    """Query the independent haseeb_server.db without mixing into hianime.db or munib_server.db."""
+    conn = haseeb_db()
     if not conn:
         return []
     try:
@@ -521,11 +591,18 @@ def audio_flags(anime_ids):
     for r in munib_rows(f"SELECT DISTINCT anime_id, type FROM streams WHERE anime_id IN ({q}) AND server_name = 'Munib Server'", clean_ids):
         if r["type"] in ("sub", "dub") and r["anime_id"] in out:
             out[r["anime_id"]][r["type"]] = True
+    for r in haseeb_rows(f"SELECT DISTINCT anime_id, type FROM streams WHERE anime_id IN ({q}) AND server_name = 'Haseeb'", clean_ids):
+        if r["type"] in ("sub", "dub") and r["anime_id"] in out:
+            out[r["anime_id"]][r["type"]] = True
     # Also cross-check shared anilist_id for any entries not aligned by primary anime_id
     al_map = {}
     for r in rows(f"SELECT anime_id, anilist_id FROM anime WHERE anime_id IN ({q}) AND anilist_id > 0", clean_ids):
         al_map[int(r["anilist_id"])] = int(r["anime_id"])
     for r in munib_rows(f"SELECT anime_id, anilist_id FROM anime WHERE anime_id IN ({q}) AND anilist_id > 0", clean_ids):
+        al_i = int(r["anilist_id"])
+        if al_i not in al_map:
+            al_map[al_i] = int(r["anime_id"])
+    for r in haseeb_rows(f"SELECT anime_id, anilist_id FROM anime WHERE anime_id IN ({q}) AND anilist_id > 0", clean_ids):
         al_i = int(r["anilist_id"])
         if al_i not in al_map:
             al_map[al_i] = int(r["anime_id"])
@@ -536,6 +613,10 @@ def audio_flags(anime_ids):
             aid = al_map.get(int(mr["anilist_id"]))
             if aid in out and mr["type"] in ("sub", "dub"):
                 out[aid][mr["type"]] = True
+        for hr in haseeb_rows(f"SELECT DISTINCT anilist_id, type FROM streams WHERE anilist_id IN ({aq}) AND server_name = 'Haseeb'", al_keys):
+            aid = al_map.get(int(hr["anilist_id"]))
+            if aid in out and hr["type"] in ("sub", "dub"):
+                out[aid][hr["type"]] = True
     return out
 
 
@@ -760,6 +841,12 @@ def _get_dub_anime_ids() -> set[int]:
                 dub_ids.add(int(r["anime_id"]))
     except Exception:
         pass
+    try:
+        for r in haseeb_rows("SELECT DISTINCT anime_id FROM streams WHERE type = 'dub' AND server_name = 'Haseeb'"):
+            if r.get("anime_id") is not None:
+                dub_ids.add(int(r["anime_id"]))
+    except Exception:
+        pass
     _DUB_IDS_CACHE = (now, dub_ids)
     return dub_ids
 
@@ -838,11 +925,14 @@ def debug_db():
 def stats():
     m_streams = munib_rows("SELECT COUNT(*) AS n FROM streams")
     munib_stream_count = m_streams[0]["n"] if m_streams else 0
+    h_streams = haseeb_rows("SELECT COUNT(*) AS n FROM streams")
+    haseeb_stream_count = h_streams[0]["n"] if h_streams else 0
     return {
         "anime": one("SELECT COUNT(*) n FROM anime")["n"],
         "episodes": one("SELECT COUNT(*) n FROM episodes")["n"],
-        "streams": one("SELECT COUNT(*) n FROM streams")["n"] + munib_stream_count,
+        "streams": one("SELECT COUNT(*) n FROM streams")["n"] + munib_stream_count + haseeb_stream_count,
         "munib_streams": munib_stream_count,
+        "haseeb_streams": haseeb_stream_count,
     }
 
 
@@ -1216,21 +1306,30 @@ def anime_episodes(anime_ident: str):
         GROUP BY e.id
         ORDER BY e.episode_number
     """, (anime_id,))
-    # Merge sub/dub availability from independent Munib Server DB (munib_server.db)
+    # Merge sub/dub availability from independent Munib Server DB (munib_server.db) & Haseeb Server DB (haseeb_server.db)
     munib_ep_flags = {}
     for mr in munib_rows("SELECT episode_number, type FROM streams WHERE anime_id = ?", (anime_id,)):
         ep_no = mr.get("episode_number")
         st = mr.get("type")
         if ep_no is not None and st in ("sub", "dub"):
             munib_ep_flags.setdefault(ep_no, {"sub": 0, "dub": 0})[st] = 1
+    haseeb_ep_flags = {}
+    for hr in haseeb_rows("SELECT episode_number, type FROM streams WHERE anime_id = ?", (anime_id,)):
+        ep_no = hr.get("episode_number")
+        st = hr.get("type")
+        if ep_no is not None and st in ("sub", "dub"):
+            haseeb_ep_flags.setdefault(ep_no, {"sub": 0, "dub": 0})[st] = 1
     if not eps:
-        # Fallback to episodes stored directly in munib_server.db (e.g. Hentai & Munib-exclusive titles)
+        # Fallback to episodes stored directly in munib_server.db or haseeb_server.db (e.g. exclusive titles)
         m_eps = munib_rows(
+            "SELECT episode_id, episode_number, title FROM episodes WHERE anime_id = ? ORDER BY episode_number",
+            (anime_id,),
+        ) or haseeb_rows(
             "SELECT episode_id, episode_number, title FROM episodes WHERE anime_id = ? ORDER BY episode_number",
             (anime_id,),
         )
         for me in m_eps:
-            mf = munib_ep_flags.get(me["episode_number"], {"sub": 1, "dub": 0})
+            mf = munib_ep_flags.get(me["episode_number"], haseeb_ep_flags.get(me["episode_number"], {"sub": 1, "dub": 0}))
             eps.append({
                 "episode_id": me["episode_id"],
                 "episode_number": me["episode_number"],
@@ -1245,6 +1344,10 @@ def anime_episodes(anime_ident: str):
         if mf:
             ep["sub"] = max(ep.get("sub") or 0, mf["sub"])
             ep["dub"] = max(ep.get("dub") or 0, mf["dub"])
+        hf = haseeb_ep_flags.get(ep["episode_number"])
+        if hf:
+            ep["sub"] = max(ep.get("sub") or 0, hf["sub"])
+            ep["dub"] = max(ep.get("dub") or 0, hf["dub"])
     return {"anime_id": anime_id, "episodes": eps}
 
 
@@ -1288,6 +1391,10 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
             m_al = munib_rows("SELECT anilist_id FROM anime WHERE anime_id = ?", (a_id,))
             if m_al and m_al[0].get("anilist_id"):
                 al_id = m_al[0]["anilist_id"]
+            else:
+                h_al = haseeb_rows("SELECT anilist_id FROM anime WHERE anime_id = ?", (a_id,))
+                if h_al and h_al[0].get("anilist_id"):
+                    al_id = h_al[0]["anilist_id"]
 
     if not zoko_data and ep_no is not None:
         if a_id is not None:
@@ -1360,9 +1467,93 @@ def episode_streams(episode_id: str, anime_id: Optional[int] = None):
             except Exception:
                 pass
 
+    # 3. Server 3: Haseeb (from haseeb_server.db + live onianime.eu fallback)
+    h_sql = "SELECT type, 'Haseeb' AS server_name, provider, embed_url FROM streams WHERE episode_id = ? AND server_name = 'Haseeb'"
+    h_params = [episode_id]
+    if anime_id is not None:
+        h_sql += " AND anime_id = ?"
+        h_params.append(anime_id)
+    haseeb_data = haseeb_rows(h_sql, h_params)
+
+    if not haseeb_data and ep_no is not None:
+        if a_id is not None:
+            haseeb_data = haseeb_rows(
+                "SELECT type, 'Haseeb' AS server_name, provider, embed_url FROM streams WHERE anime_id = ? AND episode_number = ? AND server_name = 'Haseeb'",
+                (a_id, ep_no),
+            )
+        if not haseeb_data and al_id:
+            haseeb_data = haseeb_rows(
+                "SELECT type, 'Haseeb' AS server_name, provider, embed_url FROM streams WHERE anilist_id = ? AND episode_number = ? AND server_name = 'Haseeb'",
+                (al_id, ep_no),
+            )
+        if not haseeb_data and (al_id or a_id):
+            try:
+                oni_id = None
+                if al_id:
+                    oni_row = haseeb_rows("SELECT onianime_id FROM anime WHERE anilist_id = ? LIMIT 1", (al_id,))
+                    if oni_row and oni_row[0].get("onianime_id"):
+                        oni_id = oni_row[0]["onianime_id"]
+                if not oni_id and al_id:
+                    c_res = _STREAM_SESSION.get(f"https://onianime.eu/api/catalog?search={al_id}&page=1", timeout=1.8)
+                    if c_res.status_code == 200:
+                        c_json = c_res.json()
+                        for it in c_json.get("animes", []):
+                            if str(it.get("anilist") or it.get("anilistId")) == str(al_id):
+                                oni_id = it.get("id")
+                                break
+                if oni_id:
+                    # Fetch episode list to get valid provider names for sub/dub
+                    _oni_ep_data = None
+                    try:
+                        _oni_ep_resp = _STREAM_SESSION.get(
+                            f"https://onianime.eu/api/anime/{oni_id}/episodes/new",
+                            headers={"User-Agent": _STREAM_HEADERS["User-Agent"], "Referer": "https://onianime.eu/home"},
+                            timeout=2.5,
+                        )
+                        if _oni_ep_resp.status_code == 200:
+                            _oni_ep_data = _oni_ep_resp.json()
+                    except Exception:
+                        pass
+
+                    _oni_eps = (_oni_ep_data or {}).get("episodes", [])
+                    _ep_obj = next((e for e in _oni_eps if int(e.get("ep") or 1) == ep_no), _oni_eps[0] if _oni_eps else {})
+                    _sub_provs = _ep_obj.get("subProviders") or []
+                    _dub_provs = _ep_obj.get("dubProviders") or []
+
+                    for stype in ("sub", "dub"):
+                        _providers_for_type = _sub_provs if stype == "sub" else _dub_provs
+                        _candidate_provs = list(_providers_for_type) + [p for p in ("kaa", "yuki", "animedunya") if p not in _providers_for_type]
+                        _stream_found = False
+                        for _prov in _candidate_provs[:3]:
+                            try:
+                                pr = _STREAM_SESSION.get(
+                                    f"https://onianime.eu/api/anime/{oni_id}/parts",
+                                    params={"episode": ep_no, "type": stype, "server": _prov},
+                                    headers={"User-Agent": _STREAM_HEADERS["User-Agent"], "Referer": "https://onianime.eu/home"},
+                                    timeout=2.0,
+                                )
+                                if pr.status_code == 200:
+                                    pjson = pr.json()
+                                    if pjson.get("sources"):
+                                        src = pjson["sources"][0].get("src")
+                                        if src:
+                                            haseeb_data.append({
+                                                "type": stype,
+                                                "server_name": "Haseeb",
+                                                "provider": _prov,
+                                                "embed_url": src,
+                                            })
+                                            _stream_found = True
+                                            break
+                            except Exception:
+                                pass
+                        # Both sub and dub loops run independently
+            except Exception:
+                pass
+
     combined = []
     seen_key = set()
-    for s in (zoko_data + munib_data):
+    for s in (zoko_data + munib_data + haseeb_data):
         k = (s.get("type"), s.get("server_name"))
         if k in seen_key:
             continue
@@ -8406,8 +8597,22 @@ def _vegeta_line(it, synopsis_len=260):
     syn = (it.get("synopsis") or "").replace("\n", " ").strip()
     if len(syn) > synopsis_len:
         syn = syn[:synopsis_len].rsplit(" ", 1)[0] + "..."
-    servers = "ZokoAnime + Munib Server" if (it.get("on_munib") and not it.get("munib_exclusive")) else (
-        "Munib Server" if it.get("munib_exclusive") else "ZokoAnime")
+    _on_z = not it.get("munib_exclusive")
+    _on_m = it.get("on_munib")
+    _on_h = it.get("on_haseeb")
+    _srv_parts = []
+    if _on_z:
+        _srv_parts.append("ZokoAnime")
+    if _on_m:
+        _srv_parts.append("Munib Server")
+    if _on_h:
+        _srv_parts.append("Haseeb")
+    if not _srv_parts:
+        if it.get("munib_exclusive"):
+            _srv_parts = ["Munib Server"]
+        else:
+            _srv_parts = ["ZokoAnime"]
+    servers = " + ".join(_srv_parts)
     s_note = f", {len(it['seasons'])} seasons in franchise" if len(it.get("seasons") or []) > 1 else ""
     line = (
         f"- [ID {it['anime_id']}] {it.get('title_english') or it.get('title')}"

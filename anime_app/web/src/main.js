@@ -4538,7 +4538,8 @@ function renderServerChips() {
   }
 
   chipsContainer.innerHTML = list.map((s, idx) => `
-    <button class="server-chip ${idx === state.activeServerIndex ? 'active' : ''}" data-sidx="${idx}">
+    <button class="server-chip ${idx === state.activeServerIndex ? 'active' : ''}" data-sidx="${idx}" data-server="${(s.server_name || '').toLowerCase().replace(/\s+/g, '-')}">
+      <span class="server-chip-dot"></span>
       <span class="server-chip-name">${s.server_name || 'Server ' + (idx + 1)}</span>
     </button>
   `).join('');
