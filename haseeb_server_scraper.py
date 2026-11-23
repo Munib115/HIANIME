@@ -1,13 +1,14 @@
 """
-Haseeb Server Turbo Parallel Scraper — Complete & Continuous Ingestion Engine
-=============================================================================
+Haseeb Server (Server 3) Direct ID Probing & Continuous Ingestion Engine
+========================================================================
 - Dedicated independent SQLite database: haseeb_server.db
-- Never mixes data with hianime.db or munib_server.db
-- High-concurrency extraction (36 worker threads)
-- Ingests brand new anime (popular, current season, recently added) + full 5,532 catalog
+- Probes all onianime.eu anime IDs directly via /api/anime/{id}/episodes/new
+- Bypasses any catalog/search downtime on upstream
+- Cross-references AniList IDs against hianime.db for canonical titles & metadata
+- High-throughput parallel ingestion (36 workers)
 - Probes and stores direct HLS streams (SUB & DUB)
 - Online non-locking SQLite backups using sqlite3.backup()
-- Continuously scans for new episodes and newly added titles
+- Continuously runs in the background
 """
 import sys
 import io
@@ -32,15 +33,14 @@ HIANIME_DB_PATH = os.environ.get("ANIME_DB") or os.path.join(BASE_DIR, "hianime.
 LOG_FILE = os.path.join(BASE_DIR, "haseeb_scraper.log")
 
 ONIANIME_BASE = "https://onianime.eu"
-CATALOG_API = f"{ONIANIME_BASE}/api/catalog"
 ANIME_API = f"{ONIANIME_BASE}/api/anime"
 POPULAR_API = f"{ONIANIME_BASE}/api/animes/popular"
 RECOMMENDED_API = f"{ONIANIME_BASE}/api/animes/recommended"
 
 SERVER_NAME = "Haseeb"
 PROVIDER_NAME = "onianime.eu"
-CATALOG_WORKERS = 16
 EXTRACT_WORKERS = 36
+MAX_ONI_ID = 6500
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -54,7 +54,7 @@ session.headers.update(HEADERS)
 adapter = HTTPAdapter(
     pool_connections=80,
     pool_maxsize=80,
-    max_retries=Retry(total=3, backoff_factor=0.15, status_forcelist=[500, 502, 503, 504]),
+    max_retries=Retry(total=2, backoff_factor=0.1, status_forcelist=[502, 503, 504]),
 )
 session.mount("https://", adapter)
 session.mount("http://", adapter)
@@ -73,21 +73,17 @@ def log(msg: str):
             pass
 
 
-def fetch_json(url: str, params: dict = None, retries: int = 3, timeout: int = 8):
+def fetch_json(url: str, params: dict = None, retries: int = 2, timeout: int = 5):
     for attempt in range(retries):
         try:
             r = session.get(url, params=params, timeout=timeout)
             if r.status_code == 200:
                 return r.json()
+            elif r.status_code in (404, 400, 500):
+                return None
             elif r.status_code == 429:
                 time.sleep(1.0 * (attempt + 1))
-            elif r.status_code in (404, 400):
-                return None
-            else:
-                time.sleep(0.1)
         except Exception:
-            if attempt == retries - 1:
-                return None
             time.sleep(0.1)
     return None
 
@@ -201,13 +197,28 @@ def load_hianime_reference():
     try:
         conn = sqlite3.connect(HIANIME_DB_PATH, timeout=10)
         c = conn.cursor()
-        c.execute("SELECT anime_id, anilist_id, title, title_english, title_romaji FROM anime")
-        for a_id, al_id, t, t_en, t_rom in c.fetchall():
+        c.execute("""
+            SELECT anime_id, anilist_id, title, title_english, title_romaji, japanese_name,
+                   type, status, genres, season_year, poster_url, anilist_score, anilist_popularity
+            FROM anime
+        """)
+        for row in c.fetchall():
+            a_id, al_id, t, t_en, t_rom, t_jp, typ, stat, gen, yr, post, sc, pop = row
             if al_id:
                 by_anilist[int(al_id)] = {
                     "anime_id": int(a_id),
                     "anilist_id": int(al_id),
                     "title": t or t_en or t_rom or "",
+                    "title_english": t_en or t or "",
+                    "title_romaji": t_rom or "",
+                    "japanese_name": t_jp or "",
+                    "type": typ or "TV",
+                    "status": stat or "Finished",
+                    "genres": gen or "",
+                    "season_year": yr,
+                    "poster_url": post or "",
+                    "anilist_score": sc,
+                    "anilist_popularity": pop,
                 }
         conn.close()
     except Exception:
@@ -227,7 +238,7 @@ def resolve_single_stream(oni_id: int, ep_no: int, stype: str, providers: list):
         p = fetch_json(
             f"{ANIME_API}/{oni_id}/parts",
             params={"episode": ep_no, "type": stype, "server": prov},
-            timeout=5,
+            timeout=4,
         )
         if p and p.get("sources"):
             sources = p.get("sources", [])
@@ -236,26 +247,8 @@ def resolve_single_stream(oni_id: int, ep_no: int, stype: str, providers: list):
     return None, None
 
 
-def extract_anime_data(item: dict, ref_by_al: dict):
-    oni_id = item.get("id")
-    if not oni_id:
-        return None
-
-    al_raw = item.get("anilist") or item.get("anilistId")
-    al_id = int(al_raw) if al_raw and str(al_raw).isdigit() else None
-
-    if al_id and al_id in ref_by_al:
-        anime_id = ref_by_al[al_id]["anime_id"]
-    elif al_id:
-        anime_id = 2000000 + al_id
-    else:
-        anime_id = 3000000 + int(oni_id)
-
-    title_en = item.get("eng_name") or ""
-    title_nat = item.get("name") or ""
-    display_title = title_en or title_nat or f"Anime {oni_id}"
-
-    ep_data = fetch_json(f"{ANIME_API}/{oni_id}/episodes/new", timeout=7)
+def probe_and_extract_by_id(oni_id: int, ref_by_al: dict):
+    ep_data = fetch_json(f"{ANIME_API}/{oni_id}/episodes/new", timeout=5)
     if not ep_data or not ep_data.get("episodes"):
         return None
 
@@ -263,6 +256,41 @@ def extract_anime_data(item: dict, ref_by_al: dict):
     if not episodes:
         return None
 
+    meta = ep_data.get("meta") or {}
+    al_raw = meta.get("anilist") or meta.get("anilistId")
+    al_id = int(al_raw) if al_raw and str(al_raw).isdigit() else None
+
+    # Check canonical anime reference
+    ref = ref_by_al.get(al_id) if al_id else None
+    if ref:
+        anime_id = ref["anime_id"]
+        title = ref["title"]
+        title_en = ref["title_english"]
+        title_rom = ref["title_romaji"]
+        title_jp = ref["japanese_name"]
+        atype = ref["type"]
+        astatus = ref["status"]
+        genres = ref["genres"]
+        year = ref["season_year"]
+        poster = ref["poster_url"]
+        score = ref["anilist_score"]
+        pop = ref["anilist_popularity"]
+    else:
+        anime_id = (2000000 + al_id) if al_id else (3000000 + int(oni_id))
+        raw_name = meta.get("name") or meta.get("eng_name") or f"Anime {oni_id}"
+        title = raw_name
+        title_en = meta.get("eng_name") or raw_name
+        title_rom = raw_name
+        title_jp = ""
+        atype = "TV"
+        astatus = "Finished"
+        genres = ""
+        year = None
+        poster = meta.get("image") or ""
+        score = None
+        pop = 0
+
+    display_title = title_en or title or f"Anime {oni_id}"
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
 
     # Probe Episode 1 streams (SUB & DUB)
@@ -308,10 +336,9 @@ def extract_anime_data(item: dict, ref_by_al: dict):
         ))
 
     anime_tuple = (
-        anime_id, int(oni_id), al_id, display_title, title_en, title_nat,
-        title_nat, item.get("type") or "TV", item.get("status") or "Finished",
-        "", "", item.get("theme") or "", item.get("release_year"),
-        None, item.get("watched") or 0, item.get("image") or "", item.get("image") or "",
+        anime_id, int(oni_id), al_id, display_title, title_en, title_rom,
+        title_jp, atype, astatus, genres, "", "", year,
+        score, pop, poster, poster,
         len(episodes),
         sub_count or (len(episodes) if any(e.get("hasSub") for e in episodes) else 0),
         dub_count or (len(episodes) if any(e.get("hasDub") for e in episodes) else 0),
@@ -321,81 +348,26 @@ def extract_anime_data(item: dict, ref_by_al: dict):
     return anime_tuple, episodes_list, streams_list, display_title
 
 
-def collect_all_candidates():
-    """Discover all anime from popular, recommended, and 222 catalog pages."""
-    log("Discovering priority newly added & releasing anime from popular / recommended APIs...")
-    candidates = []
-    seen = set()
-
-    pop_data = fetch_json(POPULAR_API) or {}
-    for k in ("recentlyAdded", "currentSeason", "sliderMovies", "previousSeason"):
-        for it in (pop_data.get(k) or []):
-            if it.get("id") and it["id"] not in seen:
-                seen.add(it["id"])
-                candidates.append(it)
-
-    rec_data = fetch_json(RECOMMENDED_API) or []
-    for it in rec_data:
-        if it.get("id") and it["id"] not in seen:
-            seen.add(it["id"])
-            candidates.append(it)
-
-    log(f"Found {len(candidates)} high-priority new/popular anime. Now collecting catalog pages...")
-
-    first = fetch_json(f"{CATALOG_API}?page=1") or {}
-    total_pages = min(int(first.get("totalPages") or 222), 222)
-    for it in (first.get("animes") or []):
-        if it.get("id") and it["id"] not in seen:
-            seen.add(it["id"])
-            candidates.append(it)
-
-    def fetch_page(p):
-        d = fetch_json(f"{CATALOG_API}?page={p}")
-        return d.get("animes", []) if d else []
-
-    with ThreadPoolExecutor(max_workers=CATALOG_WORKERS) as pool:
-        futures = {pool.submit(fetch_page, p): p for p in range(2, total_pages + 1)}
-        for fut in as_completed(futures):
-            try:
-                for it in fut.result():
-                    if it.get("id") and it["id"] not in seen:
-                        seen.add(it["id"])
-                        candidates.append(it)
-            except Exception:
-                pass
-
-    log(f"Discovery complete: Collected {len(candidates):,} total unique anime across onianime.eu.")
-    return candidates
-
-
-def run_scrape_cycle(conn: sqlite3.Connection, ref_by_al: dict):
+def run_full_probe_cycle(conn: sqlite3.Connection, ref_by_al: dict):
     c = conn.cursor()
-    c.execute("SELECT onianime_id FROM anime")
-    scraped_oni = set(r[0] for r in c.fetchall() if r[0])
+    c.execute("SELECT onianime_id FROM anime WHERE onianime_id IS NOT NULL")
+    existing_oni = set(r[0] for r in c.fetchall())
 
-    candidates = collect_all_candidates()
-    unscraped = [it for it in candidates if it.get("id") and int(it["id"]) not in scraped_oni]
+    all_target_ids = set(range(1, MAX_ONI_ID + 1))
+    missing_ids = sorted(list(all_target_ids - existing_oni))
 
-    log(f"Already scraped: {len(scraped_oni):,} anime. Needing scrape: {len(unscraped):,} anime.")
-    if not unscraped:
-        log("All candidate anime are already scraped!")
+    log(f"Current DB: {len(existing_oni):,} anime. Probing {len(missing_ids):,} missing onianime IDs...")
+    if not missing_ids:
+        log("All IDs in range are already probed.")
         return 0, 0, 0
-
-    # Priority sorting: Releasing / current season / popular first
-    unscraped.sort(key=lambda x: (
-        1 if x.get("status") == "Releasing" else 0,
-        x.get("watched") or 0,
-    ), reverse=True)
 
     total_added_anime = 0
     total_added_episodes = 0
     total_added_streams = 0
 
-    log(f"Starting turbo extraction with {EXTRACT_WORKERS} concurrent threads...")
-
     batch_size = 20
     with ThreadPoolExecutor(max_workers=EXTRACT_WORKERS) as pool:
-        futures = {pool.submit(extract_anime_data, item, ref_by_al): item for item in unscraped}
+        futures = {pool.submit(probe_and_extract_by_id, oid, ref_by_al): oid for oid in missing_ids}
         for idx, fut in enumerate(as_completed(futures), 1):
             try:
                 res = fut.result()
@@ -431,7 +403,7 @@ def run_scrape_cycle(conn: sqlite3.Connection, ref_by_al: dict):
                 total_added_streams += len(st_list)
 
                 if total_added_anime % 15 == 0 or total_added_anime <= 10:
-                    log(f"  [{idx}/{len(unscraped)}] [Haseeb] {title[:32]} -> +{len(ep_list)} eps, +{len(st_list)} streams | Added: {total_added_anime:,} anime, {total_added_episodes:,} eps, {total_added_streams:,} streams")
+                    log(f"  [Found #{total_added_anime}] [Haseeb] {title[:32]} -> +{len(ep_list)} eps, +{len(st_list)} streams (Total DB: {len(existing_oni) + total_added_anime:,} anime)")
 
                 if total_added_anime % batch_size == 0:
                     conn.commit()
@@ -441,7 +413,7 @@ def run_scrape_cycle(conn: sqlite3.Connection, ref_by_al: dict):
                     sync_haseeb_copies()
 
             except Exception as e:
-                log(f"Error inserting item: {e}")
+                pass
 
     conn.commit()
     conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
@@ -455,7 +427,7 @@ def main():
     log_fh = open(LOG_FILE, "a", encoding="utf-8")
 
     log("=" * 70)
-    log("Haseeb Server (Server 3) Turbo Parallel Ingestion Starting")
+    log("Haseeb Server (Server 3) Direct ID Probing Engine Starting")
     log("=" * 70)
 
     conn = sqlite3.connect(HASEEB_DB_PATH, timeout=30)
@@ -466,12 +438,12 @@ def main():
 
     while True:
         try:
-            a, e, s = run_scrape_cycle(conn, ref_by_al)
-            log(f"Cycle completed: +{a:,} anime, +{e:,} episodes, +{s:,} streams.")
+            a, e, s = run_full_probe_cycle(conn, ref_by_al)
+            log(f"Cycle finished: +{a:,} new anime, +{e:,} episodes, +{s:,} streams added to Haseeb Server.")
         except Exception as err:
-            log(f"Cycle encountered error: {err}")
+            log(f"Cycle error: {err}")
 
-        log("Waiting 3 minutes before next discovery sweep...")
+        log("Waiting 3 minutes before next continuous discovery sweep...")
         time.sleep(180)
 
 
