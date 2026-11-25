@@ -39,7 +39,7 @@ RECOMMENDED_API = f"{ONIANIME_BASE}/api/animes/recommended"
 
 SERVER_NAME = "Haseeb"
 PROVIDER_NAME = "onianime.eu"
-EXTRACT_WORKERS = 36
+EXTRACT_WORKERS = 16
 MAX_ONI_ID = 6500
 
 HEADERS = {
@@ -73,19 +73,28 @@ def log(msg: str):
             pass
 
 
-def fetch_json(url: str, params: dict = None, retries: int = 2, timeout: int = 5):
+def fetch_json_status(url: str, params: dict = None, retries: int = 2, timeout: int = 8):
+    """Fetch JSON and return (payload, reason) where reason is 'ok', 'empty', or 'timeout'."""
+    last_reason = "timeout"
     for attempt in range(retries):
         try:
             r = session.get(url, params=params, timeout=timeout)
             if r.status_code == 200:
-                return r.json()
+                return r.json(), "ok"
             elif r.status_code in (404, 400, 500):
-                return None
+                return None, "empty"
             elif r.status_code == 429:
-                time.sleep(1.0 * (attempt + 1))
+                last_reason = "timeout"
+                time.sleep(1.2 * (attempt + 1))
         except Exception:
-            time.sleep(0.1)
-    return None
+            last_reason = "timeout"
+            time.sleep(0.15)
+    return None, last_reason
+
+
+def fetch_json(url: str, params: dict = None, retries: int = 2, timeout: int = 8):
+    data, _ = fetch_json_status(url, params=params, retries=retries, timeout=timeout)
+    return data
 
 
 def init_haseeb_db(conn: sqlite3.Connection):
@@ -148,6 +157,13 @@ def init_haseeb_db(conn: sqlite3.Connection):
         value TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS probed_oni_ids (
+        onianime_id INTEGER PRIMARY KEY,
+        status      TEXT,
+        anilist_id  INTEGER,
+        checked_at  TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_haseeb_anime_al     ON anime(anilist_id);
     CREATE INDEX IF NOT EXISTS idx_haseeb_ep_anime     ON episodes(anime_id);
     CREATE INDEX IF NOT EXISTS idx_haseeb_streams_ep   ON streams(episode_id, server_name);
@@ -180,10 +196,11 @@ def sync_haseeb_copies():
             os.path.join(BASE_DIR, "api", "haseeb_server.db.gz"),
             os.path.join(BASE_DIR, "anime_app", "web", "api", "haseeb_server.db.gz"),
         ]
+        comp_data = gzip.compress(data, compresslevel=6, mtime=0)
         for t in targets:
             os.makedirs(os.path.dirname(t), exist_ok=True)
-            with gzip.open(t, "wb") as f_out:
-                f_out.write(data)
+            with open(t, "wb") as f_out:
+                f_out.write(comp_data)
             log(f"  Synced online archive: {os.path.basename(t)} ({len(data):,} -> {os.path.getsize(t):,} bytes)")
     except Exception as e:
         log(f"  Error syncing haseeb_server.db archives: {e}")
@@ -248,13 +265,13 @@ def resolve_single_stream(oni_id: int, ep_no: int, stype: str, providers: list):
 
 
 def probe_and_extract_by_id(oni_id: int, ref_by_al: dict):
-    ep_data = fetch_json(f"{ANIME_API}/{oni_id}/episodes/new", timeout=5)
-    if not ep_data or not ep_data.get("episodes"):
-        return None
+    ep_data, reason = fetch_json_status(f"{ANIME_API}/{oni_id}/episodes/new", retries=1, timeout=6)
+    if not ep_data:
+        return reason, None
 
     episodes = ep_data.get("episodes", [])
     if not episodes:
-        return None
+        return "empty", None
 
     meta = ep_data.get("meta") or {}
     al_raw = meta.get("anilist") or meta.get("anilistId")
@@ -345,20 +362,32 @@ def probe_and_extract_by_id(oni_id: int, ref_by_al: dict):
         ts,
     )
 
-    return anime_tuple, episodes_list, streams_list, display_title
+    return "ok", (int(oni_id), anime_id, al_id, anime_tuple, episodes_list, streams_list, display_title)
 
 
 def run_full_probe_cycle(conn: sqlite3.Connection, ref_by_al: dict):
     c = conn.cursor()
-    c.execute("SELECT onianime_id FROM anime WHERE onianime_id IS NOT NULL")
-    existing_oni = set(r[0] for r in c.fetchall())
+    c.execute("SELECT anime_id, onianime_id, anilist_id FROM anime")
+    existing_anime_ids = set()
+    existing_oni = set()
+    existing_al = set()
+    for aid, oid, alid in c.fetchall():
+        if aid is not None:
+            existing_anime_ids.add(int(aid))
+        if oid is not None:
+            existing_oni.add(int(oid))
+        if alid is not None:
+            existing_al.add(int(alid))
+
+    c.execute("SELECT onianime_id, status FROM probed_oni_ids WHERE status = 'duplicate' OR (status = 'empty' AND checked_at >= datetime('now', 'localtime', '-12 hours') AND onianime_id < 6050)")
+    skip_oni = set(int(r[0]) for r in c.fetchall())
 
     all_target_ids = set(range(1, MAX_ONI_ID + 1))
-    missing_ids = sorted(list(all_target_ids - existing_oni))
+    missing_ids = sorted(list(all_target_ids - existing_oni - skip_oni))
 
-    log(f"Current DB: {len(existing_oni):,} anime. Probing {len(missing_ids):,} missing onianime IDs...")
+    log(f"Current DB: {len(existing_anime_ids):,} anime ({len(skip_oni):,} known duplicates/recent-empty skipped). Probing {len(missing_ids):,} candidate onianime IDs...")
     if not missing_ids:
-        log("All IDs in range are already probed.")
+        log("All candidate IDs in range are already accounted for.")
         return 0, 0, 0
 
     total_added_anime = 0
@@ -366,14 +395,48 @@ def run_full_probe_cycle(conn: sqlite3.Connection, ref_by_al: dict):
     total_added_streams = 0
 
     batch_size = 20
+    probed_count = 0
     with ThreadPoolExecutor(max_workers=EXTRACT_WORKERS) as pool:
         futures = {pool.submit(probe_and_extract_by_id, oid, ref_by_al): oid for oid in missing_ids}
         for idx, fut in enumerate(as_completed(futures), 1):
+            oid = futures[fut]
+            ts_now = time.strftime("%Y-%m-%d %H:%M:%S")
             try:
-                res = fut.result()
-                if not res:
+                status, payload = fut.result()
+                probed_count += 1
+                if status != "ok" or not payload:
+                    if status == "empty":
+                        c.execute("INSERT OR REPLACE INTO probed_oni_ids (onianime_id, status, anilist_id, checked_at) VALUES (?,?,?,?)", (oid, "empty", None, ts_now))
+                        if probed_count % 200 == 0:
+                            conn.commit()
                     continue
-                anime_tuple, ep_list, st_list, title = res
+
+                p_oid, anime_id, al_id, anime_tuple, ep_list, st_list, title = payload
+
+                # Prevent overwriting existing canonical anime entry when onianime.eu has duplicate IDs for same AniList ID
+                is_duplicate = (anime_id in existing_anime_ids) or (al_id is not None and al_id in existing_al)
+                if is_duplicate:
+                    c.executemany("""
+                        INSERT OR IGNORE INTO episodes (
+                            anime_id, anilist_id, episode_id, episode_number, title, watch_url
+                        ) VALUES (?,?,?,?,?,?)
+                    """, ep_list)
+                    ep_added = max(0, c.rowcount) if c.rowcount and c.rowcount > 0 else 0
+                    st_added = 0
+                    if st_list:
+                        c.executemany("""
+                            INSERT OR IGNORE INTO streams (
+                                anime_id, anilist_id, anime_title, episode_id, episode_number,
+                                episode_title, type, server_name, provider, embed_url
+                            ) VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """, st_list)
+                        st_added = max(0, c.rowcount) if c.rowcount and c.rowcount > 0 else 0
+                    total_added_episodes += ep_added
+                    total_added_streams += st_added
+                    c.execute("INSERT OR REPLACE INTO probed_oni_ids (onianime_id, status, anilist_id, checked_at) VALUES (?,?,?,?)", (p_oid, "duplicate", al_id, ts_now))
+                    if probed_count % 50 == 0:
+                        conn.commit()
+                    continue
 
                 c.execute("""
                     INSERT OR REPLACE INTO anime (
@@ -398,12 +461,19 @@ def run_full_probe_cycle(conn: sqlite3.Connection, ref_by_al: dict):
                         ) VALUES (?,?,?,?,?,?,?,?,?,?)
                     """, st_list)
 
+                c.execute("INSERT OR REPLACE INTO probed_oni_ids (onianime_id, status, anilist_id, checked_at) VALUES (?,?,?,?)", (p_oid, "ok", al_id, ts_now))
+
+                existing_anime_ids.add(anime_id)
+                existing_oni.add(p_oid)
+                if al_id is not None:
+                    existing_al.add(al_id)
+
                 total_added_anime += 1
                 total_added_episodes += len(ep_list)
                 total_added_streams += len(st_list)
 
                 if total_added_anime % 15 == 0 or total_added_anime <= 10:
-                    log(f"  [Found #{total_added_anime}] [Haseeb] {title[:32]} -> +{len(ep_list)} eps, +{len(st_list)} streams (Total DB: {len(existing_oni) + total_added_anime:,} anime)")
+                    log(f"  [Found #{total_added_anime}] [Haseeb] {title[:32]} -> +{len(ep_list)} eps, +{len(st_list)} streams (Total DB: {len(existing_anime_ids):,} anime)")
 
                 if total_added_anime % batch_size == 0:
                     conn.commit()
@@ -412,12 +482,13 @@ def run_full_probe_cycle(conn: sqlite3.Connection, ref_by_al: dict):
                     conn.commit()
                     sync_haseeb_copies()
 
-            except Exception as e:
+            except Exception:
                 pass
 
     conn.commit()
     conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
-    sync_haseeb_copies()
+    if total_added_anime > 0 or total_added_episodes > 0 or total_added_streams > 0:
+        sync_haseeb_copies()
 
     return total_added_anime, total_added_episodes, total_added_streams
 
